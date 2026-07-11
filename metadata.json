@@ -1,0 +1,11 @@
+{
+  "name": "JFLIPS UPGRADE V4",
+  "description": "Professional coaching assistant for stunting and tumbling with AI video generation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

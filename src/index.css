@@ -1,0 +1,132 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-inter: "Inter", sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  background-color: #f8fafc;
+  color: #1a1a1a;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+.dark body {
+  background-color: #0f172a;
+  color: #f1f5f9;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.logo-text {
+  font-weight: 900;
+  font-style: italic;
+  color: #1e4da1;
+}
+
+@keyframes rollIn {
+  from {
+    opacity: 0;
+    transform: translate3d(-100%, 0, 0) rotate3d(0, 0, 1, -120deg);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.animate-roll-in {
+  animation: rollIn 1s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.pro-badge {
+  background-color: #1e4da1;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 900;
+  font-style: normal;
+  margin-left: 4px;
+}
+
+/* Animated List Styles */
+.animated-list-container {
+  position: relative;
+  width: 100%;
+}
+.scroll-gradient {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 40px;
+  pointer-events: none;
+  z-index: 10;
+  transition: opacity 0.3s ease;
+}
+.scroll-gradient-top {
+  top: 0;
+  background: linear-gradient(to bottom, #f8fafc 0%, transparent 100%);
+}
+.dark .scroll-gradient-top {
+  background: linear-gradient(to bottom, #0f172a 0%, transparent 100%);
+}
+.scroll-gradient-bottom {
+  bottom: 0;
+  background: linear-gradient(to top, #f8fafc 0%, transparent 100%);
+}
+.dark .scroll-gradient-bottom {
+  background: linear-gradient(to top, #0f172a 0%, transparent 100%);
+}
+
+@media print {
+  @page {
+    margin: 1.5cm;
+    size: A4;
+  }
+  body {
+    background-color: white !important;
+    color: black !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+  .print\:hidden {
+    display: none !important;
+  }
+  .print\:p-0 {
+    padding: 0 !important;
+  }
+  .print\:m-0 {
+    margin: 0 !important;
+  }
+  .print\:shadow-none {
+    box-shadow: none !important;
+  }
+  .print\:border-none {
+    border: none !important;
+  }
+  .print\:text-black {
+    color: black !important;
+  }
+  .print\:bg-black {
+    background-color: black !important;
+  }
+  .print\:inset-auto {
+     position: static !important;
+  }
+}

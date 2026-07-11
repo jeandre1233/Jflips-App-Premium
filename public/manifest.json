@@ -1,0 +1,23 @@
+{
+  "name": "JFLIPS Pro Coaching",
+  "short_name": "JFLIPS",
+  "description": "Professional coaching assistant for stunting and tumbling.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#1e4da1",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/maskable_icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

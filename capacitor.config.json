@@ -1,0 +1,8 @@
+{
+  "appId": "com.jflips.pro",
+  "appName": "JFlips Pro",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}

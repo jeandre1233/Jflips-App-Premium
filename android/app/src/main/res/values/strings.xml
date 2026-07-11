@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">JFlips Pro</string>
+    <string name="title_activity_main">JFlips Pro</string>
+    <string name="package_name">com.jflips.pro</string>
+    <string name="custom_url_scheme">com.jflips.pro</string>
+</resources>

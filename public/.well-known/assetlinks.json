@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "app.vercel.jflips.twa",
+    "sha256_cert_fingerprints": ["FF:6E:8A:49:F7:41:BA:20:F2:40:CE:B0:23:CA:7F:D1:DB:89:41:DC:6D:D9:5E:4B:87:9A:3E:80:72:DA:4A:8B"]
+  }
+}]
