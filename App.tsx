@@ -74,7 +74,7 @@ import {
 } from 'lucide-react';
 import { View, Student, Gym, ClassType, AttendanceSession, AppState, HistoryMonth, Profile, Payment, ClassSchedule, Staff, InvoiceSnapshot, AppNotification, Competition } from './types';
 import { toPng } from 'html-to-image';
-import { supabase } from './supabase';
+import { supabase, isSupabaseConfigured } from './supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import * as XLSX from 'xlsx';
@@ -2537,6 +2537,52 @@ const App: React.FC = () => {
     if (!student.groupKey) return false;
     return (state.students || []).filter(s => s.groupKey === student.groupKey).length > 1;
   }, [state.students]);
+
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 font-sans">
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1.5 bg-amber-500" />
+          
+          <div className="flex items-center justify-center w-12 h-12 bg-amber-500/10 rounded-full mb-6">
+            <svg className="w-6 h-6 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+
+          <h2 className="text-xl font-bold text-slate-100 tracking-tight mb-2">
+            Supabase Connection Required
+          </h2>
+          <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+            JFLIPS Pro is fully compiled but needs to connect to your Supabase project to start.
+          </p>
+
+          <div className="space-y-4 mb-6">
+            <div className="bg-slate-950/60 rounded-xl p-4 border border-slate-800/80">
+              <span className="text-xs font-mono text-slate-500 block mb-1">VARIABLE</span>
+              <span className="text-sm font-semibold text-slate-200">VITE_SUPABASE_URL</span>
+              <span className="float-right text-xs bg-red-500/10 text-red-400 px-2 py-0.5 rounded border border-red-500/20 font-medium">Missing</span>
+            </div>
+            
+            <div className="bg-slate-950/60 rounded-xl p-4 border border-slate-800/80">
+              <span className="text-xs font-mono text-slate-500 block mb-1">VARIABLE</span>
+              <span className="text-sm font-semibold text-slate-200">VITE_SUPABASE_ANON_KEY</span>
+              <span className="float-right text-xs bg-red-500/10 text-red-400 px-2 py-0.5 rounded border border-red-500/20 font-medium">Missing</span>
+            </div>
+          </div>
+
+          <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-800 text-xs text-slate-400 space-y-2 leading-relaxed">
+            <p className="font-semibold text-slate-300">How to fix this:</p>
+            <ol className="list-decimal pl-4 space-y-1.5">
+              <li>Go to your hosting dashboard (Vercel, Netlify, etc.) or open your local <code className="font-mono bg-slate-950 px-1 py-0.5 rounded text-amber-400">.env</code> file.</li>
+              <li>Add the environment variables listed above.</li>
+              <li>Re-deploy or restart your development server to apply the changes.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (isAuthLoading) return <SplashScreen message="Verifying Identity" />;
   if (!user) return <LandingGate />;
