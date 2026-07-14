@@ -287,7 +287,8 @@ const INITIAL_STATE: AppState = {
   theme: getInitialTheme(),
   snapshots: [],
   notifications: [],
-  pendingSyncCount: 0
+  pendingSyncCount: 0,
+  cheerRegistrations: []
 };
 
 // --- ANIMATION VARIANTS ---
@@ -969,7 +970,7 @@ const App: React.FC = () => {
         }
       };
 
-      const [studentsRes, gymsRes, classesRes, sessionsRes, historyRes, paymentsRes, schedulesRes, staffRes, snapshotsRes, notificationsRes, competitionsRes] = await Promise.all([
+      const [studentsRes, gymsRes, classesRes, sessionsRes, historyRes, paymentsRes, schedulesRes, staffRes, snapshotsRes, notificationsRes, competitionsRes, cheerRegistrationsRes] = await Promise.all([
         fetchStudents(),
         // Gyms: owner=all; coach=only assigned
         isOwner
@@ -1006,7 +1007,10 @@ const App: React.FC = () => {
         isOwner
           ? supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20)
           : Promise.resolve({ data: [], error: null }),
-        supabase.from('competitions').select('*').eq('user_id', targetUserId).order('date', { ascending: true })
+        supabase.from('competitions').select('*').eq('user_id', targetUserId).order('date', { ascending: true }),
+        isOwner
+          ? supabase.from('cheer_registrations').select('*').eq('user_id', targetUserId).order('created_at', { ascending: false })
+          : Promise.resolve({ data: [], error: null })
       ]);
 
       const errors = [
@@ -1126,7 +1130,8 @@ const App: React.FC = () => {
           ...sn,
           snapshot_data: sn.snapshot_data
         })),
-        notifications: notificationsRes.data || []
+        notifications: notificationsRes.data || [],
+        cheerRegistrations: cheerRegistrationsRes.data || []
       }));
     } catch (err: any) {
       console.error("Fetch failed", err);
@@ -2629,6 +2634,7 @@ const App: React.FC = () => {
             setBulkImportParentId(parentId);
             setShowBulkImport(true);
           }}
+          onRefresh={() => loadCloudData(true)}
         />
       )}
       {activeView === View.HISTORY && (
@@ -4532,7 +4538,7 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
   );
 });
 
-const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onUpdateCompetition, onDeleteCompetition, onAddAthlete, onUpdateStudentName, onAddSubTeam, onBulkImport }: { 
+const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onUpdateCompetition, onDeleteCompetition, onAddAthlete, onUpdateStudentName, onAddSubTeam, onBulkImport, onRefresh }: { 
   state: AppState, 
   onRemoveStudent: (studentId: string) => void,
   onUpdateSubTeams: (studentId: string, subTeamIds: string[]) => void,
@@ -4541,9 +4547,10 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
   onAddAthlete: (extra: Partial<Student>) => void,
   onUpdateStudentName: (studentId: string, newName: string) => void,
   onAddSubTeam: (parentGymId: string) => void,
-  onBulkImport: (parentGymId: string) => void
+  onBulkImport: (parentGymId: string) => void,
+  onRefresh?: () => void
 }) => {
-  const [activeTab, setActiveTab] = useState<'roster' | 'competitions'>('roster');
+  const [activeTab, setActiveTab] = useState<'roster' | 'competitions' | 'registrations'>('roster');
   const [subTab, setSubTab] = useState<'roster' | 'attendance'>('roster');
   const [selectedMainId, setSelectedMainId] = useState<string | null>(null);
   const [selectedSubId, setSelectedSubId] = useState<string | null>(null);
@@ -4552,6 +4559,285 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
   const [search, setSearch] = useState('');
   const [editingNameId, setEditingNameId] = useState<string | null>(null);
   const [editNameValue, setEditNameValue] = useState('');
+
+  // Cheer Registration states
+  const [searchCheer, setSearchCheer] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [selectedReg, setSelectedReg] = useState<any>(null);
+  const [editingReg, setEditingReg] = useState<any>(null);
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<{[key: string]: boolean}>({});
+
+  const handleCopy = (url: string, key: string) => {
+    navigator.clipboard.writeText(url);
+    setCopyStatus(prev => ({ ...prev, [key]: true }));
+    setTimeout(() => {
+      setCopyStatus(prev => ({ ...prev, [key]: false }));
+    }, 2000);
+  };
+
+  const formatDateToInput = (dobStr: string) => {
+    if (!dobStr) return '';
+    const parts = dobStr.split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+    return dobStr;
+  };
+
+  const formatDateToDb = (dobInput: string) => {
+    if (!dobInput) return null;
+    const parts = dobInput.split('/');
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+    }
+    return dobInput;
+  };
+
+  const handleEditDobChange = (val: string, setEditForm: any) => {
+    const rawValue = val.replace(/\D/g, '').slice(0, 8);
+    let formattedDob = rawValue;
+    if (rawValue.length > 4) {
+      formattedDob = `${rawValue.slice(0, 2)}/${rawValue.slice(2, 4)}/${rawValue.slice(4)}`;
+    } else if (rawValue.length > 2) {
+      formattedDob = `${rawValue.slice(0, 2)}/${rawValue.slice(2)}`;
+    }
+
+    let ageStr = '';
+    const parts = formattedDob.split(/[\/\-]/);
+    if (parts.length === 3) {
+      let d = parseInt(parts[0], 10);
+      let m = parseInt(parts[1], 10);
+      let y = parseInt(parts[2], 10);
+
+      if (parts[0].length === 4) {
+        y = parseInt(parts[0], 10);
+        m = parseInt(parts[1], 10);
+        d = parseInt(parts[2], 10);
+      }
+
+      if (y > 1900 && y < 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        const testDate = new Date(y, m - 1, d);
+        if (testDate.getFullYear() === y && testDate.getMonth() === m - 1 && testDate.getDate() === d) {
+          const birth = new Date(y, m - 1, d);
+          const today = new Date();
+          let calculatedAge = today.getFullYear() - birth.getFullYear();
+          if (today.getMonth() - birth.getMonth() < 0 || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) {
+            calculatedAge--;
+          }
+          if (calculatedAge >= 0) ageStr = String(calculatedAge);
+        }
+      }
+    }
+
+    setEditForm((prev: any) => ({ ...prev, dob: formattedDob, age: ageStr }));
+  };
+
+  const handleUpdateReg = async (updatedFields: any) => {
+    const { error } = await supabase.from('cheer_registrations').update({
+      parent_name: updatedFields.parent_name,
+      parent_phone: updatedFields.parent_phone,
+      parent_email: updatedFields.parent_email,
+      athlete_name: updatedFields.athlete_name,
+      athlete_surname: updatedFields.athlete_surname,
+      dob: updatedFields.dob,
+      age: updatedFields.age,
+      grade: updatedFields.grade,
+      school: updatedFields.school,
+      medical_conditions: updatedFields.medical_conditions,
+      allergies: updatedFields.allergies,
+      medication: updatedFields.medication,
+      emergency_contact_name: updatedFields.emergency_contact_name,
+      emergency_contact_phone: updatedFields.emergency_contact_phone,
+      status: updatedFields.status
+    }).eq('id', updatedFields.id);
+
+    if (error) {
+      alert('Error updating registration: ' + error.message);
+    } else {
+      if (onRefresh) onRefresh();
+      setShowEditModal(false);
+      setEditingReg(null);
+    }
+  };
+
+  const handleDeleteReg = async (id: string) => {
+    if (confirm('Are you sure you want to delete this registration?')) {
+      const { error } = await supabase.from('cheer_registrations').delete().eq('id', id);
+      if (error) {
+        alert('Error deleting registration: ' + error.message);
+      } else {
+        if (onRefresh) onRefresh();
+      }
+    }
+  };
+
+  const getStatusBadgeClass = (status: string) => {
+    switch (status) {
+      case 'New':
+        return 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/30';
+      case 'Added to Community':
+        return 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/30';
+      case 'Contacted':
+        return 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30';
+      case 'Active Athlete':
+        return 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 border border-green-100 dark:border-green-900/30';
+      case 'Waiting List':
+        return 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-900/30';
+      case 'Declined':
+        return 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/30';
+      default:
+        return 'bg-slate-50 dark:bg-slate-900/20 text-slate-600 dark:text-slate-400 border border-slate-100 dark:border-slate-900/30';
+    }
+  };
+
+  const exportToCSV = (regs: any[]) => {
+    const headers = [
+      'Date Registered',
+      'Athlete Name',
+      'Athlete Surname',
+      'DOB',
+      'Age',
+      'Grade',
+      'School',
+      'Parent Name',
+      'Parent Phone',
+      'Parent Email',
+      'Medical Conditions',
+      'Allergies',
+      'Medication',
+      'Emergency Contact Name',
+      'Emergency Contact Phone',
+      'Consent Supplied Correct',
+      'Consent Interest Only',
+      'Consent Data Storage',
+      'Status'
+    ];
+
+    const rows = regs.map(r => [
+      r.created_at ? new Date(r.created_at).toLocaleDateString() : '',
+      r.athlete_name || '',
+      r.athlete_surname || '',
+      r.dob || '',
+      r.age || '',
+      r.grade || '',
+      r.school || '',
+      r.parent_name || '',
+      r.parent_phone || '',
+      r.parent_email || '',
+      r.medical_conditions || '',
+      r.allergies || '',
+      r.medication || '',
+      r.emergency_contact_name || '',
+      r.emergency_contact_phone || '',
+      r.consent_correct ? 'Yes' : 'No',
+      r.consent_interest ? 'Yes' : 'No',
+      r.consent_storage ? 'Yes' : 'No',
+      r.status || 'New'
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `cheer_registrations_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handlePrint = (reg: any) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Cheer Registration - \${reg.athlete_name} \${reg.athlete_surname}</title>
+          <style>
+            body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; line-height: 1.6; }
+            .header { text-align: center; margin-bottom: 40px; border-bottom: 2px solid #1e4da1; padding-bottom: 20px; }
+            .header h1 { margin: 0; font-size: 28px; font-style: italic; color: #1e4da1; font-weight: 900; }
+            .header p { margin: 5px 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #94a3b8; }
+            .section { margin-bottom: 30px; }
+            .section-title { font-size: 14px; font-weight: bold; text-transform: uppercase; color: #1e4da1; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; margin-bottom: 12px; letter-spacing: 1px; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+            .item { margin-bottom: 8px; }
+            .label { font-size: 11px; font-weight: bold; text-transform: uppercase; color: #64748b; }
+            .value { font-size: 14px; font-weight: 600; color: #1e293b; }
+            .consent-item { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; margin-bottom: 6px; }
+            .checkbox { width: 14px; height: 14px; border: 1px solid #1e4da1; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; color: #1e4da1; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>JFLIPS</h1>
+            <p>Competitive Cheer Registration</p>
+          </div>
+          
+          <div class="section">
+            <div class="section-title">Athlete Information</div>
+            <div class="grid">
+              <div class="item"><div class="label">Athlete Name</div><div class="value">\${reg.athlete_name} \${reg.athlete_surname}</div></div>
+              <div class="item"><div class="label">Date of Birth</div><div class="value">\${reg.dob}</div></div>
+              <div class="item"><div class="label">Age</div><div class="value">\${reg.age || 'N/A'}</div></div>
+              <div class="item"><div class="label">Grade / School</div><div class="value">\${reg.grade || 'N/A'} / \${reg.school || 'N/A'}</div></div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Parent Information</div>
+            <div class="grid">
+              <div class="item"><div class="label">Parent Name</div><div class="value">\${reg.parent_name}</div></div>
+              <div class="item"><div class="label">Cell Number</div><div class="value">\${reg.parent_phone}</div></div>
+              <div class="item"><div class="label">Email Address</div><div class="value">\${reg.parent_email}</div></div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Medical Information</div>
+            <div class="grid">
+              <div class="item" style="grid-column: span 2;"><div class="label">Medical Conditions</div><div class="value">\${reg.medical_conditions || 'None'}</div></div>
+              <div class="item" style="grid-column: span 2;"><div class="label">Allergies</div><div class="value">\${reg.allergies || 'None'}</div></div>
+              <div class="item" style="grid-column: span 2;"><div class="label">Medication</div><div class="value">\${reg.medication || 'None'}</div></div>
+              <div class="item"><div class="label">Emergency Contact</div><div class="value">\${reg.emergency_contact_name}</div></div>
+              <div class="item"><div class="label">Emergency Number</div><div class="value">\${reg.emergency_contact_phone}</div></div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Consents & Declarations</div>
+            <div class="consent-item">
+              <span class="checkbox">\${reg.consent_correct ? '✓' : ''}</span>
+              <span>I confirm the information supplied is correct.</span>
+            </div>
+            <div class="consent-item">
+              <span class="checkbox">\${reg.consent_interest ? '✓' : ''}</span>
+              <span>I understand that this registration is an expression of interest only and does not guarantee placement on a team.</span>
+            </div>
+            <div class="consent-item">
+              <span class="checkbox">\${reg.consent_storage ? '✓' : ''}</span>
+              <span>I consent to JFLIPS storing my information for athlete management purposes.</span>
+            </div>
+          </div>
+          
+          <script>
+            window.onload = function() {
+              window.print();
+              setTimeout(function() { window.close(); }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
 
   const getStudentAffiliation = (student: Student) => {
     const affiliations: string[] = [];
@@ -4754,6 +5040,13 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
         >
           Competition Schedule
           {activeTab === 'competitions' && <motion.div layoutId="tm-tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#1e4da1] dark:bg-blue-400" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('registrations')}
+          className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative ${activeTab === 'registrations' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}
+        >
+          Registrations
+          {activeTab === 'registrations' && <motion.div layoutId="tm-tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#1e4da1] dark:bg-blue-400" />}
         </button>
       </div>
 
@@ -5275,6 +5568,588 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
             )}
           </div>
         </div>
+      )}
+
+      {activeTab === 'registrations' && (
+        <div className="space-y-8">
+          {/* Header */}
+          <div>
+            <h3 className="text-2xl font-black uppercase italic text-[#1a1a1a] dark:text-white">Registration Portal</h3>
+            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-1">Manage public registrations and student signup links</p>
+          </div>
+
+          {/* Sharing Links Panel */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Tumbling Registration Card */}
+            <div className="bg-white dark:bg-slate-800 rounded-[2.5rem] p-8 border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden flex flex-col justify-between min-h-[220px]">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/5 rounded-full -mr-16 -mt-16 blur-2xl" />
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center shrink-0">
+                    <User size={18} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black uppercase italic text-slate-800 dark:text-slate-100 leading-tight">Tumbling Registration</h4>
+                    <p className="text-[9px] font-bold text-slate-400 uppercase">Existing Public Enrollment Form</p>
+                  </div>
+                </div>
+                <div className="p-3.5 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 rounded-xl">
+                  <p className="text-[10px] font-mono break-all text-slate-500 dark:text-slate-400 select-all">
+                    {`${window.location.origin}/#/signup?ownerId=${state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || ''}`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => handleCopy(`${window.location.origin}/#/signup?ownerId=${state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || ''}`, 'tumbling')}
+                  className="flex-1 py-3 bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-slate-100 dark:border-slate-700 flex items-center justify-center gap-2"
+                >
+                  {copyStatus['tumbling'] ? '✓ Copied' : 'Copy Link'}
+                </button>
+                <a
+                  href={`${window.location.origin}/#/signup?ownerId=${state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || ''}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 text-center"
+                >
+                  Open Form
+                </a>
+              </div>
+            </div>
+
+            {/* Competitive Cheer Registration Card */}
+            <div className="bg-white dark:bg-slate-800 rounded-[2.5rem] p-8 border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden flex flex-col md:flex-row justify-between gap-6">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/5 rounded-full -mr-16 -mt-16 blur-2xl" />
+              <div className="flex-1 flex flex-col justify-between">
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center shrink-0">
+                      <Trophy size={18} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black uppercase italic text-slate-800 dark:text-slate-100 leading-tight">Cheer Registration</h4>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase">Competitive Cheer Interest Form</p>
+                    </div>
+                  </div>
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 rounded-xl">
+                    <p className="text-[10px] font-mono break-all text-slate-500 dark:text-slate-400 select-all">
+                      {`${window.location.origin}/#/signup-cheer?ownerId=${state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || ''}`}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-6">
+                  <button
+                    onClick={() => handleCopy(`${window.location.origin}/#/signup-cheer?ownerId=${state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || ''}`, 'cheer')}
+                    className="flex-1 py-3 bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-slate-100 dark:border-slate-700 flex items-center justify-center gap-2"
+                  >
+                    {copyStatus['cheer'] ? '✓ Copied' : 'Copy Link'}
+                  </button>
+                  <a
+                    href={`${window.location.origin}/#/signup-cheer?ownerId=${state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || ''}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 text-center"
+                  >
+                    Open Form
+                  </a>
+                </div>
+              </div>
+              
+              {/* QR Code Section */}
+              <div className="flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900/40 p-4 rounded-3xl border border-slate-100 dark:border-slate-800/80 shrink-0 w-full md:w-auto">
+                <img 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`${window.location.origin}/#/signup-cheer?ownerId=${state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || ''}`)}`}
+                  alt="Cheer signup QR code"
+                  className="w-28 h-28 border border-slate-100 dark:border-slate-800 rounded-xl shadow-inner bg-white shrink-0"
+                />
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider mt-2">Registration QR Code</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Cheer Registrations List */}
+          <div className="space-y-6">
+            <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between">
+              <div>
+                <h4 className="text-lg font-black uppercase italic text-slate-800 dark:text-slate-100">Competitive Cheer Submissions</h4>
+                <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest mt-0.5">Manage expressions of interest and athlete recruitment</p>
+              </div>
+
+              {/* Filters & Export */}
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Search */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={searchCheer}
+                    onChange={(e) => setSearchCheer(e.target.value)}
+                    placeholder="Search registrations..."
+                    className="pl-8 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-150 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-200 outline-none w-48 focus:border-indigo-500 dark:focus:border-indigo-400 transition-colors"
+                  />
+                  <div className="absolute left-2.5 top-2.5 text-slate-400">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  </div>
+                </div>
+
+                {/* Status Filter */}
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-150 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-indigo-500 transition-colors cursor-pointer"
+                >
+                  <option value="All">All Statuses</option>
+                  <option value="New">New</option>
+                  <option value="Added to Community">Added to Community</option>
+                  <option value="Contacted">Contacted</option>
+                  <option value="Active Athlete">Active Athlete</option>
+                  <option value="Waiting List">Waiting List</option>
+                  <option value="Declined">Declined</option>
+                </select>
+
+                {/* Export CSV */}
+                <button
+                  onClick={() => {
+                    const records = (state.cheerRegistrations || []).filter(r => {
+                      const searchStr = `${r.athlete_name} ${r.athlete_surname} ${r.parent_name} ${r.parent_email} ${r.parent_phone}`.toLowerCase();
+                      const matchesSearch = searchStr.includes(searchCheer.toLowerCase());
+                      const matchesStatus = statusFilter === 'All' || r.status === statusFilter;
+                      return matchesSearch && matchesStatus;
+                    });
+                    exportToCSV(records);
+                  }}
+                  className="px-4 py-2 bg-[#1e4da1] hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-blue-500/10 flex items-center gap-2"
+                >
+                  Export CSV
+                </button>
+              </div>
+            </div>
+
+            {/* List Table / Grid */}
+            <div className="bg-white dark:bg-slate-800 rounded-[2.5rem] border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-100 dark:border-slate-700 text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                      <th className="p-6">Athlete</th>
+                      <th className="p-6">Parent Info</th>
+                      <th className="p-6">Medical Notes</th>
+                      <th className="p-6 text-center">Status</th>
+                      <th className="p-6 text-center">Submitted</th>
+                      <th className="p-6 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50 dark:divide-slate-700/50">
+                    {((state.cheerRegistrations || []).filter(r => {
+                      const searchStr = `${r.athlete_name} ${r.athlete_surname} ${r.parent_name} ${r.parent_email} ${r.parent_phone}`.toLowerCase();
+                      const matchesSearch = searchStr.includes(searchCheer.toLowerCase());
+                      const matchesStatus = statusFilter === 'All' || r.status === statusFilter;
+                      return matchesSearch && matchesStatus;
+                    })).map((reg, rIdx) => (
+                      <tr key={`${reg.id}-${rIdx}`} className="group hover:bg-slate-50/50 dark:hover:bg-slate-900/20 transition-all text-xs">
+                        <td className="p-6">
+                          <div className="font-black uppercase italic text-slate-800 dark:text-slate-100 text-[13px]">
+                            {reg.athlete_name} {reg.athlete_surname}
+                          </div>
+                          <div className="text-[10px] text-slate-400 uppercase mt-0.5">
+                            Age: {reg.age || '—'} • {reg.grade || 'No Grade'} • {reg.school || 'No School'}
+                          </div>
+                        </td>
+                        <td className="p-6">
+                          <div className="font-semibold text-slate-700 dark:text-slate-300">{reg.parent_name}</div>
+                          <div className="text-[10px] text-slate-400 font-mono mt-0.5">{reg.parent_phone} • {reg.parent_email}</div>
+                        </td>
+                        <td className="p-6 max-w-[200px]">
+                          <div className="truncate text-slate-500 dark:text-slate-400" title={reg.medical_conditions || 'None'}>
+                            {reg.medical_conditions || <span className="italic text-slate-300 dark:text-slate-600">None declared</span>}
+                          </div>
+                          {(reg.allergies || reg.medication) && (
+                            <div className="text-[9px] text-rose-500 font-bold uppercase mt-0.5 truncate" title={`Allergies: ${reg.allergies || 'None'}, Meds: ${reg.medication || 'None'}`}>
+                              ⚠️ {reg.allergies ? 'Allergies' : ''} {reg.allergies && reg.medication ? '&' : ''} {reg.medication ? 'Medication' : ''}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-6 text-center">
+                          <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${getStatusBadgeClass(reg.status)}`}>
+                            {reg.status || 'New'}
+                          </span>
+                        </td>
+                        <td className="p-6 text-center text-slate-400 font-mono text-[10px]">
+                          {reg.created_at ? new Date(reg.created_at).toLocaleDateString() : '—'}
+                        </td>
+                        <td className="p-6 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => { setSelectedReg(reg); setShowViewModal(true); }}
+                              className="p-2 text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-xl transition-all"
+                              title="View Registration"
+                            >
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 12s4-8 11-8 11-8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
+                            <button
+                              onClick={() => { setEditingReg({ ...reg, dob: formatDateToInput(reg.dob) }); setShowEditModal(true); }}
+                              className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all"
+                              title="Edit Registration"
+                            >
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteReg(reg.id)}
+                              className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
+                              title="Delete Registration"
+                            >
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {(state.cheerRegistrations || []).length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-24 text-center">
+                          <div className="w-16 h-16 bg-slate-50 dark:bg-slate-900/50 rounded-2xl flex items-center justify-center text-slate-300 dark:text-slate-700 mx-auto mb-4">
+                            <Trophy size={32} />
+                          </div>
+                          <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest">No Cheer Registrations Yet</p>
+                          <p className="text-[9px] text-slate-300 dark:text-slate-600 uppercase tracking-wider mt-1">Use the registration link above to capture public interest forms</p>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cheer View Modal */}
+      {showViewModal && selectedReg && (
+        <Modal title="Registration Details" onClose={() => { setShowViewModal(false); setSelectedReg(null); }}>
+          <div className="space-y-6 text-slate-700 dark:text-slate-200">
+            {/* Header / Meta */}
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div>
+                <span className={`inline-block px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider ${getStatusBadgeClass(selectedReg.status)}`}>
+                  {selectedReg.status}
+                </span>
+                <p className="text-[9px] text-slate-400 uppercase font-mono mt-1.5">Submitted: {new Date(selectedReg.created_at).toLocaleString()}</p>
+              </div>
+              <button
+                onClick={() => handlePrint(selectedReg)}
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all flex items-center gap-2 border border-slate-200/50 dark:border-slate-700"
+              >
+                🖨️ Print Document
+              </button>
+            </div>
+
+            {/* Athlete Info */}
+            <div className="space-y-3">
+              <h5 className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Athlete Details</h5>
+              <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-900/30 p-4 rounded-2xl border border-slate-100/50 dark:border-slate-800">
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">First Name</span>
+                  <p className="text-xs font-black uppercase italic mt-0.5">{selectedReg.athlete_name}</p>
+                </div>
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Surname</span>
+                  <p className="text-xs font-black uppercase italic mt-0.5">{selectedReg.athlete_surname}</p>
+                </div>
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Date of Birth</span>
+                  <p className="text-xs font-semibold mt-0.5">{selectedReg.dob ? new Date(selectedReg.dob).toLocaleDateString() : '—'}</p>
+                </div>
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Calculated Age</span>
+                  <p className="text-xs font-semibold mt-0.5">{selectedReg.age ? `${selectedReg.age} Years` : '—'}</p>
+                </div>
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Grade</span>
+                  <p className="text-xs font-semibold mt-0.5">{selectedReg.grade || '—'}</p>
+                </div>
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">School</span>
+                  <p className="text-xs font-semibold mt-0.5">{selectedReg.school || '—'}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Parent Info */}
+            <div className="space-y-3">
+              <h5 className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Parent Details</h5>
+              <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-900/30 p-4 rounded-2xl border border-slate-100/50 dark:border-slate-800">
+                <div className="col-span-2">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Parent Full Name</span>
+                  <p className="text-xs font-semibold mt-0.5">{selectedReg.parent_name}</p>
+                </div>
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Cell Number</span>
+                  <p className="text-xs font-semibold font-mono mt-0.5">{selectedReg.parent_phone}</p>
+                </div>
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Email Address</span>
+                  <p className="text-xs font-semibold font-mono mt-0.5">{selectedReg.parent_email}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Medical Info */}
+            <div className="space-y-3">
+              <h5 className="text-[10px] font-black uppercase tracking-wider text-rose-600 dark:text-rose-400">Medical Details</h5>
+              <div className="space-y-3.5 bg-slate-50 dark:bg-slate-900/30 p-4 rounded-2xl border border-slate-100/50 dark:border-slate-800">
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Medical Conditions</span>
+                  <p className="text-xs mt-0.5 whitespace-pre-wrap">{selectedReg.medical_conditions || 'None declared'}</p>
+                </div>
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Allergies</span>
+                  <p className="text-xs mt-0.5">{selectedReg.allergies || 'None declared'}</p>
+                </div>
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Current Medication</span>
+                  <p className="text-xs mt-0.5">{selectedReg.medication || 'None declared'}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-400 uppercase">Emergency Contact</span>
+                    <p className="text-xs font-semibold mt-0.5">{selectedReg.emergency_contact_name}</p>
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-400 uppercase">Emergency Phone</span>
+                    <p className="text-xs font-semibold font-mono mt-0.5">{selectedReg.emergency_contact_phone}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Consents */}
+            <div className="space-y-3">
+              <h5 className="text-[10px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Declarations & Consents</h5>
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-900/30 rounded-xl border border-slate-100/50 dark:border-slate-800">
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${selectedReg.consent_correct ? 'bg-emerald-500 text-white' : 'bg-slate-250 dark:bg-slate-700 text-slate-400 dark:text-slate-500'}`}>✓</div>
+                  <span className="text-[11px] font-semibold">Information is true and correct</span>
+                </div>
+                <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-900/30 rounded-xl border border-slate-100/50 dark:border-slate-800">
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${selectedReg.consent_interest ? 'bg-emerald-500 text-white' : 'bg-slate-250 dark:bg-slate-700 text-slate-400 dark:text-slate-500'}`}>✓</div>
+                  <span className="text-[11px] font-semibold">Expression of interest only declaration acknowledged</span>
+                </div>
+                <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-900/30 rounded-xl border border-slate-100/50 dark:border-slate-800">
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${selectedReg.consent_storage ? 'bg-emerald-500 text-white' : 'bg-slate-250 dark:bg-slate-700 text-slate-400 dark:text-slate-500'}`}>✓</div>
+                  <span className="text-[11px] font-semibold">Consent for athlete data storage granted</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Action footer */}
+            <div className="flex justify-end pt-4 border-t border-slate-100 dark:border-slate-800">
+              <button
+                onClick={() => { setShowViewModal(false); setSelectedReg(null); }}
+                className="px-6 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-black uppercase tracking-wider rounded-xl transition-all"
+              >
+                Close View
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Cheer Edit Modal */}
+      {showEditModal && editingReg && (
+        <Modal title="Edit Registration" onClose={() => { setShowEditModal(false); setEditingReg(null); }}>
+          <div className="space-y-6 text-slate-700 dark:text-slate-200 max-h-[75vh] overflow-y-auto no-scrollbar pr-1">
+            
+            {/* Status Dropdown */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase text-slate-400 px-1">Registration Status *</label>
+              <select
+                value={editingReg.status || 'New'}
+                onChange={(e) => setEditingReg((prev: any) => ({ ...prev, status: e.target.value }))}
+                className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-bold"
+              >
+                <option value="New">New</option>
+                <option value="Added to Community">Added to Community</option>
+                <option value="Contacted">Contacted</option>
+                <option value="Active Athlete">Active Athlete</option>
+                <option value="Waiting List">Waiting List</option>
+                <option value="Declined">Declined</option>
+              </select>
+            </div>
+
+            {/* Athlete Info */}
+            <div className="space-y-3 pt-2">
+              <h5 className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Athlete Details</h5>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">First Name *</label>
+                  <input
+                    type="text"
+                    value={editingReg.athlete_name || ''}
+                    onChange={(e) => setEditingReg((prev: any) => ({ ...prev, athlete_name: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Surname *</label>
+                  <input
+                    type="text"
+                    value={editingReg.athlete_surname || ''}
+                    onChange={(e) => setEditingReg((prev: any) => ({ ...prev, athlete_surname: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Date of Birth *</label>
+                  <input
+                    type="text"
+                    placeholder="DD/MM/YYYY"
+                    value={editingReg.dob || ''}
+                    onChange={(e) => handleEditDobChange(e.target.value, setEditingReg)}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Age</label>
+                  <input
+                    type="text"
+                    readOnly
+                    placeholder="Auto-filled"
+                    value={editingReg.age || ''}
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 text-slate-500 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none font-semibold"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Grade</label>
+                  <input
+                    type="text"
+                    value={editingReg.grade || ''}
+                    onChange={(e) => setEditingReg((prev: any) => ({ ...prev, grade: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">School</label>
+                  <input
+                    type="text"
+                    value={editingReg.school || ''}
+                    onChange={(e) => setEditingReg((prev: any) => ({ ...prev, school: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Parent Info */}
+            <div className="space-y-3 pt-2">
+              <h5 className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Parent Details</h5>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2 space-y-1.5">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Parent Full Name *</label>
+                  <input
+                    type="text"
+                    value={editingReg.parent_name || ''}
+                    onChange={(e) => setEditingReg((prev: any) => ({ ...prev, parent_name: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Cell Number *</label>
+                  <input
+                    type="text"
+                    value={editingReg.parent_phone || ''}
+                    onChange={(e) => setEditingReg((prev: any) => ({ ...prev, parent_phone: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Email Address *</label>
+                  <input
+                    type="email"
+                    value={editingReg.parent_email || ''}
+                    onChange={(e) => setEditingReg((prev: any) => ({ ...prev, parent_email: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Medical Info */}
+            <div className="space-y-3 pt-2">
+              <h5 className="text-[10px] font-black uppercase tracking-wider text-rose-600 dark:text-rose-400">Medical Details</h5>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Medical Conditions</label>
+                  <textarea
+                    value={editingReg.medical_conditions || ''}
+                    onChange={(e) => setEditingReg((prev: any) => ({ ...prev, medical_conditions: e.target.value }))}
+                    rows={2}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold resize-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Allergies</label>
+                  <input
+                    type="text"
+                    value={editingReg.allergies || ''}
+                    onChange={(e) => setEditingReg((prev: any) => ({ ...prev, allergies: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Current Medication</label>
+                  <input
+                    type="text"
+                    value={editingReg.medication || ''}
+                    onChange={(e) => setEditingReg((prev: any) => ({ ...prev, medication: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Emergency Contact Name *</label>
+                    <input
+                      type="text"
+                      value={editingReg.emergency_contact_name || ''}
+                      onChange={(e) => setEditingReg((prev: any) => ({ ...prev, emergency_contact_name: e.target.value }))}
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Emergency Contact Phone *</label>
+                    <input
+                      type="text"
+                      value={editingReg.emergency_contact_phone || ''}
+                      onChange={(e) => setEditingReg((prev: any) => ({ ...prev, emergency_contact_phone: e.target.value }))}
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Action footer */}
+            <div className="flex justify-end gap-3 pt-6 border-t border-slate-100 dark:border-slate-800">
+              <button
+                onClick={() => { setShowEditModal(false); setEditingReg(null); }}
+                className="px-5 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-black uppercase tracking-wider rounded-xl transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const dbDob = formatDateToDb(editingReg.dob);
+                  handleUpdateReg({
+                    ...editingReg,
+                    dob: dbDob,
+                    age: editingReg.age ? parseInt(editingReg.age, 10) : null
+                  });
+                }}
+                className="px-6 py-3 bg-[#1e4da1] hover:bg-blue-700 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md shadow-blue-500/10"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {showAddComp && (

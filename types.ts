@@ -205,6 +205,7 @@ export interface AppState {
   snapshots: InvoiceSnapshot[];
   notifications: AppNotification[];
   pendingSyncCount: number;
+  cheerRegistrations?: any[];
 }
 
 export enum View {
