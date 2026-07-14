@@ -5,15 +5,15 @@ type FormData = {
   parentName: string;
   parentPhone: string;
   parentEmail: string;
+  preferredParentContact: string;
+  secondParentName: string;
+  secondParentPhone: string;
   athleteName: string;
   athleteSurname: string;
   dob: string;
   age: string;
-  grade: string;
-  school: string;
   medicalConditions: string;
   allergies: string;
-  medication: string;
   emergencyContactName: string;
   emergencyContactPhone: string;
   consentCorrect: boolean;
@@ -25,15 +25,15 @@ const EMPTY_FORM: FormData = {
   parentName: '',
   parentPhone: '',
   parentEmail: '',
+  preferredParentContact: 'First Parent',
+  secondParentName: '',
+  secondParentPhone: '',
   athleteName: '',
   athleteSurname: '',
   dob: '',
   age: '',
-  grade: '',
-  school: '',
   medicalConditions: '',
   allergies: '',
-  medication: '',
   emergencyContactName: '',
   emergencyContactPhone: '',
   consentCorrect: false,
@@ -115,6 +115,21 @@ export default function SignupCheer() {
     if (!form.parentEmail.trim()) return 'Please enter parent/guardian email address.';
     if (!/\S+@\S+\.\S+/.test(form.parentEmail.trim())) return 'Please enter a valid email address.';
 
+    if (form.preferredParentContact === 'Second Parent') {
+      if (!form.secondParentName.trim()) {
+        return 'Please enter Second Parent name if they are the preferred contact.';
+      }
+      if (!form.secondParentPhone.trim()) {
+        return 'Please enter Second Parent cell number if they are the preferred contact.';
+      }
+    }
+
+    if (form.secondParentPhone.trim()) {
+      if (!/^[\d\s\+\-\(\)]{7,15}$/.test(form.secondParentPhone.replace(/\s+/g, ''))) {
+        return 'Please enter a valid second parent cell number.';
+      }
+    }
+
     if (!form.athleteName.trim()) return "Please enter athlete's name.";
     if (!form.athleteSurname.trim()) return "Please enter athlete's surname.";
     if (!form.dob.trim()) return "Please enter athlete's date of birth.";
@@ -162,15 +177,15 @@ export default function SignupCheer() {
         parent_name: form.parentName.trim(),
         parent_phone: form.parentPhone.trim(),
         parent_email: form.parentEmail.trim(),
+        preferred_parent_to_contact: form.preferredParentContact,
+        second_parent_name: form.secondParentName.trim() || null,
+        second_parent_phone: form.secondParentPhone.trim() || null,
         athlete_name: form.athleteName.trim(),
         athlete_surname: form.athleteSurname.trim(),
         dob: dobForDb,
         age: form.age ? parseInt(form.age, 10) : null,
-        grade: form.grade.trim() || null,
-        school: form.school.trim() || null,
         medical_conditions: form.medicalConditions.trim() || null,
         allergies: form.allergies.trim() || null,
-        medication: form.medication.trim() || null,
         emergency_contact_name: form.emergencyContactName.trim(),
         emergency_contact_phone: form.emergencyContactPhone.trim(),
         consent_correct: form.consentCorrect,
@@ -186,8 +201,8 @@ export default function SignupCheer() {
         await supabase.from('notifications').insert({
           id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           user_id: ownerUserId,
-          title: 'New Cheer Registration',
-          message: `${form.athleteName} ${form.athleteSurname} has registered for Competitive Cheer.`,
+          title: 'New Cheerleading Registration',
+          message: `${form.athleteName} ${form.athleteSurname} has registered for Cheerleading & Tumbling.`,
           is_read: false,
           created_at: new Date().toISOString()
         });
@@ -213,11 +228,11 @@ export default function SignupCheer() {
           </div>
           <h2 style={{ fontSize: '20px', fontWeight: 900, color: '#ef4444', marginBottom: '12px' }}>INVALID LINK</h2>
           <p style={{ color: '#475569', fontSize: '14px', lineHeight: '1.6', marginBottom: '24px' }}>
-            Invalid cheer signup link. Please contact JFLIPS for a valid Competitive Cheer registration link.
+            Invalid signup link. Please contact J-flips competitive cheer and tumbling for a valid cheerleading registration link.
           </p>
           <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid #f1f5f9' }}>
-            <span style={{ fontSize: '20px', fontWeight: 900, fontStyle: 'italic', color: '#1e4da1' }}>JFLIPS</span>
-            <p style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '2px', color: '#94a3b8', marginTop: '4px' }}>Competitive Cheer</p>
+            <span style={{ fontSize: '20px', fontWeight: 900, fontStyle: 'italic', color: '#1e4da1' }}>J-flips</span>
+            <p style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '2px', color: '#94a3b8', marginTop: '4px' }}>Cheer & Tumbling</p>
           </div>
         </div>
       </div>
@@ -234,14 +249,14 @@ export default function SignupCheer() {
           </div>
           <h2 style={{ fontSize: '22px', fontWeight: 900, color: '#1e4da1', fontStyle: 'italic', marginBottom: '8px' }}>REGISTERED!</h2>
           <p style={{ color: '#475569', fontSize: '15px', lineHeight: '1.6', marginBottom: '20px' }}>
-            Thank you! <strong>{form.athleteName} {form.athleteSurname}</strong> has been registered for JFLIPS Competitive Cheer.
+            Thank you! <strong>{form.athleteName} {form.athleteSurname}</strong> has been registered for J-flips competitive cheer and tumbling.
           </p>
           <p style={{ color: '#64748b', fontSize: '13px', lineHeight: '1.5', marginBottom: '28px' }}>
             Please note that this registration is an expression of interest only and does not guarantee placement on a team. We will contact you soon!
           </p>
           <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid #f1f5f9' }}>
-            <span style={{ fontSize: '20px', fontWeight: 900, fontStyle: 'italic', color: '#1e4da1' }}>JFLIPS</span>
-            <p style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '2px', color: '#94a3b8', marginTop: '4px' }}>Competitive Cheer</p>
+            <span style={{ fontSize: '20px', fontWeight: 900, fontStyle: 'italic', color: '#1e4da1' }}>J-flips</span>
+            <p style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '2px', color: '#94a3b8', marginTop: '4px' }}>Cheer & Tumbling</p>
           </div>
         </div>
       </div>
@@ -252,10 +267,10 @@ export default function SignupCheer() {
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0f172a 0%, #1e3a6e 60%, #1e4da1 100%)', fontFamily: 'Inter, sans-serif' }}>
       <div style={{ padding: '32px 24px 0', textAlign: 'center' }}>
         <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '16px 32px', border: '1px solid rgba(255,255,255,0.15)', marginBottom: '24px' }}>
-          <div style={{ fontSize: '32px', fontWeight: 900, fontStyle: 'italic', color: 'white', letterSpacing: '-1px', lineHeight: 1 }}>JFLIPS</div>
-          <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '3px', color: '#93c5fd', marginTop: '4px' }}>Competitive Cheer</div>
+          <div style={{ fontSize: '32px', fontWeight: 900, fontStyle: 'italic', color: 'white', letterSpacing: '-1px', lineHeight: 1 }}>J-flips</div>
+          <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '3px', color: '#93c5fd', marginTop: '4px' }}>Competitive Cheer and Tumbling</div>
         </div>
-        <h1 style={{ fontSize: '22px', fontWeight: 900, color: 'white', marginBottom: '8px' }}>Competitive Cheer Registration</h1>
+        <h1 style={{ fontSize: '22px', fontWeight: 900, color: 'white', marginBottom: '8px' }}>Cheerleading Registration</h1>
         <p style={{ fontSize: '13px', color: '#93c5fd' }}>Expression of Interest Form</p>
       </div>
 
@@ -264,19 +279,56 @@ export default function SignupCheer() {
           
           <Section label="Parent / Guardian Information" icon="👥" color="#0891b2">
             <div>
-              <Label>Parent Full Name *</Label>
+              <Label>First Parent / Guardian Full Name *</Label>
               <Input value={form.parentName} onChange={set('parentName')} placeholder="e.g. Sarah Smith" />
             </div>
             <Row>
-              <div style={{ flex: 1 }}>
-                <Label>Cell Number *</Label>
+              <div style={{ flex: 1, minWidth: '150px' }}>
+                <Label>First Parent Cell Number *</Label>
                 <Input type="tel" value={form.parentPhone} onChange={set('parentPhone')} placeholder="e.g. 082 123 4567" />
               </div>
-              <div style={{ flex: 1 }}>
-                <Label>Email Address *</Label>
+              <div style={{ flex: 1, minWidth: '150px' }}>
+                <Label>First Parent Email Address *</Label>
                 <Input type="email" value={form.parentEmail} onChange={set('parentEmail')} placeholder="e.g. sarah@email.com" />
               </div>
             </Row>
+
+            <div style={{ borderTop: '1px dashed #e2e8f0', marginTop: '8px', paddingTop: '12px' }}>
+              <Label>Second Parent / Guardian Full Name (Optional)</Label>
+              <Input value={form.secondParentName} onChange={set('secondParentName')} placeholder="e.g. John Smith" />
+            </div>
+            <div>
+              <Label>Second Parent Cell Number (Optional)</Label>
+              <Input type="tel" value={form.secondParentPhone} onChange={set('secondParentPhone')} placeholder="e.g. 083 987 6543" />
+            </div>
+
+            <div style={{ marginTop: '8px' }}>
+              <Label>Preferred Parent to Contact *</Label>
+              <div style={{ display: 'flex', gap: '20px', marginTop: '6px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: '#475569', fontWeight: 600 }}>
+                  <input
+                    type="radio"
+                    name="preferredParentContact"
+                    value="First Parent"
+                    checked={form.preferredParentContact === 'First Parent'}
+                    onChange={() => setForm(prev => ({ ...prev, preferredParentContact: 'First Parent' }))}
+                    style={{ width: '16px', height: '16px', accentColor: '#0891b2' }}
+                  />
+                  First Parent
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: '#475569', fontWeight: 600 }}>
+                  <input
+                    type="radio"
+                    name="preferredParentContact"
+                    value="Second Parent"
+                    checked={form.preferredParentContact === 'Second Parent'}
+                    onChange={() => setForm(prev => ({ ...prev, preferredParentContact: 'Second Parent' }))}
+                    style={{ width: '16px', height: '16px', accentColor: '#0891b2' }}
+                  />
+                  Second Parent
+                </label>
+              </div>
+            </div>
           </Section>
 
           <Section label="Athlete Information" icon="🤸" color="#6366f1">
@@ -300,16 +352,6 @@ export default function SignupCheer() {
                 <Input value={form.age} readOnly placeholder="Auto-filled" style={{ background: '#f8fafc', color: '#64748b' }} />
               </div>
             </Row>
-            <Row>
-              <div style={{ flex: 1 }}>
-                <Label>Grade</Label>
-                <Input value={form.grade} onChange={set('grade')} placeholder="e.g. Grade 4" />
-              </div>
-              <div style={{ flex: 1 }}>
-                <Label>School</Label>
-                <Input value={form.school} onChange={set('school')} placeholder="e.g. Primary School" />
-              </div>
-            </Row>
           </Section>
 
           <Section label="Medical Information" icon="📋" color="#e11d48">
@@ -320,10 +362,6 @@ export default function SignupCheer() {
             <div>
               <Label>Allergies</Label>
               <Input value={form.allergies} onChange={set('allergies')} placeholder="List any allergies..." />
-            </div>
-            <div>
-              <Label>Medication</Label>
-              <Input value={form.medication} onChange={set('medication')} placeholder="List current medication..." />
             </div>
             <Row>
               <div style={{ flex: 1 }}>

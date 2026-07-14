@@ -70,7 +70,9 @@ import {
   ZapOff,
   MapPin,
   BookOpen,
-  Building
+  Building,
+  Globe,
+  Link
 } from 'lucide-react';
 import { View, Student, Gym, ClassType, AttendanceSession, AppState, HistoryMonth, Profile, Payment, ClassSchedule, Staff, InvoiceSnapshot, AppNotification, Competition } from './types';
 import { toPng } from 'html-to-image';
@@ -4569,6 +4571,34 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
   const [showEditModal, setShowEditModal] = useState(false);
   const [copyStatus, setCopyStatus] = useState<{[key: string]: boolean}>({});
 
+  // Domain view settings for public sharing links & QR codes
+  const [domainMode, setDomainMode] = useState<'current' | 'branded' | 'custom'>('current');
+  const [customDomainInput, setCustomDomainInput] = useState('jflips.app');
+
+  const ownerIdForSharing = state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || '';
+
+  const tumblingUrl = useMemo(() => {
+    if (domainMode === 'branded') {
+      return `https://jflips.tumblingregistration.com?ownerId=${ownerIdForSharing}`;
+    } else if (domainMode === 'custom') {
+      const cleanDomain = customDomainInput.replace(/^(https?:\/\/)?(www\.)?/, '').trim();
+      const base = cleanDomain || 'jflips.app';
+      return `https://${base}/#/signup?ownerId=${ownerIdForSharing}`;
+    }
+    return `${window.location.origin}/#/signup?ownerId=${ownerIdForSharing}`;
+  }, [domainMode, customDomainInput, ownerIdForSharing]);
+
+  const cheerUrl = useMemo(() => {
+    if (domainMode === 'branded') {
+      return `https://jflips.cheerregestration.com?ownerId=${ownerIdForSharing}`;
+    } else if (domainMode === 'custom') {
+      const cleanDomain = customDomainInput.replace(/^(https?:\/\/)?(www\.)?/, '').trim();
+      const base = cleanDomain || 'jflips.app';
+      return `https://${base}/#/signup-cheer?ownerId=${ownerIdForSharing}`;
+    }
+    return `${window.location.origin}/#/signup-cheer?ownerId=${ownerIdForSharing}`;
+  }, [domainMode, customDomainInput, ownerIdForSharing]);
+
   const handleCopy = (url: string, key: string) => {
     navigator.clipboard.writeText(url);
     setCopyStatus(prev => ({ ...prev, [key]: true }));
@@ -4639,15 +4669,15 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
       parent_name: updatedFields.parent_name,
       parent_phone: updatedFields.parent_phone,
       parent_email: updatedFields.parent_email,
+      preferred_parent_to_contact: updatedFields.preferred_parent_to_contact,
+      second_parent_name: updatedFields.second_parent_name,
+      second_parent_phone: updatedFields.second_parent_phone,
       athlete_name: updatedFields.athlete_name,
       athlete_surname: updatedFields.athlete_surname,
       dob: updatedFields.dob,
       age: updatedFields.age,
-      grade: updatedFields.grade,
-      school: updatedFields.school,
       medical_conditions: updatedFields.medical_conditions,
       allergies: updatedFields.allergies,
-      medication: updatedFields.medication,
       emergency_contact_name: updatedFields.emergency_contact_name,
       emergency_contact_phone: updatedFields.emergency_contact_phone,
       status: updatedFields.status
@@ -4699,14 +4729,14 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
       'Athlete Surname',
       'DOB',
       'Age',
-      'Grade',
-      'School',
-      'Parent Name',
-      'Parent Phone',
-      'Parent Email',
+      'Parent 1 Name',
+      'Parent 1 Phone',
+      'Parent 1 Email',
+      'Second Parent Name',
+      'Second Parent Phone',
+      'Preferred Contact Parent',
       'Medical Conditions',
       'Allergies',
-      'Medication',
       'Emergency Contact Name',
       'Emergency Contact Phone',
       'Consent Supplied Correct',
@@ -4721,14 +4751,14 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
       r.athlete_surname || '',
       r.dob || '',
       r.age || '',
-      r.grade || '',
-      r.school || '',
       r.parent_name || '',
       r.parent_phone || '',
       r.parent_email || '',
+      r.second_parent_name || '',
+      r.second_parent_phone || '',
+      r.preferred_parent_to_contact || 'First Parent',
       r.medical_conditions || '',
       r.allergies || '',
-      r.medication || '',
       r.emergency_contact_name || '',
       r.emergency_contact_phone || '',
       r.consent_correct ? 'Yes' : 'No',
@@ -4759,7 +4789,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
     printWindow.document.write(`
       <html>
         <head>
-          <title>Cheer Registration - \${reg.athlete_name} \${reg.athlete_surname}</title>
+          <title>Cheerleading & Tumbling Registration - \${reg.athlete_name} \${reg.athlete_surname}</title>
           <style>
             body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; line-height: 1.6; }
             .header { text-align: center; margin-bottom: 40px; border-bottom: 2px solid #1e4da1; padding-bottom: 20px; }
@@ -4777,8 +4807,8 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
         </head>
         <body>
           <div class="header">
-            <h1>JFLIPS</h1>
-            <p>Competitive Cheer Registration</p>
+            <h1>J-flips</h1>
+            <p>Competitive Cheer and Tumbling Registration</p>
           </div>
           
           <div class="section">
@@ -4786,17 +4816,21 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
             <div class="grid">
               <div class="item"><div class="label">Athlete Name</div><div class="value">\${reg.athlete_name} \${reg.athlete_surname}</div></div>
               <div class="item"><div class="label">Date of Birth</div><div class="value">\${reg.dob}</div></div>
-              <div class="item"><div class="label">Age</div><div class="value">\${reg.age || 'N/A'}</div></div>
-              <div class="item"><div class="label">Grade / School</div><div class="value">\${reg.grade || 'N/A'} / \${reg.school || 'N/A'}</div></div>
+              <div class="item"><div class="label">Age</div><div class="value">\${reg.age ? reg.age + ' Years' : 'N/A'}</div></div>
             </div>
           </div>
 
           <div class="section">
             <div class="section-title">Parent Information</div>
             <div class="grid">
-              <div class="item"><div class="label">Parent Name</div><div class="value">\${reg.parent_name}</div></div>
-              <div class="item"><div class="label">Cell Number</div><div class="value">\${reg.parent_phone}</div></div>
-              <div class="item"><div class="label">Email Address</div><div class="value">\${reg.parent_email}</div></div>
+              <div class="item"><div class="label">First Parent Name</div><div class="value">\${reg.parent_name}</div></div>
+              <div class="item"><div class="label">First Parent Cell Number</div><div class="value">\${reg.parent_phone}</div></div>
+              <div class="item"><div class="label">First Parent Email Address</div><div class="value">\${reg.parent_email}</div></div>
+              <div class="item"><div class="label">Preferred Contact Parent</div><div class="value" style="color: #1e4da1;">\${reg.preferred_parent_to_contact || 'First Parent'}</div></div>
+              \${reg.second_parent_name ? \`
+                <div class="item"><div class="label">Second Parent Name</div><div class="value">\${reg.second_parent_name}</div></div>
+                <div class="item"><div class="label">Second Parent Cell Number</div><div class="value">\${reg.second_parent_phone || 'N/A'}</div></div>
+              \` : ''}
             </div>
           </div>
 
@@ -4805,7 +4839,6 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
             <div class="grid">
               <div class="item" style="grid-column: span 2;"><div class="label">Medical Conditions</div><div class="value">\${reg.medical_conditions || 'None'}</div></div>
               <div class="item" style="grid-column: span 2;"><div class="label">Allergies</div><div class="value">\${reg.allergies || 'None'}</div></div>
-              <div class="item" style="grid-column: span 2;"><div class="label">Medication</div><div class="value">\${reg.medication || 'None'}</div></div>
               <div class="item"><div class="label">Emergency Contact</div><div class="value">\${reg.emergency_contact_name}</div></div>
               <div class="item"><div class="label">Emergency Number</div><div class="value">\${reg.emergency_contact_phone}</div></div>
             </div>
@@ -4823,7 +4856,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
             </div>
             <div class="consent-item">
               <span class="checkbox">\${reg.consent_storage ? '✓' : ''}</span>
-              <span>I consent to JFLIPS storing my information for athlete management purposes.</span>
+              <span>I consent to J-flips storing my information for athlete management purposes.</span>
             </div>
           </div>
           
@@ -5578,42 +5611,127 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
             <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-1">Manage public registrations and student signup links</p>
           </div>
 
-          {/* Sharing Links Panel */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Tumbling Registration Card */}
-            <div className="bg-white dark:bg-slate-800 rounded-[2.5rem] p-8 border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden flex flex-col justify-between min-h-[220px]">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/5 rounded-full -mr-16 -mt-16 blur-2xl" />
-              <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center shrink-0">
-                    <User size={18} />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-black uppercase italic text-slate-800 dark:text-slate-100 leading-tight">Tumbling Registration</h4>
-                    <p className="text-[9px] font-bold text-slate-400 uppercase">Existing Public Enrollment Form</p>
-                  </div>
+          {/* Link Configuration Panel */}
+          <div className="bg-slate-50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800 p-6 rounded-[2.5rem] space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100 font-black uppercase italic text-sm">
+                  <Globe className="text-blue-600 dark:text-blue-400" size={16} />
+                  Link & Domain Configurations
                 </div>
-                <div className="p-3.5 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 rounded-xl">
-                  <p className="text-[10px] font-mono break-all text-slate-500 dark:text-slate-400 select-all">
-                    {`${window.location.origin}/#/signup?ownerId=${state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || ''}`}
-                  </p>
+                <p className="text-[10px] text-slate-500 max-w-xl font-medium leading-relaxed">
+                  By default, registration links use your temporary sandboxed development server URL. Toggle between <b>Branded Domains</b> (for print material and clean shares) or <b>Custom Domain</b> to configure JFLIPS' official custom URLs!
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setDomainMode('current')}
+                  className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all border ${
+                    domainMode === 'current'
+                      ? 'bg-blue-600 border-blue-600 text-white'
+                      : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                  }`}
+                >
+                  Dev Sandbox URL
+                </button>
+                <button
+                  onClick={() => setDomainMode('branded')}
+                  className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all border ${
+                    domainMode === 'branded'
+                      ? 'bg-blue-600 border-blue-600 text-white'
+                      : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                  }`}
+                >
+                  Branded Domains
+                </button>
+                <button
+                  onClick={() => setDomainMode('custom')}
+                  className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all border ${
+                    domainMode === 'custom'
+                      ? 'bg-blue-600 border-blue-600 text-white'
+                      : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                  }`}
+                >
+                  Custom Domain
+                </button>
+              </div>
+            </div>
+
+            {domainMode === 'custom' && (
+              <div className="pt-2 border-t border-dashed border-slate-200/60 dark:border-slate-800/60 flex items-center gap-3">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider shrink-0">Custom Domain Base:</span>
+                <div className="flex-1 max-w-xs relative rounded-xl shadow-sm">
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[10px] font-mono text-slate-400">
+                    https://
+                  </span>
+                  <input
+                    type="text"
+                    value={customDomainInput}
+                    onChange={(e) => setCustomDomainInput(e.target.value)}
+                    placeholder="jflips.app"
+                    className="block w-full pl-[52px] pr-3 py-2 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:outline-none dark:text-slate-100"
+                  />
                 </div>
               </div>
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={() => handleCopy(`${window.location.origin}/#/signup?ownerId=${state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || ''}`, 'tumbling')}
-                  className="flex-1 py-3 bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-slate-100 dark:border-slate-700 flex items-center justify-center gap-2"
-                >
-                  {copyStatus['tumbling'] ? '✓ Copied' : 'Copy Link'}
-                </button>
-                <a
-                  href={`${window.location.origin}/#/signup?ownerId=${state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || ''}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 text-center"
-                >
-                  Open Form
-                </a>
+            )}
+
+            {domainMode === 'branded' && (
+              <div className="p-3.5 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100/50 dark:border-blue-900/30 rounded-2xl">
+                <p className="text-[10px] text-blue-700 dark:text-blue-300 font-semibold leading-relaxed">
+                  💡 <b>Pro Domain Tip:</b> You can bind your purchased domains <b>jflips.tumblingregistration.com</b> and <b>jflips.cheerregestration.com</b> at your registrar (such as Squarespace, Namecheap, or GoDaddy) using DNS CNAME/A records pointing directly to your Cloud Run server.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Sharing Links Panel */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Tumbling Registration Card */}
+            <div className="bg-white dark:bg-slate-800 rounded-[2.5rem] p-8 border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden flex flex-col md:flex-row justify-between gap-6">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/5 rounded-full -mr-16 -mt-16 blur-2xl" />
+              <div className="flex-1 flex flex-col justify-between">
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center shrink-0">
+                      <User size={18} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black uppercase italic text-slate-800 dark:text-slate-100 leading-tight">Tumbling Registration</h4>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase">Existing Public Enrollment Form</p>
+                    </div>
+                  </div>
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 rounded-xl">
+                    <p className="text-[10px] font-mono break-all text-slate-500 dark:text-slate-400 select-all">
+                      {tumblingUrl}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-6">
+                  <button
+                    onClick={() => handleCopy(tumblingUrl, 'tumbling')}
+                    className="flex-1 py-3 bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-slate-100 dark:border-slate-700 flex items-center justify-center gap-2"
+                  >
+                    {copyStatus['tumbling'] ? '✓ Copied' : 'Copy Link'}
+                  </button>
+                  <a
+                    href={tumblingUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 text-center"
+                  >
+                    Open Form
+                  </a>
+                </div>
+              </div>
+
+              {/* Tumbling QR Code Section */}
+              <div className="flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900/40 p-4 rounded-3xl border border-slate-100 dark:border-slate-800/80 shrink-0 w-full md:w-auto">
+                <img 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(tumblingUrl)}`}
+                  alt="Tumbling signup QR code"
+                  className="w-28 h-28 border border-slate-100 dark:border-slate-800 rounded-xl shadow-inner bg-white shrink-0"
+                />
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider mt-2">Registration QR Code</span>
               </div>
             </div>
 
@@ -5627,25 +5745,25 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
                       <Trophy size={18} />
                     </div>
                     <div>
-                      <h4 className="text-sm font-black uppercase italic text-slate-800 dark:text-slate-100 leading-tight">Cheer Registration</h4>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase">Competitive Cheer Interest Form</p>
+                      <h4 className="text-sm font-black uppercase italic text-slate-800 dark:text-slate-100 leading-tight">Cheerleading Registration</h4>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase">Cheerleading and Tumbling Interest Form</p>
                     </div>
                   </div>
                   <div className="p-3.5 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 rounded-xl">
                     <p className="text-[10px] font-mono break-all text-slate-500 dark:text-slate-400 select-all">
-                      {`${window.location.origin}/#/signup-cheer?ownerId=${state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || ''}`}
+                      {cheerUrl}
                     </p>
                   </div>
                 </div>
                 <div className="flex gap-3 mt-6">
                   <button
-                    onClick={() => handleCopy(`${window.location.origin}/#/signup-cheer?ownerId=${state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || ''}`, 'cheer')}
+                    onClick={() => handleCopy(cheerUrl, 'cheer')}
                     className="flex-1 py-3 bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-slate-100 dark:border-slate-700 flex items-center justify-center gap-2"
                   >
                     {copyStatus['cheer'] ? '✓ Copied' : 'Copy Link'}
                   </button>
                   <a
-                    href={`${window.location.origin}/#/signup-cheer?ownerId=${state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || ''}`}
+                    href={cheerUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 text-center"
@@ -5658,7 +5776,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
               {/* QR Code Section */}
               <div className="flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900/40 p-4 rounded-3xl border border-slate-100 dark:border-slate-800/80 shrink-0 w-full md:w-auto">
                 <img 
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`${window.location.origin}/#/signup-cheer?ownerId=${state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || ''}`)}`}
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(cheerUrl)}`}
                   alt="Cheer signup QR code"
                   className="w-28 h-28 border border-slate-100 dark:border-slate-800 rounded-xl shadow-inner bg-white shrink-0"
                 />
@@ -5671,7 +5789,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
           <div className="space-y-6">
             <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between">
               <div>
-                <h4 className="text-lg font-black uppercase italic text-slate-800 dark:text-slate-100">Competitive Cheer Submissions</h4>
+                <h4 className="text-lg font-black uppercase italic text-slate-800 dark:text-slate-100">Cheerleading & Tumbling Submissions</h4>
                 <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest mt-0.5">Manage expressions of interest and athlete recruitment</p>
               </div>
 
@@ -5751,20 +5869,33 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
                             {reg.athlete_name} {reg.athlete_surname}
                           </div>
                           <div className="text-[10px] text-slate-400 uppercase mt-0.5">
-                            Age: {reg.age || '—'} • {reg.grade || 'No Grade'} • {reg.school || 'No School'}
+                            Age: {reg.age || '—'}
                           </div>
                         </td>
                         <td className="p-6">
-                          <div className="font-semibold text-slate-700 dark:text-slate-300">{reg.parent_name}</div>
+                          <div className="font-semibold text-slate-700 dark:text-slate-300">
+                            {reg.parent_name} <span className="text-[9px] px-1.5 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-slate-500">P1</span>
+                          </div>
                           <div className="text-[10px] text-slate-400 font-mono mt-0.5">{reg.parent_phone} • {reg.parent_email}</div>
+                          {reg.second_parent_name && (
+                            <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-800">
+                              <div className="font-semibold text-slate-600 dark:text-slate-400">
+                                {reg.second_parent_name} <span className="text-[9px] px-1.5 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-slate-500">P2</span>
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-mono">{reg.second_parent_phone || 'No phone'}</div>
+                            </div>
+                          )}
+                          <div className="text-[9px] font-bold text-indigo-500 uppercase mt-1">
+                            Contact: {reg.preferred_parent_to_contact || 'First Parent'}
+                          </div>
                         </td>
                         <td className="p-6 max-w-[200px]">
                           <div className="truncate text-slate-500 dark:text-slate-400" title={reg.medical_conditions || 'None'}>
                             {reg.medical_conditions || <span className="italic text-slate-300 dark:text-slate-600">None declared</span>}
                           </div>
-                          {(reg.allergies || reg.medication) && (
-                            <div className="text-[9px] text-rose-500 font-bold uppercase mt-0.5 truncate" title={`Allergies: ${reg.allergies || 'None'}, Meds: ${reg.medication || 'None'}`}>
-                              ⚠️ {reg.allergies ? 'Allergies' : ''} {reg.allergies && reg.medication ? '&' : ''} {reg.medication ? 'Medication' : ''}
+                          {reg.allergies && (
+                            <div className="text-[9px] text-rose-500 font-bold uppercase mt-0.5 truncate" title={`Allergies: ${reg.allergies || 'None'}`}>
+                              ⚠️ Allergies: {reg.allergies}
                             </div>
                           )}
                         </td>
@@ -5862,14 +5993,6 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
                   <span className="text-[9px] font-bold text-slate-400 uppercase">Calculated Age</span>
                   <p className="text-xs font-semibold mt-0.5">{selectedReg.age ? `${selectedReg.age} Years` : '—'}</p>
                 </div>
-                <div>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase">Grade</span>
-                  <p className="text-xs font-semibold mt-0.5">{selectedReg.grade || '—'}</p>
-                </div>
-                <div>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase">School</span>
-                  <p className="text-xs font-semibold mt-0.5">{selectedReg.school || '—'}</p>
-                </div>
               </div>
             </div>
 
@@ -5877,18 +6000,34 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
             <div className="space-y-3">
               <h5 className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Parent Details</h5>
               <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-900/30 p-4 rounded-2xl border border-slate-100/50 dark:border-slate-800">
-                <div className="col-span-2">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase">Parent Full Name</span>
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">First Parent Name</span>
                   <p className="text-xs font-semibold mt-0.5">{selectedReg.parent_name}</p>
                 </div>
                 <div>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase">Cell Number</span>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">Preferred Contact</span>
+                  <p className="text-xs font-black uppercase text-indigo-600 dark:text-indigo-400 mt-0.5">{selectedReg.preferred_parent_to_contact || 'First Parent'}</p>
+                </div>
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">First Parent Cell</span>
                   <p className="text-xs font-semibold font-mono mt-0.5">{selectedReg.parent_phone}</p>
                 </div>
                 <div>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase">Email Address</span>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase">First Parent Email</span>
                   <p className="text-xs font-semibold font-mono mt-0.5">{selectedReg.parent_email}</p>
                 </div>
+                {selectedReg.second_parent_name && (
+                  <>
+                    <div>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase">Second Parent Name</span>
+                      <p className="text-xs font-semibold mt-0.5">{selectedReg.second_parent_name}</p>
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase">Second Parent Cell</span>
+                      <p className="text-xs font-semibold font-mono mt-0.5">{selectedReg.second_parent_phone || '—'}</p>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -5903,10 +6042,6 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
                 <div>
                   <span className="text-[9px] font-bold text-slate-400 uppercase">Allergies</span>
                   <p className="text-xs mt-0.5">{selectedReg.allergies || 'None declared'}</p>
-                </div>
-                <div>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase">Current Medication</span>
-                  <p className="text-xs mt-0.5">{selectedReg.medication || 'None declared'}</p>
                 </div>
                 <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-100 dark:border-slate-800">
                   <div>
@@ -6017,24 +6152,6 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
                     className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 text-slate-500 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none font-semibold"
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Grade</label>
-                  <input
-                    type="text"
-                    value={editingReg.grade || ''}
-                    onChange={(e) => setEditingReg((prev: any) => ({ ...prev, grade: e.target.value }))}
-                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">School</label>
-                  <input
-                    type="text"
-                    value={editingReg.school || ''}
-                    onChange={(e) => setEditingReg((prev: any) => ({ ...prev, school: e.target.value }))}
-                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
-                  />
-                </div>
               </div>
             </div>
 
@@ -6043,7 +6160,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
               <h5 className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Parent Details</h5>
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2 space-y-1.5">
-                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Parent Full Name *</label>
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">First Parent Full Name *</label>
                   <input
                     type="text"
                     value={editingReg.parent_name || ''}
@@ -6052,7 +6169,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Cell Number *</label>
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">First Parent Cell Number *</label>
                   <input
                     type="text"
                     value={editingReg.parent_phone || ''}
@@ -6061,13 +6178,46 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Email Address *</label>
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">First Parent Email Address *</label>
                   <input
                     type="email"
                     value={editingReg.parent_email || ''}
                     onChange={(e) => setEditingReg((prev: any) => ({ ...prev, parent_email: e.target.value }))}
                     className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
                   />
+                </div>
+
+                <div className="col-span-2 border-t border-dashed border-slate-100 dark:border-slate-800 pt-3 mt-1 space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Second Parent Full Name (Optional)</label>
+                    <input
+                      type="text"
+                      value={editingReg.second_parent_name || ''}
+                      onChange={(e) => setEditingReg((prev: any) => ({ ...prev, second_parent_name: e.target.value }))}
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Second Parent Cell Number (Optional)</label>
+                    <input
+                      type="text"
+                      value={editingReg.second_parent_phone || ''}
+                      onChange={(e) => setEditingReg((prev: any) => ({ ...prev, second_parent_phone: e.target.value }))}
+                      className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                    />
+                  </div>
+                </div>
+
+                <div className="col-span-2 space-y-1.5">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Preferred Parent to Contact *</label>
+                  <select
+                    value={editingReg.preferred_parent_to_contact || 'First Parent'}
+                    onChange={(e) => setEditingReg((prev: any) => ({ ...prev, preferred_parent_to_contact: e.target.value }))}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                  >
+                    <option value="First Parent">First Parent</option>
+                    <option value="Second Parent">Second Parent</option>
+                  </select>
                 </div>
               </div>
             </div>
@@ -6091,15 +6241,6 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
                     type="text"
                     value={editingReg.allergies || ''}
                     onChange={(e) => setEditingReg((prev: any) => ({ ...prev, allergies: e.target.value }))}
-                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[9px] font-bold text-slate-400 uppercase px-1">Current Medication</label>
-                  <input
-                    type="text"
-                    value={editingReg.medication || ''}
-                    onChange={(e) => setEditingReg((prev: any) => ({ ...prev, medication: e.target.value }))}
                     className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
                   />
                 </div>
