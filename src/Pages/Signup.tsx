@@ -525,7 +525,7 @@ export default function Signup() {
       <div style={{ padding: '32px 24px 0', textAlign: 'center' }}>
         <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '16px 32px', border: '1px solid rgba(255,255,255,0.15)', marginBottom: '24px' }}>
           <div style={{ fontSize: '32px', fontWeight: 900, fontStyle: 'italic', color: 'white', letterSpacing: '-1px', lineHeight: 1 }}>JFLIPS</div>
-          <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '3px', color: '#93c5fd', marginTop: '4px' }}>Stunting & Tumbling</div>
+          <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '3px', color: '#93c5fd', marginTop: '4px' }}>Cheer & Tumbling</div>
         </div>
         <h1 style={{ fontSize: '22px', fontWeight: 900, color: 'white', marginBottom: '8px' }}>Tumbling Registration</h1>
         <p style={{ fontSize: '13px', color: '#93c5fd' }}>Fill in your details below to sign up for a class</p>
