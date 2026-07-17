@@ -228,10 +228,10 @@ export default function SignupCheer() {
           </div>
           <h2 style={{ fontSize: '20px', fontWeight: 900, color: '#ef4444', marginBottom: '12px' }}>INVALID LINK</h2>
           <p style={{ color: '#475569', fontSize: '14px', lineHeight: '1.6', marginBottom: '24px' }}>
-            Invalid signup link. Please contact J-flips competitive cheer and tumbling for a valid cheerleading registration link.
+            Invalid signup link. Please contact JFLIPS competitive cheer and tumbling for a valid cheerleading registration link.
           </p>
           <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid #f1f5f9' }}>
-            <span style={{ fontSize: '20px', fontWeight: 900, fontStyle: 'italic', color: '#1e4da1' }}>J-flips</span>
+            <span style={{ fontSize: '20px', fontWeight: 900, fontStyle: 'italic', color: '#1e4da1' }}>JFLIPS</span>
             <p style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '2px', color: '#94a3b8', marginTop: '4px' }}>Cheer & Tumbling</p>
           </div>
         </div>
@@ -249,13 +249,13 @@ export default function SignupCheer() {
           </div>
           <h2 style={{ fontSize: '22px', fontWeight: 900, color: '#1e4da1', fontStyle: 'italic', marginBottom: '8px' }}>REGISTERED!</h2>
           <p style={{ color: '#475569', fontSize: '15px', lineHeight: '1.6', marginBottom: '20px' }}>
-            Thank you! <strong>{form.athleteName} {form.athleteSurname}</strong> has been registered for J-flips competitive cheer and tumbling.
+            Thank you! <strong>{form.athleteName} {form.athleteSurname}</strong> has been registered for JFLIPS competitive cheer and tumbling.
           </p>
           <p style={{ color: '#64748b', fontSize: '13px', lineHeight: '1.5', marginBottom: '28px' }}>
             Please note that this registration is an expression of interest only and does not guarantee placement on a team. We will contact you soon!
           </p>
           <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid #f1f5f9' }}>
-            <span style={{ fontSize: '20px', fontWeight: 900, fontStyle: 'italic', color: '#1e4da1' }}>J-flips</span>
+            <span style={{ fontSize: '20px', fontWeight: 900, fontStyle: 'italic', color: '#1e4da1' }}>JFLIPS</span>
             <p style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '2px', color: '#94a3b8', marginTop: '4px' }}>Cheer & Tumbling</p>
           </div>
         </div>
@@ -267,7 +267,7 @@ export default function SignupCheer() {
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0f172a 0%, #1e3a6e 60%, #1e4da1 100%)', fontFamily: 'Inter, sans-serif' }}>
       <div style={{ padding: '32px 24px 0', textAlign: 'center' }}>
         <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '16px 32px', border: '1px solid rgba(255,255,255,0.15)', marginBottom: '24px' }}>
-          <div style={{ fontSize: '32px', fontWeight: 900, fontStyle: 'italic', color: 'white', letterSpacing: '-1px', lineHeight: 1 }}>J-flips</div>
+          <div style={{ fontSize: '32px', fontWeight: 900, fontStyle: 'italic', color: 'white', letterSpacing: '-1px', lineHeight: 1 }}>JFLIPS</div>
           <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '3px', color: '#93c5fd', marginTop: '4px' }}>Competitive Cheer and Tumbling</div>
         </div>
         <h1 style={{ fontSize: '22px', fontWeight: 900, color: 'white', marginBottom: '8px' }}>Cheerleading Registration</h1>

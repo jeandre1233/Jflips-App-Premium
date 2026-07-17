@@ -245,10 +245,7 @@ const getInitialTheme = (): 'light' | 'dark' => {
   if (saved === 'light' || saved === 'dark') {
     return saved;
   }
-  if (typeof window !== 'undefined' && window.matchMedia) {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  }
-  return 'dark'; // Fallback
+  return 'dark'; // Always default to dark mode
 };
 
 const MAX_ROWS_PER_PAGE = 15;
@@ -754,27 +751,7 @@ const App: React.FC = () => {
     }
   }, [state.theme]);
 
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return;
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = (e: MediaQueryListEvent) => {
-      if (!localStorage.getItem(THEME_KEY)) {
-        setState(prev => ({ ...prev, theme: e.matches ? 'dark' : 'light' }));
-      }
-    };
-    if (mediaQuery.addEventListener) {
-      mediaQuery.addEventListener('change', handleChange);
-    } else {
-      mediaQuery.addListener(handleChange);
-    }
-    return () => {
-      if (mediaQuery.removeEventListener) {
-        mediaQuery.removeEventListener('change', handleChange);
-      } else {
-        mediaQuery.removeListener(handleChange);
-      }
-    };
-  }, []);
+
 
   const loadCloudData = useCallback(async (silent = true) => {
     if (!user) return;
@@ -4571,33 +4548,15 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
   const [showEditModal, setShowEditModal] = useState(false);
   const [copyStatus, setCopyStatus] = useState<{[key: string]: boolean}>({});
 
-  // Domain view settings for public sharing links & QR codes
-  const [domainMode, setDomainMode] = useState<'current' | 'branded' | 'custom'>('current');
-  const [customDomainInput, setCustomDomainInput] = useState('jflips.app');
-
   const ownerIdForSharing = state.profile?.role === 'owner' ? state.profile.id : state.profile?.owner_id || '';
 
   const tumblingUrl = useMemo(() => {
-    if (domainMode === 'branded') {
-      return `https://jflips.tumblingregistration.com?ownerId=${ownerIdForSharing}`;
-    } else if (domainMode === 'custom') {
-      const cleanDomain = customDomainInput.replace(/^(https?:\/\/)?(www\.)?/, '').trim();
-      const base = cleanDomain || 'jflips.app';
-      return `https://${base}/#/signup?ownerId=${ownerIdForSharing}`;
-    }
     return `${window.location.origin}/#/signup?ownerId=${ownerIdForSharing}`;
-  }, [domainMode, customDomainInput, ownerIdForSharing]);
+  }, [ownerIdForSharing]);
 
   const cheerUrl = useMemo(() => {
-    if (domainMode === 'branded') {
-      return `https://jflips.cheerregestration.com?ownerId=${ownerIdForSharing}`;
-    } else if (domainMode === 'custom') {
-      const cleanDomain = customDomainInput.replace(/^(https?:\/\/)?(www\.)?/, '').trim();
-      const base = cleanDomain || 'jflips.app';
-      return `https://${base}/#/signup-cheer?ownerId=${ownerIdForSharing}`;
-    }
     return `${window.location.origin}/#/signup-cheer?ownerId=${ownerIdForSharing}`;
-  }, [domainMode, customDomainInput, ownerIdForSharing]);
+  }, [ownerIdForSharing]);
 
   const handleCopy = (url: string, key: string) => {
     navigator.clipboard.writeText(url);
@@ -4807,7 +4766,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
         </head>
         <body>
           <div class="header">
-            <h1>J-flips</h1>
+            <h1>JFLIPS</h1>
             <p>Competitive Cheer and Tumbling Registration</p>
           </div>
           
@@ -4856,7 +4815,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
             </div>
             <div class="consent-item">
               <span class="checkbox">\${reg.consent_storage ? '✓' : ''}</span>
-              <span>I consent to J-flips storing my information for athlete management purposes.</span>
+              <span>I consent to JFLIPS storing my information for athlete management purposes.</span>
             </div>
           </div>
           
@@ -5611,78 +5570,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
             <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-1">Manage public registrations and student signup links</p>
           </div>
 
-          {/* Link Configuration Panel */}
-          <div className="bg-slate-50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800 p-6 rounded-[2.5rem] space-y-4">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-slate-800 dark:text-slate-100 font-black uppercase italic text-sm">
-                  <Globe className="text-blue-600 dark:text-blue-400" size={16} />
-                  Link & Domain Configurations
-                </div>
-                <p className="text-[10px] text-slate-500 max-w-xl font-medium leading-relaxed">
-                  By default, registration links use your temporary sandboxed development server URL. Toggle between <b>Branded Domains</b> (for print material and clean shares) or <b>Custom Domain</b> to configure JFLIPS' official custom URLs!
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => setDomainMode('current')}
-                  className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all border ${
-                    domainMode === 'current'
-                      ? 'bg-blue-600 border-blue-600 text-white'
-                      : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                  }`}
-                >
-                  Dev Sandbox URL
-                </button>
-                <button
-                  onClick={() => setDomainMode('branded')}
-                  className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all border ${
-                    domainMode === 'branded'
-                      ? 'bg-blue-600 border-blue-600 text-white'
-                      : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                  }`}
-                >
-                  Branded Domains
-                </button>
-                <button
-                  onClick={() => setDomainMode('custom')}
-                  className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all border ${
-                    domainMode === 'custom'
-                      ? 'bg-blue-600 border-blue-600 text-white'
-                      : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                  }`}
-                >
-                  Custom Domain
-                </button>
-              </div>
-            </div>
 
-            {domainMode === 'custom' && (
-              <div className="pt-2 border-t border-dashed border-slate-200/60 dark:border-slate-800/60 flex items-center gap-3">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider shrink-0">Custom Domain Base:</span>
-                <div className="flex-1 max-w-xs relative rounded-xl shadow-sm">
-                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[10px] font-mono text-slate-400">
-                    https://
-                  </span>
-                  <input
-                    type="text"
-                    value={customDomainInput}
-                    onChange={(e) => setCustomDomainInput(e.target.value)}
-                    placeholder="jflips.app"
-                    className="block w-full pl-[52px] pr-3 py-2 text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:outline-none dark:text-slate-100"
-                  />
-                </div>
-              </div>
-            )}
-
-            {domainMode === 'branded' && (
-              <div className="p-3.5 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100/50 dark:border-blue-900/30 rounded-2xl">
-                <p className="text-[10px] text-blue-700 dark:text-blue-300 font-semibold leading-relaxed">
-                  💡 <b>Pro Domain Tip:</b> You can bind your purchased domains <b>jflips.tumblingregistration.com</b> and <b>jflips.cheerregestration.com</b> at your registrar (such as Squarespace, Namecheap, or GoDaddy) using DNS CNAME/A records pointing directly to your Cloud Run server.
-                </p>
-              </div>
-            )}
-          </div>
 
           {/* Sharing Links Panel */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
