@@ -81,6 +81,9 @@ import { User as SupabaseUser } from '@supabase/supabase-js';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { StatusBar, Style } from '@capacitor/status-bar';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { Capacitor } from '@capacitor/core';
 
 import { useNetworkStatus } from './src/hooks/useNetworkStatus';
 import ShareSignupLink from './src/components/ShareSignupLink';
@@ -235,7 +238,41 @@ async function generateIndemnityPDFFromStudent(student: Student) {
     doc.text('No digital signature on record.', margin, y);
   }
 
-  doc.save(`Indemnity_${studentName.replace(/\s+/g, '_')}.pdf`);
+  const fileName = `Indemnity_${studentName.replace(/\s+/g, '_')}.pdf`;
+  if (Capacitor.isNativePlatform()) {
+    const pdfBase64 = doc.output('datauristring');
+    await saveAndShareFile(pdfBase64, fileName);
+  } else {
+    doc.save(fileName);
+  }
+}
+
+async function saveAndShareFile(dataUrl: string, fileName: string) {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const base64Data = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+      const savedFile = await Filesystem.writeFile({
+        path: fileName,
+        data: base64Data,
+        directory: Directory.Cache,
+      });
+
+      await Share.share({
+        title: fileName,
+        text: `Sharing ${fileName}`,
+        url: savedFile.uri,
+        dialogTitle: `Share ${fileName}`,
+      });
+    } catch (e) {
+      console.error('Native share failed', e);
+      alert('Failed to share file on mobile.');
+    }
+  } else {
+    const link = document.createElement('a');
+    link.download = fileName;
+    link.href = dataUrl;
+    link.click();
+  }
 }
 
 const THEME_KEY = 'jflips_theme_pref';
@@ -7022,7 +7059,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
         style: { borderRadius: '2rem' }
       });
       const fileName = `Invoice_${selectedGroup.label.replace(/\s+/g, '_')}.png`;
-      const link = document.createElement('a'); link.download = fileName; link.href = dataUrl; link.click();
+      await saveAndShareFile(dataUrl, fileName);
     } catch (e) {
       console.error('Invoice capture failed:', e);
     } finally { 
@@ -7081,7 +7118,12 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       
       doc.addImage(dataUrl, 'PNG', margin, margin, contentW, pdfH);
       const fileName = `Invoice_${selectedGroup.label.replace(/\s+/g, '_')}.pdf`;
-      doc.save(fileName);
+      if (Capacitor.isNativePlatform()) {
+        const pdfBase64 = doc.output('datauristring');
+        await saveAndShareFile(pdfBase64, fileName);
+      } else {
+        doc.save(fileName);
+      }
     } catch (e) {
       console.error('PDF generation failed:', e);
       alert('Failed to generate PDF');
