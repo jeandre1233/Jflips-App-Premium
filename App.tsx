@@ -1095,10 +1095,11 @@ const App: React.FC = () => {
           bill_to_name: g.bill_to_name,
           bill_to_address: g.bill_to_address,
           bill_to_phone: g.bill_to_phone,
-          parent_gym_id: g.parent_gym_id
+          parent_gym_id: g.parent_gym_id,
+          custom_event_presets: g.custom_event_presets || []
         })),
         classTypes: (classesRes.data || []).map((ct: any) => ({ ...ct, studentIds: ct.enrolled_student_ids || [], coach_ids: ct.coach_ids || [] })),
-        sessions: (sessionsRes.data || []).map(s => ({ ...s, classTypeId: s.class_type_id, studentIds: s.student_ids || [], hours_coached: s.hours_coached, coach_id: s.coach_id, is_competition: s.is_competition })),
+        sessions: (sessionsRes.data || []).map(s => ({ ...s, classTypeId: s.class_type_id, studentIds: s.student_ids || [], hours_coached: s.hours_coached, coach_id: s.coach_id, is_competition: s.is_competition, custom_event_name: s.custom_event_name })),
         history: (historyRes.data || []).map(h => ({ 
           ...h, 
           monthName: h.month_name, 
@@ -1390,7 +1391,7 @@ const App: React.FC = () => {
     setIsSyncing(false);
   };
 
-  const handleSaveGym = async (name: string, sessionTypes: string, payAmount: number, gymType: 'tumbling' | 'cheer', defaultHours: number, teamAthleteNames: string[], billToName?: string, billToAddress?: string, billToPhone?: string, parentGymId?: string, competitionRate?: number, coachIds?: string[], defaultCoachId?: string, secondaryCoachId?: string, autoResetInvoice: boolean = true, billingDay: number = 1) => {
+  const handleSaveGym = async (name: string, sessionTypes: string, payAmount: number, gymType: 'tumbling' | 'cheer', defaultHours: number, teamAthleteNames: string[], billToName?: string, billToAddress?: string, billToPhone?: string, parentGymId?: string, competitionRate?: number, coachIds?: string[], defaultCoachId?: string, secondaryCoachId?: string, autoResetInvoice: boolean = true, billingDay: number = 1, customEventPresets?: string[]) => {
     if (!user) return;
     setIsSyncing(true);
     const gymId = (editingGym && editingGym.id) ? editingGym.id : `gym_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
@@ -1417,14 +1418,16 @@ const App: React.FC = () => {
       default_coach_id: defaultCoachId || null,
       secondary_coach_id: secondaryCoachId || null,
       auto_reset_invoice: autoResetInvoice,
-      billing_day: billingDay
+      billing_day: billingDay,
+      custom_event_presets: customEventPresets || []
     };
 
-    const { error: gymError } = await supabase.from('gyms').upsert(payload);
+    let { error: gymError } = await supabase.from('gyms').upsert(payload);
 
     if (gymError) {
-      if (gymError.message.includes('auto_reset_invoice') || gymError.message.includes('billing_day')) {
+      if (gymError.message.includes('custom_event_presets') || gymError.message.includes('auto_reset_invoice') || gymError.message.includes('billing_day')) {
         const fallbackPayload = { ...payload };
+        delete (fallbackPayload as any).custom_event_presets;
         delete (fallbackPayload as any).auto_reset_invoice;
         delete (fallbackPayload as any).billing_day;
         const { error: fallbackError } = await supabase.from('gyms').upsert(fallbackPayload);
@@ -1434,7 +1437,7 @@ const App: React.FC = () => {
           setIsSyncing(false);
           return;
         }
-        alert("Gym saved, but 'billing_day' feature requires a database update.");
+        alert("Gym saved, but custom presets or billing options require running the Supabase SQL schema update.");
       } else {
         console.error("Gym Save Error Details:", gymError);
         alert("Gym Save Error: " + gymError.message + "\n\nNote: If this is about missing columns, please update your Supabase schema using the SQL provided in the instructions.");
@@ -1727,7 +1730,8 @@ const App: React.FC = () => {
         hours_coached: s.hours || null,
         user_id: targetUserId,
         coach_id: s.coachId || finalCoachId,
-        is_competition: s.isCompetition || isCompetition || false
+        is_competition: s.isCompetition || isCompetition || false,
+        custom_event_name: s.customEventName || null
       }));
     } else {
       const sessionId = (editingSession && editingSession.id) ? editingSession.id : `sess_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
@@ -1739,7 +1743,8 @@ const App: React.FC = () => {
         hours_coached: hours || null,
         user_id: targetUserId,
         coach_id: finalCoachId,
-        is_competition: isCompetition || false
+        is_competition: isCompetition || false,
+        custom_event_name: editingSession?.custom_event_name || null
       }];
     }
 
@@ -2734,7 +2739,8 @@ const App: React.FC = () => {
                             {(() => {
                               const baseName = ct?.name || gym?.name || 'Session';
                               const hasCompInName = baseName.toLowerCase().includes('competition');
-                              return `${baseName}${session.is_competition && !hasCompInName ? ' Competition' : ''}`;
+                              const mainName = `${baseName}${session.is_competition && !hasCompInName ? ' Competition' : ''}`;
+                              return session.custom_event_name ? `${mainName} (${session.custom_event_name})` : mainName;
                             })()}
                           </p>
                           {session.is_competition && <span className="bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[7px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest shrink-0">Comp</span>}
@@ -3917,6 +3923,7 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
   const [compCoachHours, setCompCoachHours] = useState<Record<string, number>>({});
   const [compTargetGymIds, setCompTargetGymIds] = useState<Record<string, string>>({});
   const [search, setSearch] = useState('');
+  
   const isOwner = state.profile.role === 'owner';
 
   const teams = useMemo(() => {
@@ -3935,6 +3942,40 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
     teams.filter(t => selectedTeamIds.includes(t.id)),
     [teams, selectedTeamIds]
   );
+
+  const availablePresets = useMemo(() => {
+    const mainOrgTeam = activeTeams.find(t => !t.parent_gym_id);
+    const presets = (mainOrgTeam && mainOrgTeam.custom_event_presets && mainOrgTeam.custom_event_presets.length > 0)
+      ? [...mainOrgTeam.custom_event_presets]
+      : ['Class', 'Clinic', 'Camp', 'Workshop', 'Tryout'];
+    
+    const filtered = presets.filter(p => p.toLowerCase() !== 'custom');
+    
+    const seen = new Set<string>();
+    const unique: string[] = [];
+    for (const p of filtered) {
+      const lower = p.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        unique.push(p);
+      }
+    }
+    unique.push('Custom');
+    return unique;
+  }, [activeTeams]);
+
+  const [selectedPreset, setSelectedPreset] = useState<string>(() => {
+    if (initialSession?.custom_event_name) {
+      const mainOrgTeam = state.gyms.find(g => g.id === initialSession.classTypeId);
+      const savedPresets = mainOrgTeam?.custom_event_presets || ['Clinic', 'Class', 'Camp', 'Workshop', 'Tryout', 'Open Gym'];
+      if (savedPresets.includes(initialSession.custom_event_name)) {
+        return initialSession.custom_event_name;
+      }
+      return 'Custom';
+    }
+    return 'Class';
+  });
+  const [customEventName, setCustomEventName] = useState(initialSession?.custom_event_name || '');
 
   const isCompetition = useMemo(() => 
     activeTeams.some(t => t.gym_type === 'cheer' && !t.parent_gym_id), 
@@ -3975,6 +4016,19 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
       setTeamCoachIds({ [initialSession.classTypeId]: initialSession.coach_id || '' });
       if (initialSession.is_competition && initialSession.coach_id) {
         setCompCoachHours({ [initialSession.coach_id]: initialSession.hours_coached || 1 });
+      }
+      if (initialSession.custom_event_name) {
+        setCustomEventName(initialSession.custom_event_name);
+        const matchingTeam = state.gyms.find(g => g.id === initialSession.classTypeId);
+        const savedPresets = matchingTeam?.custom_event_presets || ['Clinic', 'Class', 'Camp', 'Workshop', 'Tryout', 'Open Gym'];
+        if (savedPresets.includes(initialSession.custom_event_name)) {
+          setSelectedPreset(initialSession.custom_event_name);
+        } else {
+          setSelectedPreset('Custom');
+        }
+      } else {
+        setCustomEventName('');
+        setSelectedPreset('Class');
       }
       setIsRosterView(true);
       return;
@@ -4039,6 +4093,15 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
       }
     }
   }, [initialTeamIds, initialDate, initialCoachId, initialAthleteIds, state.gyms, state.students, initialSession]);
+
+  useEffect(() => {
+    if (availablePresets.length > 0 && !availablePresets.includes(selectedPreset)) {
+      if (selectedPreset === 'Custom' && availablePresets.includes('Custom')) {
+        return;
+      }
+      setSelectedPreset(availablePresets[0]);
+    }
+  }, [availablePresets, selectedPreset]);
 
   const assignedCoachIds = useMemo(() => {
     const ids = new Set<string>();
@@ -4148,6 +4211,9 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
         selectedTeamIds.forEach(teamId => {
           // If a specific sub-team was selected for this team, use it as classTypeId, keeping target to that sub-team.
           const targetTeamId = compTargetGymIds[teamId] || teamId;
+          const targetTeam = state.gyms.find(g => g.id === targetTeamId);
+          const isMainOrg = targetTeam && !targetTeam.parent_gym_id;
+          const finalEventName = isMainOrg ? (selectedPreset === 'Custom' ? customEventName : selectedPreset) : undefined;
           
           sessions.push({
             id: undefined,
@@ -4157,9 +4223,9 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
               const student = state.students.find(s => s.id === aid);
               
               // Filter athletes accurately based on the actual targetTeam
-              const targetTeam = state.gyms.find(g => g.id === targetTeamId);
-              if (targetTeam && !targetTeam.parent_gym_id) {
-                const subTeams = state.gyms.filter(g => g.parent_gym_id === targetTeam.id);
+              const targetTeamObj = state.gyms.find(g => g.id === targetTeamId);
+              if (targetTeamObj && !targetTeamObj.parent_gym_id) {
+                const subTeams = state.gyms.filter(g => g.parent_gym_id === targetTeamObj.id);
                 return subTeams.some(st => st.id === student?.associated_gym_id);
               }
               // If it's a subteam
@@ -4168,30 +4234,36 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
             date,
             hours: coachHrs,
             coachId: coachId,
-            isCompetition: true
+            isCompetition: true,
+            customEventName: finalEventName
           });
         });
       });
     } else {
-      sessions = selectedTeamIds.map(teamId => ({
-        id: (initialSession && initialSession.classTypeId === teamId) ? initialSession.id : undefined,
-        classTypeId: teamId,
-        studentIds: finalAthletes.filter(aid => {
-          if (gymType === 'tumbling') return true;
-          const student = state.students.find(s => s.id === aid);
-          // If it's a parent team, we check if the student belongs to any of its sub-teams
-          const team = state.gyms.find(g => g.id === teamId);
-          if (team && !team.parent_gym_id) {
-            const subTeams = state.gyms.filter(g => g.parent_gym_id === team.id);
-            return subTeams.some(st => st.id === student?.associated_gym_id);
-          }
-          return student?.associated_gym_id === teamId;
-        }),
-        date,
-        hours: selectedTeamIds.length > 1 ? (teamHours[teamId] || hours) : hours,
-        coachId: teamCoachIds[teamId] || undefined,
-        isCompetition
-      }));
+      sessions = selectedTeamIds.map(teamId => {
+        const team = state.gyms.find(g => g.id === teamId);
+        const isMainOrg = team && !team.parent_gym_id;
+        const finalEventName = isMainOrg ? (selectedPreset === 'Custom' ? customEventName : selectedPreset) : undefined;
+        return {
+          id: (initialSession && initialSession.classTypeId === teamId) ? initialSession.id : undefined,
+          classTypeId: teamId,
+          studentIds: finalAthletes.filter(aid => {
+            if (gymType === 'tumbling') return true;
+            const student = state.students.find(s => s.id === aid);
+            // If it's a parent team, we check if the student belongs to any of its sub-teams
+            if (team && !team.parent_gym_id) {
+              const subTeams = state.gyms.filter(g => g.parent_gym_id === team.id);
+              return subTeams.some(st => st.id === student?.associated_gym_id);
+            }
+            return student?.associated_gym_id === teamId;
+          }),
+          date,
+          hours: selectedTeamIds.length > 1 ? (teamHours[teamId] || hours) : hours,
+          coachId: teamCoachIds[teamId] || undefined,
+          isCompetition,
+          customEventName: finalEventName
+        };
+      });
     }
 
     onSave(sessions, [], '', 0, undefined, isCompetition);
@@ -4245,6 +4317,53 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
             </div>
           )}
         </div>
+
+        {activeTeams.some(t => !t.parent_gym_id) && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-2xl space-y-3">
+            <div className="flex items-center gap-2">
+              <ClipboardCheck size={14} className="text-blue-500" />
+              <span className="text-[9px] font-black uppercase text-blue-600 dark:text-blue-400">Main Org Event Type</span>
+            </div>
+            
+            <div className="grid grid-cols-3 gap-2">
+              {availablePresets.map(preset => (
+                <button
+                  type="button"
+                  key={preset}
+                  onClick={() => {
+                    setSelectedPreset(preset);
+                    if (preset !== 'Custom') {
+                      setCustomEventName('');
+                    }
+                  }}
+                  className={`py-2 px-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all border ${
+                    selectedPreset === preset
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-md'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-100 dark:border-slate-700'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+
+            {selectedPreset === 'Custom' && (
+              <motion.div
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="pt-1"
+              >
+                <input
+                  type="text"
+                  placeholder="Enter custom event name (e.g. End of year clinic)"
+                  value={customEventName}
+                  onChange={e => setCustomEventName(e.target.value)}
+                  className="w-full bg-white dark:bg-slate-800 border-none rounded-xl p-3 text-xs font-black outline-none shadow-sm dark:text-white"
+                />
+              </motion.div>
+            )}
+          </div>
+        )}
 
         {(isCompetition || (isOwner && (activeTeams.length > 1 || gymType === 'cheer'))) && (
           <div className="space-y-3">
@@ -6876,12 +6995,13 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
         const payRate = coach?.pay_rate || 0;
         const className = gym ? gym.name : 'Session';
         const baseClassName = className;
+        const customSuffix = s.custom_event_name ? ` - ${s.custom_event_name}` : '';
         
         return {
           ...s,
           targetStudentName: 'Coaching Fee',
           displayPrice: payRate * (s.hours_coached || 1),
-          displayClassName: `${baseClassName}${s.is_competition ? ' Competition' : ''} (${s.hours_coached || 1} hrs)`
+          displayClassName: `${baseClassName}${customSuffix}${s.is_competition ? ' Competition' : ''} (${s.hours_coached || 1} hrs)`
         };
       }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     }
@@ -6918,6 +7038,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       const price = ct ? ct.price : (gym ? gym.pay_amount : 0);
       const className = ct ? ct.name : (gym ? `${gym.name} Coaching` : 'Session');
       const baseClassName = className;
+      const customSuffix = s.custom_event_name ? ` - ${s.custom_event_name}` : '';
 
       if (gym && (gym.id === selectedGroup.family_id || gym.parent_gym_id === selectedGroup.family_id)) {
         let currentPrice = price;
@@ -6931,7 +7052,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
           ...s,
           targetStudentName: gym.name,
           displayPrice: lineTotal,
-          displayClassName: `${baseClassName} (${s.hours_coached || gym.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`
+          displayClassName: `${baseClassName}${customSuffix} (${s.hours_coached || gym.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`
         }];
       }
 
@@ -6941,7 +7062,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
           ...s,
           targetStudentName: state.students.find(st => st.id === sid)?.name || (sid === selectedGroup?.family_id ? selectedGroup.label : 'Client'),
           displayPrice: price || 0,
-          displayClassName: baseClassName
+          displayClassName: `${baseClassName}${customSuffix}`
         };
       });
     }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -7907,6 +8028,33 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
   const [billingDay, setBillingDay] = useState<number>(initialData?.billing_day || 1);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [customEventPresets, setCustomEventPresets] = useState<string[]>(() => {
+    const raw = initialData?.custom_event_presets || ['Class', 'Clinic', 'Camp', 'Workshop', 'Tryout'];
+    const seen = new Set<string>();
+    return raw.filter(p => {
+      const lower = p.toLowerCase();
+      if (seen.has(lower)) return false;
+      seen.add(lower);
+      return true;
+    });
+  });
+  const [newPresetInput, setNewPresetInput] = useState('');
+
+  const handleAddPreset = () => {
+    const trimmed = newPresetInput.trim();
+    if (!trimmed) return;
+    if (customEventPresets.map(p => p.toLowerCase()).includes(trimmed.toLowerCase())) {
+      alert("This event type already exists!");
+      return;
+    }
+    setCustomEventPresets([...customEventPresets, trimmed]);
+    setNewPresetInput('');
+  };
+
+  const handleRemovePreset = (presetToRemove: string) => {
+    setCustomEventPresets(customEventPresets.filter(p => p !== presetToRemove));
+  };
+
   const [teamRosterText, setTeamRosterText] = useState(
     state.students.filter((s: Student) => s.associated_gym_id === initialData?.id && s.is_gym_member).map((s: Student) => s.name).join('\n')
   );
@@ -7978,7 +8126,8 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
       isSubTeam ? defaultCoachId : '',
       undefined,
       true, // Auto-reset invoice always defaults to true
-      !isSubTeam ? billingDay : 1 // Billing cycle is only in main gym profile
+      !isSubTeam ? billingDay : 1, // Billing cycle is only in main gym profile
+      customEventPresets
     );
   };
 
@@ -8132,11 +8281,68 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
 
       <div className="flex flex-col gap-3 mt-4">
         {!isSubTeam && (
-          <div className="space-y-1">
-            <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Billing Cycle Start Day</label>
-            <input type="number" min="1" max="31" value={billingDay} onChange={e => setBillingDay(parseInt(e.target.value) || 1)} placeholder="e.g. 20" className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
-            <p className="text-[8px] text-slate-400 mt-1 ml-1 leading-relaxed">By default, billing runs from month-to-month. If set to 20, sessions on or after the 20th are billed to the next month.</p>
-          </div>
+          <>
+            <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl space-y-3">
+              <div className="flex items-center gap-2">
+                <ClipboardCheck size={14} className="text-[#1e4da1] dark:text-blue-400" />
+                <span className="text-[8px] font-black uppercase text-slate-500 dark:text-slate-400">Custom Event Types (Presets)</span>
+              </div>
+              
+              <p className="text-[8px] text-slate-400 leading-relaxed">
+                Add and manage custom buttons that show up when logging a session for this gym. Add any preset (e.g. Clinic, Camp, Workshop) and delete options you do not need.
+              </p>
+
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {customEventPresets.map((preset, idx) => (
+                  <div 
+                    key={`${preset}-${idx}`}
+                    className="flex items-center gap-1.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-slate-600 shadow-sm"
+                  >
+                    <span className="text-[9px] font-black uppercase tracking-wider">{preset}</span>
+                    <button 
+                      type="button"
+                      onClick={() => handleRemovePreset(preset)}
+                      className="text-red-500 hover:text-red-700 p-0.5"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                ))}
+                {customEventPresets.length === 0 && (
+                  <p className="text-[8px] text-amber-500 font-bold uppercase py-1">No custom presets. Will fallback to default ones.</p>
+                )}
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                <input
+                  type="text"
+                  placeholder="E.G. CLINIC, CAMP, TRYOUT"
+                  value={newPresetInput}
+                  onChange={e => setNewPresetInput(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-white dark:bg-slate-700 rounded-lg text-[9px] font-black uppercase outline-none border border-slate-100 dark:border-slate-600 dark:text-white"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddPreset();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={handleAddPreset}
+                  className="bg-[#1e4da1] dark:bg-blue-600 text-white px-3 py-2 rounded-lg font-black text-[9px] uppercase hover:opacity-90"
+                >
+                  Add Preset
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Billing Cycle Start Day</label>
+              <input type="number" min="1" max="31" value={billingDay} onChange={e => setBillingDay(parseInt(e.target.value) || 1)} placeholder="e.g. 20" className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
+              <p className="text-[8px] text-slate-400 mt-1 ml-1 leading-relaxed">By default, billing runs from month-to-month. If set to 20, sessions on or after the 20th are billed to the next month.</p>
+            </div>
+          </>
         )}
         <div className="flex gap-2">
           <motion.button

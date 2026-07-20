@@ -74,3 +74,6 @@ CREATE POLICY "Users can manage their own team athletes"
 -- 8. Add auto_reset_invoice column to gyms and class_types
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS auto_reset_invoice BOOLEAN DEFAULT true;
 ALTER TABLE class_types ADD COLUMN IF NOT EXISTS auto_reset_invoice BOOLEAN DEFAULT true;
+
+-- 9. Add custom_event_presets column to gyms table
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS custom_event_presets text[] DEFAULT '{}';

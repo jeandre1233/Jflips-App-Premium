@@ -283,7 +283,12 @@ export const CalendarView = memo(({ sessions, classTypes, gyms, month, year, sch
                         {gym ? <Building2 size={14} /> : ((session.studentIds?.length || 0) > 1 ? <Users size={14} /> : <User size={14} />)}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-[11px] font-black text-[#1a1a1a] dark:text-slate-100 italic uppercase">{ct?.name || gym?.name || 'Session'}</p>
+                        <p className="text-[11px] font-black text-[#1a1a1a] dark:text-slate-100 italic uppercase">
+                          {(() => {
+                            const baseName = ct?.name || gym?.name || 'Session';
+                            return session.custom_event_name ? `${baseName} (${session.custom_event_name})` : baseName;
+                          })()}
+                        </p>
                         <p className="text-[9px] font-bold text-[#10b981] uppercase">
                           LOGGED • {gym ? `${session.hours_coached || gym.default_hours || 1} HRS` : `${session.studentIds?.length || 0} Athletes`}
                         </p>
@@ -595,7 +600,8 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                       {(() => {
                         const baseName = ct?.name || gym?.name || 'Session';
                         const hasCompInName = baseName.toLowerCase().includes('competition');
-                        return `${baseName}${session.is_competition && !hasCompInName ? ' Competition' : ''}`;
+                        const mainName = `${baseName}${session.is_competition && !hasCompInName ? ' Competition' : ''}`;
+                        return session.custom_event_name ? `${mainName} (${session.custom_event_name})` : mainName;
                       })()}
                     </p>
                     {session.is_competition && (

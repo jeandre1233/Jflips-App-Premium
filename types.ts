@@ -45,6 +45,7 @@ export interface Gym {
   secondary_coach_id?: string;
   auto_reset_invoice?: boolean;
   billing_day?: number;
+  custom_event_presets?: string[];
 }
 
 export interface ClassType {
@@ -65,6 +66,7 @@ export interface AttendanceSession {
   coach_id?: string;
   is_competition?: boolean;
   created_at?: string;
+  custom_event_name?: string;
 }
 
 export interface HistoryMonth {
