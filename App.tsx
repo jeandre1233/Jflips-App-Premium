@@ -81,9 +81,6 @@ import { User as SupabaseUser } from '@supabase/supabase-js';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { StatusBar, Style } from '@capacitor/status-bar';
-import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
-import { Capacitor } from '@capacitor/core';
 
 import { useNetworkStatus } from './src/hooks/useNetworkStatus';
 import ShareSignupLink from './src/components/ShareSignupLink';
@@ -92,7 +89,7 @@ import { addToQueue, getPendingItems, updateItemStatus, deleteSyncedItems } from
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { SyncStatusBadge } from './src/components/SyncStatusBadge';
 import { sendWhatsAppAttendanceQuery, sendWhatsAppInvoiceReminder } from './src/utils/whatsapp';
-import { sendClassReminderNotification, sendCycleMonthReminderNotification, getDiscordWebhookUrl, setDiscordWebhookUrl } from './src/utils/discordNotifications';
+import { sendCycleMonthReminderNotification, getDiscordWebhookUrl, setDiscordWebhookUrl } from './src/utils/discordNotifications';
 import { 
   initAuth as initGoogleAuth, 
   googleSignIn, 
@@ -239,34 +236,6 @@ async function generateIndemnityPDFFromStudent(student: Student) {
   }
 
   doc.save(`Indemnity_${studentName.replace(/\s+/g, '_')}.pdf`);
-}
-
-async function saveAndShareFile(dataUrl: string, fileName: string) {
-  if (Capacitor.isNativePlatform()) {
-    try {
-      const base64Data = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-      const savedFile = await Filesystem.writeFile({
-        path: fileName,
-        data: base64Data,
-        directory: Directory.Cache,
-      });
-
-      await Share.share({
-        title: fileName,
-        text: `Sharing ${fileName}`,
-        url: savedFile.uri,
-        dialogTitle: `Share ${fileName}`,
-      });
-    } catch (e) {
-      console.error('Native share failed', e);
-      alert('Failed to share file on mobile.');
-    }
-  } else {
-    const link = document.createElement('a');
-    link.download = fileName;
-    link.href = dataUrl;
-    link.click();
-  }
 }
 
 const THEME_KEY = 'jflips_theme_pref';
@@ -1153,62 +1122,10 @@ const App: React.FC = () => {
 
   // ── BACKGROUND NOTIFICATION WATCHER ─────────────────────────────────────────
   useEffect(() => {
-    if (!user || (state.schedules || []).length === 0) return;
+    if (!user) return;
 
     const runBackgroundChecks = async () => {
       const now = new Date();
-      const currentDay = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-      const currentHour = now.getHours();
-      const currentMin = now.getMinutes();
-      const currentMinutesTotal = currentHour * 60 + currentMin;
-      const todayDateStr = now.toISOString().slice(0, 10);
-
-      // 1️⃣ Class Schedulers (1 hour before scheduled class starting alert)
-      state.schedules.forEach(async (sched) => {
-        if (sched.day_of_week === currentDay) {
-          const timeParts = sched.time.split(':');
-          if (timeParts.length === 2) {
-            const schedHour = parseInt(timeParts[0], 10);
-            const schedMin = parseInt(timeParts[1], 10);
-            const schedMinutesTotal = schedHour * 60 + schedMin;
-
-            // Difference in minutes (class matches today, should be between 50 and 65 minutes in the future)
-            const diffMin = schedMinutesTotal - currentMinutesTotal;
-            if (diffMin >= 50 && diffMin <= 65) {
-              const alertKey = `discord_alert_sent_${sched.id}_${todayDateStr}`;
-              if (!localStorage.getItem(alertKey)) {
-                // Get Class/Gym name
-                const names = (sched.class_ids || []).map(cid => {
-                  const ct = state.classTypes.find(c => c.id === cid);
-                  const gym = state.gyms.find(g => g.id === cid);
-                  return ct?.name || gym?.name;
-                }).filter(Boolean);
-                const className = sched.label || names.join(' & ') || 'Class';
-                
-                // Get coach name if assigned
-                const coach = state.staff.find(s => s.id === sched.coach_id);
-                const coachName = coach?.name || (sched.coach_id === user.id ? state.profile.businessName : undefined);
-
-                const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-                
-                try {
-                  const success = await sendClassReminderNotification({
-                    className,
-                    time: sched.time,
-                    dayName: dayNames[sched.day_of_week],
-                    coachName
-                  });
-                  if (success) {
-                    localStorage.setItem(alertKey, 'true');
-                  }
-                } catch (err) {
-                  console.error('Failed to notify class schedule:', err);
-                }
-              }
-            }
-          }
-        }
-      });
 
       // 2️⃣ Cycle Month Invoicing Reminder (on 30th/end of month if active sessions exist)
       const currentDayOfMonth = now.getDate();
@@ -7105,7 +7022,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
         style: { borderRadius: '2rem' }
       });
       const fileName = `Invoice_${selectedGroup.label.replace(/\s+/g, '_')}.png`;
-      await saveAndShareFile(dataUrl, fileName);
+      const link = document.createElement('a'); link.download = fileName; link.href = dataUrl; link.click();
     } catch (e) {
       console.error('Invoice capture failed:', e);
     } finally { 
@@ -7164,12 +7081,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       
       doc.addImage(dataUrl, 'PNG', margin, margin, contentW, pdfH);
       const fileName = `Invoice_${selectedGroup.label.replace(/\s+/g, '_')}.pdf`;
-      if (Capacitor.isNativePlatform()) {
-        const pdfBase64 = doc.output('datauristring');
-        await saveAndShareFile(pdfBase64, fileName);
-      } else {
-        doc.save(fileName);
-      }
+      doc.save(fileName);
     } catch (e) {
       console.error('PDF generation failed:', e);
       alert('Failed to generate PDF');

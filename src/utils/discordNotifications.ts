@@ -74,33 +74,6 @@ export async function sendNewSignupNotification(data: {
 }
 
 /**
- * Send reminder 1 hour before a scheduled class.
- */
-export async function sendClassReminderNotification(data: {
-  className: string;
-  time: string;
-  dayName: string;
-  coachName?: string;
-}): Promise<boolean> {
-  const embed = {
-    title: '⏰ Class Starting in 1 Hour!',
-    description: `The class **${data.className}** is scheduled to start soon.`,
-    color: 16753920, // Orange
-    fields: [
-      { name: 'Class', value: data.className, inline: true },
-      { name: 'Time', value: `${data.dayName} at ${data.time}`, inline: true },
-      { name: 'Coach Assigned', value: data.coachName || 'Unassigned', inline: true },
-    ],
-    timestamp: new Date().toISOString(),
-    footer: {
-      text: 'JFLIPS Schedule Watcher',
-    }
-  };
-
-  return sendDiscordMessage(`⏰ **Upcoming Class Reminder:** *${data.className}* begins in 1 hour!`, [embed]);
-}
-
-/**
  * Send reminder on the 30th of the month to review logs and cycle the billing month.
  */
 export async function sendCycleMonthReminderNotification(data: {
