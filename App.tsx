@@ -83,7 +83,14 @@ import * as XLSX from 'xlsx';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+import { PushNotifications } from '@capacitor/push-notifications';
+
+interface NativeNotificationPlugin {
+  showTestNotification(options: { title: string; message: string }): Promise<{ status: string }>;
+}
+
+const NativeNotification = registerPlugin<NativeNotificationPlugin>('NativeNotification');
 
 import { useNetworkStatus } from './src/hooks/useNetworkStatus';
 import ShareSignupLink from './src/components/ShareSignupLink';
@@ -599,6 +606,33 @@ const App: React.FC = () => {
         .then(reg => console.log('Service Worker registered', reg))
         .catch(err => console.error('Service Worker registration failed', err));
     }
+
+    if (Capacitor.isNativePlatform()) {
+      // Request and register push notifications
+      PushNotifications.requestPermissions().then(result => {
+        if (result.receive === 'granted') {
+          PushNotifications.register();
+        }
+      }).catch(err => {
+        console.error('Push notification permissions error:', err);
+      });
+
+      PushNotifications.addListener('registration', token => {
+        console.log('Push registration success, token: ' + token.value);
+      });
+
+      PushNotifications.addListener('registrationError', error => {
+        console.error('Push registration error: ' + error.error);
+      });
+
+      PushNotifications.addListener('pushNotificationReceived', notification => {
+        console.log('Push notification received: ', notification);
+      });
+
+      PushNotifications.addListener('pushNotificationActionPerformed', notification => {
+        console.log('Push notification action performed: ', notification);
+      });
+    }
   }, []);
 
   const requestNotificationPermission = async () => {
@@ -652,6 +686,13 @@ const App: React.FC = () => {
     // Always show in-app toast as fallback/complement
     setToast({ title, body });
     setTimeout(() => setToast(null), 5000);
+
+    if (Capacitor.isNativePlatform()) {
+      NativeNotification.showTestNotification({ title, message: body })
+        .then(res => console.log('Native local notification sent successfully:', res))
+        .catch(err => console.error('Failed to send native local notification:', err));
+      return;
+    }
 
     if (notificationPermission === 'granted') {
       // Try service worker notification first (works better on mobile)
