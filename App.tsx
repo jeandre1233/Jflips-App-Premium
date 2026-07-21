@@ -3983,11 +3983,11 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
   const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>([]);
   const [isRosterView, setIsRosterView] = useState(false);
   const [selectedAthletes, setSelectedAthletes] = useState<string[]>([]);
-  const [teamHours, setTeamHours] = useState<Record<string, number>>({});
-  const [hours, setHours] = useState<number>(1);
+  const [teamHours, setTeamHours] = useState<Record<string, number | string>>({});
+  const [hours, setHours] = useState<number | string>(1);
   const [date, setDate] = useState(initialDate || new Date().toISOString().split('T')[0]);
   const [teamCoachIds, setTeamCoachIds] = useState<Record<string, string>>({});
-  const [compCoachHours, setCompCoachHours] = useState<Record<string, number>>({});
+  const [compCoachHours, setCompCoachHours] = useState<Record<string, number | string>>({});
   const [compTargetGymIds, setCompTargetGymIds] = useState<Record<string, string>>({});
   const [search, setSearch] = useState('');
   
@@ -4301,7 +4301,7 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
               return student?.associated_gym_id === targetTeamId || student?.sub_team_ids?.includes(targetTeamId);
             }),
             date,
-            hours: coachHrs,
+            hours: Number(coachHrs) || 1,
             coachId: coachId,
             isCompetition: true,
             customEventName: finalEventName
@@ -4327,7 +4327,7 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
             return student?.associated_gym_id === teamId;
           }),
           date,
-          hours: selectedTeamIds.length > 1 ? (teamHours[teamId] || hours) : hours,
+          hours: Number(selectedTeamIds.length > 1 ? (teamHours[teamId] !== "" && teamHours[teamId] !== undefined ? teamHours[teamId] : hours) : hours) || 1,
           coachId: teamCoachIds[teamId] || undefined,
           isCompetition,
           customEventName: finalEventName
@@ -4380,7 +4380,10 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
                 min="0.5"
                 max="24"
                 value={hours}
-                onChange={e => setHours(e.target.valueAsNumber || 1)}
+                onChange={e => {
+                  const val = e.target.value;
+                  setHours(val === '' ? '' : (parseFloat(val) || 0));
+                }}
                 className="w-full bg-white dark:bg-slate-800 border-none rounded-xl p-2.5 text-xs font-black text-center outline-none shadow-sm dark:text-white"
               />
             </div>
@@ -4508,8 +4511,14 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
                           step="0.5"
                           min="0.5"
                           max="24"
-                          value={compCoachHours[coach.id]}
-                          onChange={(e) => setCompCoachHours({ ...compCoachHours, [coach.id]: e.target.valueAsNumber || 0 })}
+                          value={compCoachHours[coach.id] !== undefined ? compCoachHours[coach.id] : ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setCompCoachHours({
+                              ...compCoachHours,
+                              [coach.id]: val === '' ? '' : (parseFloat(val) || 0)
+                            });
+                          }}
                           placeholder="Hrs"
                           className="w-full bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 rounded-lg p-2 text-xs font-black text-center outline-none shadow-sm dark:text-amber-100"
                           onClick={(e) => e.stopPropagation()}
@@ -4554,8 +4563,14 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
                           step="0.5"
                           min="0.5"
                           max="24"
-                          value={teamHours[team.id] || 1}
-                          onChange={e => setTeamHours(prev => ({ ...prev, [team.id]: e.target.valueAsNumber || 1 }))}
+                          value={teamHours[team.id] !== undefined ? teamHours[team.id] : ''}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setTeamHours(prev => ({
+                              ...prev,
+                              [team.id]: val === '' ? '' : (parseFloat(val) || 0)
+                            }));
+                          }}
                           className="w-full bg-transparent border-none p-2.5 text-xs font-black text-center outline-none dark:text-white"
                         />
                       </div>
@@ -8128,7 +8143,7 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
   const [selectedCoachIds, setSelectedCoachIds] = useState<string[]>(initialData?.coach_ids || []);
   const [defaultCoachId, setDefaultCoachId] = useState<string>(initialData?.default_coach_id || '');
   const [autoResetInvoice, setAutoResetInvoice] = useState<boolean>(initialData?.auto_reset_invoice !== false);
-  const [billingDay, setBillingDay] = useState<number>(initialData?.billing_day || 1);
+  const [billingDay, setBillingDay] = useState<number | string>(initialData?.billing_day || 1);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [customEventPresets, setCustomEventPresets] = useState<string[]>(() => {
@@ -8238,7 +8253,7 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
       isSubTeam ? defaultCoachId : '',
       undefined,
       true, // Auto-reset invoice always defaults to true
-      !isSubTeam ? billingDay : 1, // Billing cycle is only in main gym profile
+      !isSubTeam ? (Number(billingDay) || 1) : 1, // Billing cycle is only in main gym profile
       customEventPresets
     );
   };
@@ -8471,7 +8486,18 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
 
             <div className="space-y-1">
               <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Billing Cycle Start Day</label>
-              <input type="number" min="1" max="31" value={billingDay} onChange={e => setBillingDay(parseInt(e.target.value) || 1)} placeholder="e.g. 20" className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
+              <input
+                type="number"
+                min="1"
+                max="31"
+                value={billingDay}
+                onChange={e => {
+                  const val = e.target.value;
+                  setBillingDay(val === '' ? '' : (parseInt(val) || 1));
+                }}
+                placeholder="e.g. 20"
+                className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200"
+              />
               <p className="text-[8px] text-slate-400 mt-1 ml-1 leading-relaxed">By default, billing runs from month-to-month. If set to 20, sessions on or after the 20th are billed to the next month.</p>
             </div>
           </>
