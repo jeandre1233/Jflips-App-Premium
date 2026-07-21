@@ -576,6 +576,19 @@ export async function syncFinancesToGoogleSheet(
     const gym = sGyms.find((g: any) => g.id === sess.classTypeId);
     
     let price = ct ? ct.price : (gym ? gym.pay_amount : 0);
+    if (gym && sess.custom_event_name) {
+      const customPreset = gym.custom_event_presets?.find((p: string) => {
+        const name = p.includes(':') ? p.split(':')[0] : p;
+        return name.toLowerCase() === sess.custom_event_name?.toLowerCase();
+      });
+      if (customPreset && customPreset.includes(':')) {
+        const ratePart = customPreset.split(':')[1];
+        const parsed = parseFloat(ratePart);
+        if (!isNaN(parsed)) {
+          price = parsed;
+        }
+      }
+    }
     if (sess.is_competition && gym?.competition_rate) {
       price = gym.competition_rate;
     }

@@ -1939,6 +1939,19 @@ const App: React.FC = () => {
         const gym = (state.gyms || []).find(g => g.id === sess.classTypeId);
         
         let price = ct ? ct.price : (gym ? gym.pay_amount : 0);
+        if (gym && sess.custom_event_name) {
+          const customPreset = gym.custom_event_presets?.find(p => {
+            const name = p.includes(':') ? p.split(':')[0] : p;
+            return name.toLowerCase() === sess.custom_event_name?.toLowerCase();
+          });
+          if (customPreset && customPreset.includes(':')) {
+            const ratePart = customPreset.split(':')[1];
+            const parsed = parseFloat(ratePart);
+            if (!isNaN(parsed)) {
+              price = parsed;
+            }
+          }
+        }
         if (sess.is_competition && gym?.competition_rate) price = gym.competition_rate;
 
         let billingDay = gym?.billing_day || 1;
@@ -2288,7 +2301,20 @@ const App: React.FC = () => {
     sessionsToReset.forEach(sess => {
       const ct = (state.classTypes || []).find(c => c.id === sess.classTypeId);
       const gym = (state.gyms || []).find(g => g.id === sess.classTypeId);
-      const price = ct ? ct.price : (gym ? gym.pay_amount : 0);
+      let price = ct ? ct.price : (gym ? gym.pay_amount : 0);
+      if (gym && sess.custom_event_name) {
+        const customPreset = gym.custom_event_presets?.find(p => {
+          const name = p.includes(':') ? p.split(':')[0] : p;
+          return name.toLowerCase() === sess.custom_event_name?.toLowerCase();
+        });
+        if (customPreset && customPreset.includes(':')) {
+          const ratePart = customPreset.split(':')[1];
+          const parsed = parseFloat(ratePart);
+          if (!isNaN(parsed)) {
+            price = parsed;
+          }
+        }
+      }
       let sessionRev = 0;
       if (gym) {
         sessionRev = price * (sess.hours_coached || gym.default_hours || 1);
@@ -3990,7 +4016,7 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
       ? [...mainOrgTeam.custom_event_presets]
       : ['Class', 'Clinic', 'Camp', 'Workshop', 'Tryout'];
     
-    const filtered = presets.filter(p => p.toLowerCase() !== 'custom');
+    const filtered = presets.map(p => p.includes(':') ? p.split(':')[0] : p).filter(p => p.toLowerCase() !== 'custom');
     
     const seen = new Set<string>();
     const unique: string[] = [];
@@ -4008,7 +4034,8 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
   const [selectedPreset, setSelectedPreset] = useState<string>(() => {
     if (initialSession?.custom_event_name) {
       const mainOrgTeam = state.gyms.find(g => g.id === initialSession.classTypeId);
-      const savedPresets = mainOrgTeam?.custom_event_presets || ['Clinic', 'Class', 'Camp', 'Workshop', 'Tryout', 'Open Gym'];
+      const rawPresets = mainOrgTeam?.custom_event_presets || ['Clinic', 'Class', 'Camp', 'Workshop', 'Tryout', 'Open Gym'];
+      const savedPresets = rawPresets.map(p => p.includes(':') ? p.split(':')[0] : p);
       if (savedPresets.includes(initialSession.custom_event_name)) {
         return initialSession.custom_event_name;
       }
@@ -4061,7 +4088,8 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
       if (initialSession.custom_event_name) {
         setCustomEventName(initialSession.custom_event_name);
         const matchingTeam = state.gyms.find(g => g.id === initialSession.classTypeId);
-        const savedPresets = matchingTeam?.custom_event_presets || ['Clinic', 'Class', 'Camp', 'Workshop', 'Tryout', 'Open Gym'];
+        const rawPresets = matchingTeam?.custom_event_presets || ['Clinic', 'Class', 'Camp', 'Workshop', 'Tryout', 'Open Gym'];
+        const savedPresets = rawPresets.map(p => p.includes(':') ? p.split(':')[0] : p);
         if (savedPresets.includes(initialSession.custom_event_name)) {
           setSelectedPreset(initialSession.custom_event_name);
         } else {
@@ -7076,7 +7104,22 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
     }).flatMap(s => {
       const ct = (state.classTypes || []).find(c => c.id === s.classTypeId);
       const gym = (state.gyms || []).find(g => g.id === s.classTypeId);
-      const price = ct ? ct.price : (gym ? gym.pay_amount : 0);
+      
+      let price = ct ? ct.price : (gym ? gym.pay_amount : 0);
+      if (gym && s.custom_event_name) {
+        const customPreset = gym.custom_event_presets?.find(p => {
+          const name = p.includes(':') ? p.split(':')[0] : p;
+          return name.toLowerCase() === s.custom_event_name?.toLowerCase();
+        });
+        if (customPreset && customPreset.includes(':')) {
+          const ratePart = customPreset.split(':')[1];
+          const parsed = parseFloat(ratePart);
+          if (!isNaN(parsed)) {
+            price = parsed;
+          }
+        }
+      }
+
       const className = ct ? ct.name : (gym ? `${gym.name} Coaching` : 'Session');
       const baseClassName = className;
       const customSuffix = s.custom_event_name ? ` - ${s.custom_event_name}` : '';
@@ -7088,22 +7131,28 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
         }
 
         const lineTotal = currentPrice * (s.hours_coached || gym.default_hours || 1);
+        const displayName = s.custom_event_name 
+          ? `${s.custom_event_name} (${s.hours_coached || gym.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`
+          : `${baseClassName}${customSuffix} (${s.hours_coached || gym.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`;
 
         return [{
           ...s,
           targetStudentName: gym.name,
           displayPrice: lineTotal,
-          displayClassName: `${baseClassName}${customSuffix} (${s.hours_coached || gym.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`
+          displayClassName: displayName
         }];
       }
 
       const matching = (s.studentIds || []).filter(sid => billableIds.includes(sid));
       return matching.map(sid => {
+        const displayName = s.custom_event_name 
+          ? `${s.custom_event_name} (${s.hours_coached || gym?.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`
+          : `${baseClassName}${customSuffix}`;
         return {
           ...s,
           targetStudentName: state.students.find(st => st.id === sid)?.name || (sid === selectedGroup?.family_id ? selectedGroup.label : 'Client'),
           displayPrice: price || 0,
-          displayClassName: `${baseClassName}${customSuffix}`
+          displayClassName: displayName
         };
       });
     }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -7166,6 +7215,19 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       const gym = (state.gyms || []).find(g => g.id === s.classTypeId);
       
       let price = ct ? ct.price : (gym ? gym.pay_amount : 0);
+      if (gym && s.custom_event_name) {
+        const customPreset = gym.custom_event_presets?.find(p => {
+          const name = p.includes(':') ? p.split(':')[0] : p;
+          return name.toLowerCase() === s.custom_event_name?.toLowerCase();
+        });
+        if (customPreset && customPreset.includes(':')) {
+          const ratePart = customPreset.split(':')[1];
+          const parsed = parseFloat(ratePart);
+          if (!isNaN(parsed)) {
+            price = parsed;
+          }
+        }
+      }
       if (s.is_competition && gym?.competition_rate) {
         price = gym.competition_rate;
       }
@@ -8080,16 +8142,25 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
     });
   });
   const [newPresetInput, setNewPresetInput] = useState('');
+  const [newPresetRate, setNewPresetRate] = useState('');
 
   const handleAddPreset = () => {
-    const trimmed = newPresetInput.trim();
-    if (!trimmed) return;
-    if (customEventPresets.map(p => p.toLowerCase()).includes(trimmed.toLowerCase())) {
+    const trimmedName = newPresetInput.trim();
+    if (!trimmedName) return;
+
+    // Check if name already exists
+    const existingNames = customEventPresets.map(p => (p.includes(':') ? p.split(':')[0] : p).toLowerCase());
+    if (existingNames.includes(trimmedName.toLowerCase())) {
       alert("This event type already exists!");
       return;
     }
-    setCustomEventPresets([...customEventPresets, trimmed]);
+
+    const trimmedRate = newPresetRate.trim();
+    const finalPreset = trimmedRate ? `${trimmedName}:${trimmedRate}` : trimmedName;
+
+    setCustomEventPresets([...customEventPresets, finalPreset]);
     setNewPresetInput('');
+    setNewPresetRate('');
   };
 
   const handleRemovePreset = (presetToRemove: string) => {
@@ -8334,44 +8405,64 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
               </p>
 
               <div className="flex flex-wrap gap-1.5 pt-1">
-                {customEventPresets.map((preset, idx) => (
-                  <div 
-                    key={`${preset}-${idx}`}
-                    className="flex items-center gap-1.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-slate-600 shadow-sm"
-                  >
-                    <span className="text-[9px] font-black uppercase tracking-wider">{preset}</span>
-                    <button 
-                      type="button"
-                      onClick={() => handleRemovePreset(preset)}
-                      className="text-red-500 hover:text-red-700 p-0.5"
+                {customEventPresets.map((preset, idx) => {
+                  const [pName, pRate] = preset.includes(':') ? preset.split(':') : [preset, ''];
+                  return (
+                    <div 
+                      key={`${preset}-${idx}`}
+                      className="flex items-center gap-1.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-slate-600 shadow-sm"
                     >
-                      <X size={10} />
-                    </button>
-                  </div>
-                ))}
+                      <span className="text-[9px] font-black uppercase tracking-wider">
+                        {pName} {pRate ? `(R${pRate}/hr)` : ''}
+                      </span>
+                      <button 
+                        type="button"
+                        onClick={() => handleRemovePreset(preset)}
+                        className="text-red-500 hover:text-red-700 p-0.5"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  );
+                })}
                 {customEventPresets.length === 0 && (
                   <p className="text-[8px] text-amber-500 font-bold uppercase py-1">No custom presets. Will fallback to default ones.</p>
                 )}
               </div>
 
-              <div className="flex gap-2 pt-1">
-                <input
-                  type="text"
-                  placeholder="E.G. CLINIC, CAMP, TRYOUT"
-                  value={newPresetInput}
-                  onChange={e => setNewPresetInput(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-white dark:bg-slate-700 rounded-lg text-[9px] font-black uppercase outline-none border border-slate-100 dark:border-slate-600 dark:text-white"
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleAddPreset();
-                    }
-                  }}
-                />
+              <div className="flex flex-col gap-2 pt-1">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="E.G. CLINIC, CAMP, TRYOUT"
+                    value={newPresetInput}
+                    onChange={e => setNewPresetInput(e.target.value)}
+                    className="flex-[2] min-w-0 w-full px-3 py-2 bg-white dark:bg-slate-700 rounded-lg text-[9px] font-black uppercase outline-none border border-slate-100 dark:border-slate-600 dark:text-white"
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddPreset();
+                      }
+                    }}
+                  />
+                  <input
+                    type="number"
+                    placeholder="RATE (R/HR) OPTIONAL"
+                    value={newPresetRate}
+                    onChange={e => setNewPresetRate(e.target.value)}
+                    className="flex-1 min-w-0 w-full px-3 py-2 bg-white dark:bg-slate-700 rounded-lg text-[9px] font-black uppercase outline-none border border-slate-100 dark:border-slate-600 dark:text-white"
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddPreset();
+                      }
+                    }}
+                  />
+                </div>
                 <button
                   type="button"
                   onClick={handleAddPreset}
-                  className="bg-[#1e4da1] dark:bg-blue-600 text-white px-3 py-2 rounded-lg font-black text-[9px] uppercase hover:opacity-90"
+                  className="w-full bg-[#1e4da1] dark:bg-blue-600 text-white py-2.5 rounded-lg font-black text-[9px] uppercase hover:opacity-90 tracking-widest transition-all"
                 >
                   Add Preset
                 </button>
