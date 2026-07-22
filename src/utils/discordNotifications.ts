@@ -1,3 +1,11 @@
+export function isDiscordNotificationsEnabled(): boolean {
+  return localStorage.getItem('discord_notifications_enabled') === 'true';
+}
+
+export function setDiscordNotificationsEnabled(enabled: boolean): void {
+  localStorage.setItem('discord_notifications_enabled', enabled ? 'true' : 'false');
+}
+
 export function getDiscordWebhookUrl(): string | null {
   return localStorage.getItem('discord_webhook_url');
 }
@@ -11,6 +19,11 @@ export function setDiscordWebhookUrl(url: string): void {
 }
 
 export async function sendDiscordMessage(content: string, embeds?: any[]): Promise<boolean> {
+  if (!isDiscordNotificationsEnabled()) {
+    console.warn('Discord notifications are disabled. Skipping sending message.');
+    return false;
+  }
+
   const url = getDiscordWebhookUrl();
   if (!url) {
     console.warn('Discord webhook URL is not configured. Skipping sending message.');

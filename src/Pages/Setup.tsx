@@ -41,7 +41,7 @@ import {
   syncSchedulesToCalendar, 
   syncFinancesToGoogleSheet 
 } from '../utils/googleWorkspace';
-import { getDiscordWebhookUrl, setDiscordWebhookUrl } from '../utils/discordNotifications';
+import { getDiscordWebhookUrl, setDiscordWebhookUrl, isDiscordNotificationsEnabled, setDiscordNotificationsEnabled } from '../utils/discordNotifications';
 
 const athleteItemVariants = {
   hidden: { y: 15, opacity: 0 },
@@ -218,8 +218,15 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
     }
   };
 
+  const [discordEnabled, setDiscordEnabled] = useState(isDiscordNotificationsEnabled());
   const [discordWebhookInput, setDiscordWebhookInput] = useState(getDiscordWebhookUrl() || '');
   const [testStatus, setTestStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+
+  const handleToggleDiscord = (enabled: boolean) => {
+    setDiscordEnabled(enabled);
+    setDiscordNotificationsEnabled(enabled);
+    showToast(enabled ? 'Discord notifications enabled' : 'Discord notifications disabled', enabled ? 'success' : 'info');
+  };
 
   const handleTestDiscordWebhook = async () => {
     setTestStatus('sending');
@@ -247,7 +254,8 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
   const handleSaveDiscordWebhook = (e: React.FormEvent) => {
     e.preventDefault();
     setDiscordWebhookUrl(discordWebhookInput);
-    showToast('Discord Webhook URL saved successfully!', 'success');
+    setDiscordNotificationsEnabled(discordEnabled);
+    showToast('Discord settings saved successfully!', 'success');
   };
 
   const tabs = isOwner 
@@ -518,10 +526,33 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
             </form>
 
             <div className="bg-white dark:bg-slate-800/60 p-6 rounded-3xl border border-slate-50 dark:border-slate-800 shadow-sm space-y-4">
-              <div>
-                <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase italic">Discord Webhook Integration</h3>
-                <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider mt-0.5 leading-relaxed">Configure automated Discord messaging alerts for student signups, schedulers, and monthly billings.</p>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase italic">Discord Webhook Integration</h3>
+                    <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider ${discordEnabled ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'}`}>
+                      {discordEnabled ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                  <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider mt-0.5 leading-relaxed">Configure automated Discord messaging alerts for student signups, schedulers, and monthly billings.</p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleToggleDiscord(!discordEnabled)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${discordEnabled ? 'bg-[#1e4da1] dark:bg-blue-600' : 'bg-slate-200 dark:bg-slate-700'}`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${discordEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                  />
+                </button>
               </div>
+
+              {!discordEnabled && (
+                <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-900/40 p-3 rounded-xl text-[9px] font-bold text-amber-800 dark:text-amber-300">
+                  🚫 Discord notifications are currently <strong>disabled</strong>. No webhook alerts will be sent for signups or billing cycles.
+                </div>
+              )}
               
               <form onSubmit={handleSaveDiscordWebhook} className="space-y-3">
                 <input 
@@ -538,7 +569,7 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                     type="submit" 
                     className="w-full bg-[#1e4da1] dark:bg-blue-600 text-white py-3.5 px-2 rounded-xl font-black text-[8px] uppercase flex items-center justify-center gap-2"
                   >
-                    Save Webhook <Check size={14} />
+                    Save Settings <Check size={14} />
                   </motion.button>
                   
                   <motion.button 
