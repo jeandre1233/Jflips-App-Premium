@@ -595,6 +595,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
+  const [pushToken, setPushToken] = useState<string | null>(null);
 
   useEffect(() => {
     if ('Notification' in window) {
@@ -619,6 +620,7 @@ const App: React.FC = () => {
 
       PushNotifications.addListener('registration', token => {
         console.log('Push registration success, token: ' + token.value);
+        setPushToken(token.value);
       });
 
       PushNotifications.addListener('registrationError', error => {
@@ -744,6 +746,22 @@ const App: React.FC = () => {
   const [rosterTab, setRosterTab] = useState<'students' | 'classes' | 'schedule' | 'profile' | 'staff'>('students');
   const [rosterEntityType, setRosterEntityType] = useState<'athletes' | 'gyms' | 'teams'>('athletes');
   const isOwner = state.profile.role === 'owner';
+
+  // Save this device's push token against the logged-in user, so the
+  // send-push-notification Edge Function knows where to deliver alerts.
+  useEffect(() => {
+    if (!user || !pushToken) return;
+    supabase
+      .from('device_tokens')
+      .upsert(
+        { user_id: user.id, fcm_token: pushToken, platform: 'android', updated_at: new Date().toISOString() },
+        { onConflict: 'user_id,fcm_token' }
+      )
+      .then(({ error }) => {
+        if (error) console.error('Failed to save push token:', error.message);
+        else console.log('Push token saved for user', user.id);
+      });
+  }, [user, pushToken]);
 
   useEffect(() => {
     const checkInitialSession = async () => {
