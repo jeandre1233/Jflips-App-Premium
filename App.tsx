@@ -38,6 +38,7 @@ import {
   ZoomOut,
   BarChart3,
   UserCircle,
+  UserCheck,
   Upload,
   Loader2,
   AlertTriangle,
@@ -1155,10 +1156,11 @@ const App: React.FC = () => {
           bill_to_address: g.bill_to_address,
           bill_to_phone: g.bill_to_phone,
           parent_gym_id: g.parent_gym_id,
-          custom_event_presets: g.custom_event_presets || []
+          custom_event_presets: g.custom_event_presets || [],
+          coach_names: g.coach_names || []
         })),
         classTypes: (classesRes.data || []).map((ct: any) => ({ ...ct, studentIds: ct.enrolled_student_ids || [], coach_ids: ct.coach_ids || [] })),
-        sessions: (sessionsRes.data || []).map(s => ({ ...s, classTypeId: s.class_type_id, studentIds: s.student_ids || [], hours_coached: s.hours_coached, coach_id: s.coach_id, is_competition: s.is_competition, custom_event_name: s.custom_event_name })),
+        sessions: (sessionsRes.data || []).map(s => ({ ...s, classTypeId: s.class_type_id, studentIds: s.student_ids || [], hours_coached: s.hours_coached, coach_id: s.coach_id, is_competition: s.is_competition, custom_event_name: s.custom_event_name, covering_coach_name: s.covering_coach_name || s.covering_coach || undefined })),
         history: (historyRes.data || []).map(h => ({ 
           ...h, 
           monthName: h.month_name, 
@@ -1450,7 +1452,7 @@ const App: React.FC = () => {
     setIsSyncing(false);
   };
 
-  const handleSaveGym = async (name: string, sessionTypes: string, payAmount: number, gymType: 'tumbling' | 'cheer', defaultHours: number, teamAthleteNames: string[], billToName?: string, billToAddress?: string, billToPhone?: string, parentGymId?: string, competitionRate?: number, coachIds?: string[], defaultCoachId?: string, secondaryCoachId?: string, autoResetInvoice: boolean = true, billingDay: number = 1, customEventPresets?: string[]) => {
+  const handleSaveGym = async (name: string, sessionTypes: string, payAmount: number, gymType: 'tumbling' | 'cheer', defaultHours: number, teamAthleteNames: string[], billToName?: string, billToAddress?: string, billToPhone?: string, parentGymId?: string, competitionRate?: number, coachIds?: string[], defaultCoachId?: string, secondaryCoachId?: string, autoResetInvoice: boolean = true, billingDay: number = 1, customEventPresets?: string[], coachNames?: string[]) => {
     if (!user) return;
     setIsSyncing(true);
     const gymId = (editingGym && editingGym.id) ? editingGym.id : `gym_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
@@ -1478,14 +1480,16 @@ const App: React.FC = () => {
       secondary_coach_id: secondaryCoachId || null,
       auto_reset_invoice: autoResetInvoice,
       billing_day: billingDay,
-      custom_event_presets: customEventPresets || []
+      custom_event_presets: customEventPresets || [],
+      coach_names: coachNames || []
     };
 
     let { error: gymError } = await supabase.from('gyms').upsert(payload);
 
     if (gymError) {
-      if (gymError.message.includes('custom_event_presets') || gymError.message.includes('auto_reset_invoice') || gymError.message.includes('billing_day')) {
+      if (gymError.message.includes('coach_names') || gymError.message.includes('custom_event_presets') || gymError.message.includes('auto_reset_invoice') || gymError.message.includes('billing_day')) {
         const fallbackPayload = { ...payload };
+        delete (fallbackPayload as any).coach_names;
         delete (fallbackPayload as any).custom_event_presets;
         delete (fallbackPayload as any).auto_reset_invoice;
         delete (fallbackPayload as any).billing_day;
@@ -1496,7 +1500,6 @@ const App: React.FC = () => {
           setIsSyncing(false);
           return;
         }
-        alert("Gym saved, but custom presets or billing options require running the Supabase SQL schema update.");
       } else {
         console.error("Gym Save Error Details:", gymError);
         alert("Gym Save Error: " + gymError.message + "\n\nNote: If this is about missing columns, please update your Supabase schema using the SQL provided in the instructions.");
@@ -1790,7 +1793,8 @@ const App: React.FC = () => {
         user_id: targetUserId,
         coach_id: s.coachId || finalCoachId,
         is_competition: s.isCompetition || isCompetition || false,
-        custom_event_name: s.customEventName || null
+        custom_event_name: s.customEventName || null,
+        covering_coach_name: s.covering_coach_name || s.coveringCoachName || null
       }));
     } else {
       const sessionId = (editingSession && editingSession.id) ? editingSession.id : `sess_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
@@ -1803,7 +1807,8 @@ const App: React.FC = () => {
         user_id: targetUserId,
         coach_id: finalCoachId,
         is_competition: isCompetition || false,
-        custom_event_name: editingSession?.custom_event_name || null
+        custom_event_name: editingSession?.custom_event_name || null,
+        covering_coach_name: editingSession?.covering_coach_name || null
       }];
     }
 
@@ -1815,7 +1820,16 @@ const App: React.FC = () => {
       return;
     }
 
-    const { error } = await supabase.from('sessions').upsert(sessionsToUpsert);
+    let { error } = await supabase.from('sessions').upsert(sessionsToUpsert);
+    if (error && (error.message.includes('covering_coach_name') || error.message.includes('column'))) {
+      const fallbackSessions = sessionsToUpsert.map(s => {
+        const copy = { ...s };
+        delete copy.covering_coach_name;
+        return copy;
+      });
+      const fallbackRes = await supabase.from('sessions').upsert(fallbackSessions);
+      error = fallbackRes.error;
+    }
     if (error) { alert("Session Save Error: " + error.message); return; }
 
     // Owner Notification
@@ -4005,6 +4019,8 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
   const [hours, setHours] = useState<number | string>(1);
   const [date, setDate] = useState(initialDate || new Date().toISOString().split('T')[0]);
   const [teamCoachIds, setTeamCoachIds] = useState<Record<string, string>>({});
+  const [coveringCoachNames, setCoveringCoachNames] = useState<Record<string, string>>({});
+  const [customCoveringInputs, setCustomCoveringInputs] = useState<Record<string, string>>({});
   const [compCoachHours, setCompCoachHours] = useState<Record<string, number | string>>({});
   const [compTargetGymIds, setCompTargetGymIds] = useState<Record<string, string>>({});
   const [search, setSearch] = useState('');
@@ -4100,6 +4116,9 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
       setTeamHours({ [initialSession.classTypeId]: initialSession.hours_coached || 1 });
       setDate(initialSession.date);
       setTeamCoachIds({ [initialSession.classTypeId]: initialSession.coach_id || '' });
+      if (initialSession.covering_coach_name) {
+        setCoveringCoachNames({ [initialSession.classTypeId]: initialSession.covering_coach_name });
+      }
       if (initialSession.is_competition && initialSession.coach_id) {
         setCompCoachHours({ [initialSession.coach_id]: initialSession.hours_coached || 1 });
       }
@@ -4331,6 +4350,9 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
         const team = state.gyms.find(g => g.id === teamId);
         const isMainOrg = team && !team.parent_gym_id;
         const finalEventName = isMainOrg ? (selectedPreset === 'Custom' ? customEventName : selectedPreset) : undefined;
+        const covCoach = coveringCoachNames[teamId];
+        const customInput = customCoveringInputs[teamId];
+        const finalCoveringCoachName = covCoach === '__custom__' ? (customInput ? customInput.trim() : undefined) : (covCoach ? covCoach.trim() : undefined);
         return {
           id: (initialSession && initialSession.classTypeId === teamId) ? initialSession.id : undefined,
           classTypeId: teamId,
@@ -4348,7 +4370,8 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
           hours: Number(selectedTeamIds.length > 1 ? (teamHours[teamId] !== "" && teamHours[teamId] !== undefined ? teamHours[teamId] : hours) : hours) || 1,
           coachId: teamCoachIds[teamId] || undefined,
           isCompetition,
-          customEventName: finalEventName
+          customEventName: finalEventName,
+          covering_coach_name: finalCoveringCoachName
         };
       });
     }
@@ -4398,9 +4421,10 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
                 min="0.5"
                 max="24"
                 value={hours}
+                onFocus={e => e.target.select()}
                 onChange={e => {
                   const val = e.target.value;
-                  setHours(val === '' ? '' : (parseFloat(val) || 0));
+                  setHours(val === '' ? '' : (parseFloat(val) || ''));
                 }}
                 className="w-full bg-white dark:bg-slate-800 border-none rounded-xl p-2.5 text-xs font-black text-center outline-none shadow-sm dark:text-white"
               />
@@ -4530,11 +4554,12 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
                           min="0.5"
                           max="24"
                           value={compCoachHours[coach.id] !== undefined ? compCoachHours[coach.id] : ''}
+                          onFocus={e => e.target.select()}
                           onChange={(e) => {
                             const val = e.target.value;
                             setCompCoachHours({
                               ...compCoachHours,
-                              [coach.id]: val === '' ? '' : (parseFloat(val) || 0)
+                              [coach.id]: val === '' ? '' : (parseFloat(val) || '')
                             });
                           }}
                           placeholder="Hrs"
@@ -4582,11 +4607,12 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
                           min="0.5"
                           max="24"
                           value={teamHours[team.id] !== undefined ? teamHours[team.id] : ''}
+                          onFocus={e => e.target.select()}
                           onChange={e => {
                             const val = e.target.value;
                             setTeamHours(prev => ({
                               ...prev,
-                              [team.id]: val === '' ? '' : (parseFloat(val) || 0)
+                              [team.id]: val === '' ? '' : (parseFloat(val) || '')
                             }));
                           }}
                           className="w-full bg-transparent border-none p-2.5 text-xs font-black text-center outline-none dark:text-white"
@@ -4594,6 +4620,48 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
                       </div>
                     )}
                   </div>
+
+                  {(() => {
+                    const customNames = team.coach_names || [];
+                    const parentCustomNames = team.parent_gym_id ? (state.gyms.find(g => g.id === team.parent_gym_id)?.coach_names || []) : [];
+                    const staffNames = state.staff.map(s => s.name);
+                    const allAvailableNames = Array.from(new Set([...customNames, ...parentCustomNames, ...staffNames]));
+
+                    return (
+                      <div className="mt-2 space-y-1">
+                        <div className="flex items-center gap-1.5 px-1">
+                          <UserCheck size={11} className="text-blue-500" />
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400">
+                            Covering for Coach (Optional)
+                          </span>
+                        </div>
+                        <div className="flex bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
+                          <select
+                            value={coveringCoachNames[team.id] || ''}
+                            onChange={e => setCoveringCoachNames(prev => ({ ...prev, [team.id]: e.target.value }))}
+                            className="w-full bg-transparent border-none p-2.5 text-xs font-black outline-none dark:text-white appearance-none"
+                          >
+                            <option value="">- NO COVER (REGULAR COACH) -</option>
+                            {allAvailableNames.map((cName, cIdx) => (
+                              <option key={`cover-opt-${team.id}-${cName}-${cIdx}`} value={cName}>
+                                {cName}
+                              </option>
+                            ))}
+                            <option value="__custom__">+ Custom Name...</option>
+                          </select>
+                        </div>
+                        {coveringCoachNames[team.id] === '__custom__' && (
+                          <input
+                            type="text"
+                            placeholder="ENTER COACH NAME (E.G. BIANCA)"
+                            value={customCoveringInputs[team.id] || ''}
+                            onChange={e => setCustomCoveringInputs(prev => ({ ...prev, [team.id]: e.target.value }))}
+                            className="w-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs font-black uppercase outline-none dark:text-white"
+                          />
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               ))
             )}
@@ -7097,13 +7165,14 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
         const payRate = coach?.pay_rate || 0;
         const className = gym ? gym.name : 'Session';
         const baseClassName = className;
+        const coverSuffix = s.covering_coach_name ? ` - ${s.covering_coach_name}` : '';
         const customSuffix = s.custom_event_name ? ` - ${s.custom_event_name}` : '';
         
         return {
           ...s,
           targetStudentName: 'Coaching Fee',
           displayPrice: payRate * (s.hours_coached || 1),
-          displayClassName: `${baseClassName}${customSuffix}${s.is_competition ? ' Competition' : ''} (${s.hours_coached || 1} hrs)`
+          displayClassName: `${baseClassName}${coverSuffix}${customSuffix}${s.is_competition ? ' Competition' : ''} (${s.hours_coached || 1} hrs)`
         };
       }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     }
@@ -7153,8 +7222,9 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
         }
       }
 
-      const className = ct ? ct.name : (gym ? `${gym.name} Coaching` : 'Session');
+      const className = ct ? ct.name : (gym ? gym.name : 'Session');
       const baseClassName = className;
+      const coverSuffix = s.covering_coach_name ? ` - ${s.covering_coach_name}` : '';
       const customSuffix = s.custom_event_name ? ` - ${s.custom_event_name}` : '';
 
       if (gym && (gym.id === selectedGroup.family_id || gym.parent_gym_id === selectedGroup.family_id)) {
@@ -7165,8 +7235,8 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
 
         const lineTotal = currentPrice * (s.hours_coached || gym.default_hours || 1);
         const displayName = s.custom_event_name 
-          ? `${s.custom_event_name} (${s.hours_coached || gym.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`
-          : `${baseClassName}${customSuffix} (${s.hours_coached || gym.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`;
+          ? `${s.custom_event_name}${coverSuffix} (${s.hours_coached || gym.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`
+          : `${baseClassName}${coverSuffix}${customSuffix} (${s.hours_coached || gym.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`;
 
         return [{
           ...s,
@@ -7179,8 +7249,8 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       const matching = (s.studentIds || []).filter(sid => billableIds.includes(sid));
       return matching.map(sid => {
         const displayName = s.custom_event_name 
-          ? `${s.custom_event_name} (${s.hours_coached || gym?.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`
-          : `${baseClassName}${customSuffix}`;
+          ? `${s.custom_event_name}${coverSuffix} (${s.hours_coached || gym?.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`
+          : `${baseClassName}${coverSuffix}${customSuffix}`;
         return {
           ...s,
           targetStudentName: state.students.find(st => st.id === sid)?.name || (sid === selectedGroup?.family_id ? selectedGroup.label : 'Client'),
@@ -7889,10 +7959,10 @@ const NavButton = memo(({ active, icon, label, onClick }: { active: boolean, ico
 ));
 
 const Modal: React.FC<{ title: string, onClose: () => void, children: React.ReactNode }> = ({ title, onClose, children }) => (
-  <div className="fixed inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-4">
-    <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="bg-white dark:bg-[#1e293b] w-full max-w-sm rounded-t-[2rem] sm:rounded-[2rem] overflow-hidden shadow-2xl">
-      <div className="p-8 pb-3 flex justify-between items-center border-b border-slate-50 dark:border-slate-800"><h3 className="font-black text-[10px] uppercase tracking-widest text-[#94a3b8]">{title}</h3><button onClick={onClose} className="p-2 bg-slate-50 dark:bg-slate-800 rounded-lg text-[#94a3b8]"><X size={16} /></button></div>
-      <div className="p-8 pt-5 no-scrollbar overflow-y-auto max-h-[80vh]">{children}</div>
+  <div className="fixed inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm z-[100] flex items-end sm:items-center justify-center p-3 sm:p-4">
+    <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="bg-white dark:bg-[#1e293b] w-full max-w-lg rounded-t-[2rem] sm:rounded-[2rem] overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+      <div className="p-6 pb-3 flex justify-between items-center border-b border-slate-50 dark:border-slate-800 shrink-0"><h3 className="font-black text-[10px] uppercase tracking-widest text-[#94a3b8]">{title}</h3><button onClick={onClose} className="p-2 bg-slate-50 dark:bg-slate-800 rounded-lg text-[#94a3b8]"><X size={16} /></button></div>
+      <div className="p-6 pt-4 no-scrollbar overflow-y-auto flex-1">{children}</div>
     </motion.div>
   </div>
 );
@@ -8164,6 +8234,24 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
   const [billingDay, setBillingDay] = useState<number | string>(initialData?.billing_day || 1);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [coachNames, setCoachNames] = useState<string[]>(initialData?.coach_names || []);
+  const [newCoachNameInput, setNewCoachNameInput] = useState('');
+
+  const handleAddCoachName = () => {
+    const trimmed = newCoachNameInput.trim();
+    if (!trimmed) return;
+    if (coachNames.some(c => c.toLowerCase() === trimmed.toLowerCase())) {
+      alert("This coach name is already added.");
+      return;
+    }
+    setCoachNames([...coachNames, trimmed]);
+    setNewCoachNameInput('');
+  };
+
+  const handleRemoveCoachName = (nameToRemove: string) => {
+    setCoachNames(coachNames.filter(c => c !== nameToRemove));
+  };
+
   const [customEventPresets, setCustomEventPresets] = useState<string[]>(() => {
     const raw = initialData?.custom_event_presets || ['Class', 'Clinic', 'Camp', 'Workshop', 'Tryout'];
     const seen = new Set<string>();
@@ -8272,7 +8360,8 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
       undefined,
       true, // Auto-reset invoice always defaults to true
       !isSubTeam ? (Number(billingDay) || 1) : 1, // Billing cycle is only in main gym profile
-      customEventPresets
+      customEventPresets,
+      coachNames
     );
   };
 
@@ -8423,6 +8512,60 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
           )}
         </>
       )}
+
+      <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl space-y-3">
+        <div className="flex items-center gap-2">
+          <UserCheck size={14} className="text-[#1e4da1] dark:text-blue-400" />
+          <span className="text-[8px] font-black uppercase text-slate-500 dark:text-slate-400">Coaches / Covering Coaches (Names)</span>
+        </div>
+        <p className="text-[8px] text-slate-400 leading-relaxed">
+          Enter coach names (e.g. Bianca, Sarah) that can be selected when logging sessions for this gym or sub-team class.
+        </p>
+
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {coachNames.map((cName, cIdx) => (
+            <div 
+              key={`coach-name-chip-${cName}-${cIdx}`}
+              className="flex items-center gap-1.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-slate-600 shadow-sm"
+            >
+              <span className="text-[9px] font-black uppercase tracking-wider">{cName}</span>
+              <button 
+                type="button"
+                onClick={() => handleRemoveCoachName(cName)}
+                className="text-red-500 hover:text-red-700 p-0.5"
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ))}
+          {coachNames.length === 0 && (
+            <p className="text-[8px] text-slate-400 font-bold uppercase py-1">No custom coach names added yet.</p>
+          )}
+        </div>
+
+        <div className="flex gap-2 pt-1">
+          <input
+            type="text"
+            placeholder="E.G. BIANCA, SARAH"
+            value={newCoachNameInput}
+            onChange={e => setNewCoachNameInput(e.target.value)}
+            className="flex-1 min-w-0 w-full px-3 py-2 bg-white dark:bg-slate-700 rounded-lg text-[9px] font-black uppercase outline-none border border-slate-100 dark:border-slate-600 dark:text-white"
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleAddCoachName();
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={handleAddCoachName}
+            className="bg-[#1e4da1] dark:bg-blue-600 text-white px-3 py-2 rounded-lg font-black text-[9px] uppercase hover:opacity-90 tracking-widest transition-all shrink-0"
+          >
+            Add Coach
+          </button>
+        </div>
+      </div>
 
       <div className="flex flex-col gap-3 mt-4">
         {!isSubTeam && (
