@@ -500,9 +500,9 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                 <div className="grid grid-cols-2 gap-3">
                   <input placeholder="BRANCH" value={profileForm.branchCode} onChange={e => setProfileForm({ ...profileForm, branchCode: e.target.value })} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
                   <select value={profileForm.accountType} onChange={e => setProfileForm({ ...profileForm, accountType: e.target.value })} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none">
-                    <option value="Current">Current</option>
-                    <option value="Savings">Savings</option>
-                    <option value="Transact">Transact</option>
+                    <option value="Current" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Current</option>
+                    <option value="Savings" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Savings</option>
+                    <option value="Transact" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Transact</option>
                   </select>
                 </div>
               </div>
@@ -514,9 +514,9 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                 <div className="grid grid-cols-2 gap-3">
                   <input placeholder="BRANCH" value={profileForm.bizBranchCode || ''} onChange={e => setProfileForm({ ...profileForm, bizBranchCode: e.target.value })} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
                   <select value={profileForm.bizAccountType || 'Current'} onChange={e => setProfileForm({ ...profileForm, bizAccountType: e.target.value })} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none">
-                    <option value="Current">Current</option>
-                    <option value="Savings">Savings</option>
-                    <option value="Transact">Transact</option>
+                    <option value="Current" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Current</option>
+                    <option value="Savings" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Savings</option>
+                    <option value="Transact" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Transact</option>
                   </select>
                 </div>
               </div>
@@ -862,7 +862,21 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                       </div>
                     </div>
                     {isOwner ? (
-                      <ChevronRight size={18} className="text-slate-300" />
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRemoveSchedule(item.id);
+                          }}
+                          className="p-2 text-slate-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl transition-all"
+                          title="Delete Schedule"
+                          aria-label="Delete Schedule"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                        <ChevronRight size={18} className="text-slate-300" />
+                      </div>
                     ) : (
                       <span className="text-[7px] font-black text-[#1e4da1] bg-[#eff6ff] dark:bg-blue-900/30 px-2 py-1 rounded uppercase tracking-wider">{item.time}</span>
                     )}

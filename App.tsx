@@ -2884,7 +2884,17 @@ const App: React.FC = () => {
           ) : showModal === 'class' ? (
             <ClassTypeForm students={state.students || []} gyms={state.gyms || []} staff={state.staff || []} isOwner={state.profile.role === 'owner'} initialData={editingClassType || undefined} onSubmit={handleSaveClassType} onCancel={() => setShowModal(null)} />
           ) : showModal === 'schedule' ? (
-            <ScheduleForm students={state.students || []} classTypes={state.classTypes || []} gyms={state.gyms || []} staff={state.staff || []} isOwner={state.profile.role === 'owner'} initialData={editingSchedule || undefined} onSubmit={handleSaveSchedule} onCancel={() => setShowModal(null)} />
+            <ScheduleForm
+              students={state.students || []}
+              classTypes={state.classTypes || []}
+              gyms={state.gyms || []}
+              staff={state.staff || []}
+              isOwner={state.profile.role === 'owner'}
+              initialData={editingSchedule || undefined}
+              onSubmit={handleSaveSchedule}
+              onCancel={() => setShowModal(null)}
+              onDelete={editingSchedule ? (id) => { removeSchedule(id); setShowModal(null); } : undefined}
+            />
           ) : showModal === 'staff' ? (
             <StaffForm 
               initialData={editingStaff || undefined} 
@@ -4508,11 +4518,11 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
                         <select
                           value={compTargetGymIds[parentTeam.id] || ''}
                           onChange={e => setCompTargetGymIds(prev => ({ ...prev, [parentTeam.id]: e.target.value }))}
-                          className="w-full bg-white dark:bg-slate-800 border border-amber-100 dark:border-amber-800/40 rounded-xl p-2.5 text-xs font-black outline-none shadow-sm dark:text-white appearance-none"
+                          className="w-full bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-amber-100 dark:border-amber-800/40 rounded-xl p-2.5 text-xs font-black outline-none shadow-sm appearance-none cursor-pointer"
                         >
-                          <option value="">- All {parentTeam.name} -</option>
+                          <option value="" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">- All {parentTeam.name} -</option>
                           {subTeams.map((sub, sIdx) => (
-                            <option key={`subteam-opt-${sub.id}-${sIdx}`} value={sub.id}>
+                            <option key={`subteam-opt-${sub.id}-${sIdx}`} value={sub.id} className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">
                               {sub.name}
                             </option>
                           ))}
@@ -4590,11 +4600,11 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
                     <select
                       value={teamCoachIds[team.id] || ''}
                       onChange={e => setTeamCoachIds(prev => ({ ...prev, [team.id]: e.target.value }))}
-                      className="flex-1 bg-transparent border-none p-2.5 text-xs font-black outline-none dark:text-white appearance-none"
+                      className="flex-1 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border-none p-2.5 text-xs font-black outline-none appearance-none cursor-pointer"
                     >
-                      <option value="">- MYSELF -</option>
+                      <option value="" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">- MYSELF -</option>
                       {coachOptions.map((s, sIdx) => (
-                        <option key={`coach-opt-${s.id}-${sIdx}`} value={s.id}>
+                        <option key={`coach-opt-${s.id}-${sIdx}`} value={s.id} className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">
                           {s.name} {(team.coach_ids || []).includes(s.id) ? '★' : ''}
                         </option>
                       ))}
@@ -4640,15 +4650,15 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
                           <select
                             value={coveringCoachNames[team.id] || ''}
                             onChange={e => setCoveringCoachNames(prev => ({ ...prev, [team.id]: e.target.value }))}
-                            className="w-full bg-transparent border-none p-2.5 text-xs font-black outline-none dark:text-white appearance-none"
+                            className="w-full bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border-none p-2.5 text-xs font-black outline-none appearance-none cursor-pointer"
                           >
-                            <option value="">- NO COVER (REGULAR COACH) -</option>
+                            <option value="" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">- NO COVER (REGULAR COACH) -</option>
                             {allAvailableNames.map((cName, cIdx) => (
-                              <option key={`cover-opt-${team.id}-${cName}-${cIdx}`} value={cName}>
+                              <option key={`cover-opt-${team.id}-${cName}-${cIdx}`} value={cName} className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">
                                 {cName}
                               </option>
                             ))}
-                            <option value="__custom__">+ Custom Name...</option>
+                            <option value="__custom__" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">+ Custom Name...</option>
                           </select>
                         </div>
                         {coveringCoachNames[team.id] === '__custom__' && (
@@ -5978,13 +5988,13 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
                   onChange={(e) => setStatusFilter(e.target.value)}
                   className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-150 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-indigo-500 transition-colors cursor-pointer"
                 >
-                  <option value="All">All Statuses</option>
-                  <option value="New">New</option>
-                  <option value="Added to Community">Added to Community</option>
-                  <option value="Contacted">Contacted</option>
-                  <option value="Active Athlete">Active Athlete</option>
-                  <option value="Waiting List">Waiting List</option>
-                  <option value="Declined">Declined</option>
+                  <option value="All" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">All Statuses</option>
+                  <option value="New" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">New</option>
+                  <option value="Added to Community" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">Added to Community</option>
+                  <option value="Contacted" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">Contacted</option>
+                  <option value="Active Athlete" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">Active Athlete</option>
+                  <option value="Waiting List" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">Waiting List</option>
+                  <option value="Declined" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">Declined</option>
                 </select>
 
                 {/* Export CSV */}
@@ -6262,14 +6272,14 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
               <select
                 value={editingReg.status || 'New'}
                 onChange={(e) => setEditingReg((prev: any) => ({ ...prev, status: e.target.value }))}
-                className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-bold"
+                className="w-full px-4 py-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-bold"
               >
-                <option value="New">New</option>
-                <option value="Added to Community">Added to Community</option>
-                <option value="Contacted">Contacted</option>
-                <option value="Active Athlete">Active Athlete</option>
-                <option value="Waiting List">Waiting List</option>
-                <option value="Declined">Declined</option>
+                <option value="New" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">New</option>
+                <option value="Added to Community" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">Added to Community</option>
+                <option value="Contacted" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">Contacted</option>
+                <option value="Active Athlete" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">Active Athlete</option>
+                <option value="Waiting List" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">Waiting List</option>
+                <option value="Declined" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">Declined</option>
               </select>
             </div>
 
@@ -6376,10 +6386,10 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
                   <select
                     value={editingReg.preferred_parent_to_contact || 'First Parent'}
                     onChange={(e) => setEditingReg((prev: any) => ({ ...prev, preferred_parent_to_contact: e.target.value }))}
-                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500 font-semibold"
                   >
-                    <option value="First Parent">First Parent</option>
-                    <option value="Second Parent">Second Parent</option>
+                    <option value="First Parent" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">First Parent</option>
+                    <option value="Second Parent" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">Second Parent</option>
                   </select>
                 </div>
               </div>
@@ -6689,10 +6699,10 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
         {isOwner && (
           <div className="space-y-2">
             <label className="text-[10px] font-black text-[#94a3b8] uppercase px-1">Assign Coach</label>
-            <select value={coachId} onChange={e => setCoachId(e.target.value)} className="w-full bg-white dark:bg-slate-800 border-none rounded-2xl p-4 text-sm font-black dark:text-slate-200 shadow-sm outline-none appearance-none">
-              <option value="">- MYSELF -</option>
+            <select value={coachId} onChange={e => setCoachId(e.target.value)} className="w-full bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border-none rounded-2xl p-4 text-sm font-black shadow-sm outline-none appearance-none cursor-pointer">
+              <option value="" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">- MYSELF -</option>
               {coachOptions.map((s, idx) => (
-                <option key={s.id || `coach-reg-${idx}`} value={s.id}>
+                <option key={s.id || `coach-reg-${idx}`} value={s.id} className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">
                   {s.name} {assignedCoachIds.includes(s.id) ? '★' : ''}
                 </option>
               ))}
@@ -8852,8 +8862,9 @@ const ScheduleForm: React.FC<{
   isOwner: boolean,
   initialData?: ClassSchedule,
   onSubmit: (classIds: string[], dayOfWeek: number, time: string, label?: string, color?: string) => void,
-  onCancel: () => void
-}> = ({ students, classTypes, gyms, staff, isOwner, initialData, onSubmit, onCancel }) => {
+  onCancel: () => void,
+  onDelete?: (id: string) => void
+}> = ({ students, classTypes, gyms, staff, isOwner, initialData, onSubmit, onCancel, onDelete }) => {
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>(initialData?.class_ids || []);
   const [dayOfWeek, setDayOfWeek] = useState(initialData?.day_of_week ?? 1);
   const [time, setTime] = useState(initialData?.time || '16:00');
@@ -8915,7 +8926,7 @@ const ScheduleForm: React.FC<{
   };
 
   return (
-    <div className="space-y-4 max-h-[70vh] overflow-y-auto no-scrollbar">
+    <div className="space-y-4 pb-6">
       <div className="space-y-1">
         <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Class / Gym / Team (Select Multiple)</label>
         <div className="space-y-1.5 mt-1 max-h-40 overflow-y-auto pr-1">
@@ -8959,7 +8970,11 @@ const ScheduleForm: React.FC<{
         <div className="space-y-1">
           <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Day</label>
           <select value={dayOfWeek} onChange={e => setDayOfWeek(Number(e.target.value))} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none">
-            {DAY_OPTIONS.map((d, idx) => <option key={d.value || `day-${idx}`} value={d.value}>{d.label}</option>)}
+            {DAY_OPTIONS.map((d, idx) => (
+              <option key={d.value || `day-${idx}`} value={d.value} className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">
+                {d.label}
+              </option>
+            ))}
           </select>
         </div>
         <div className="space-y-1">
@@ -8985,9 +9000,40 @@ const ScheduleForm: React.FC<{
           ))}
         </div>
       </div>
-      <div className="flex gap-2 mt-4">
-        <motion.button whileTap={{ scale: 0.95 }} onClick={() => { if (selectedClassIds.length === 0) return alert('Select at least one class or gym'); let finalColor = color; if (athleteIds.length > 0) { finalColor += '|' + athleteIds.join(','); } onSubmit(selectedClassIds, dayOfWeek, time, label || undefined, finalColor); }} className="flex-[4] bg-[#1e4da1] dark:bg-blue-600 text-white py-4 rounded-xl font-black text-[10px] uppercase shadow-lg">Save Schedule</motion.button>
-        <motion.button whileTap={{ scale: 0.9 }} onClick={onCancel} className="flex-1 bg-slate-100 dark:bg-slate-800 text-[#94a3b8] rounded-xl flex items-center justify-center"><X size={16} /></motion.button>
+      <div className="flex flex-col gap-2.5 mt-6">
+        <div className="flex gap-2">
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              if (selectedClassIds.length === 0) return alert('Select at least one class or gym');
+              let finalColor = color;
+              if (athleteIds.length > 0) {
+                finalColor += '|' + athleteIds.join(',');
+              }
+              onSubmit(selectedClassIds, dayOfWeek, time, label || undefined, finalColor);
+            }}
+            className="flex-[4] bg-[#1e4da1] dark:bg-blue-600 text-white py-4 rounded-xl font-black text-[10px] uppercase shadow-lg"
+          >
+            Save Schedule
+          </motion.button>
+          <motion.button whileTap={{ scale: 0.9 }} onClick={onCancel} className="flex-1 bg-slate-100 dark:bg-slate-800 text-[#94a3b8] rounded-xl flex items-center justify-center font-black text-[10px] uppercase">
+            Cancel
+          </motion.button>
+        </div>
+        {initialData && onDelete && (
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            type="button"
+            onClick={() => {
+              if (confirm("Are you sure you want to delete this schedule item?")) {
+                onDelete(initialData.id);
+              }
+            }}
+            className="w-full py-3.5 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 border border-red-200 dark:border-red-900/50 rounded-xl font-black text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all"
+          >
+            <Trash2 size={14} /> Delete Schedule
+          </motion.button>
+        )}
       </div>
     </div>
   );
