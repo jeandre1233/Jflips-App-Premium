@@ -4226,7 +4226,9 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
 
   const coachOptions = useMemo(() => {
     if (!isOwner && state.profile.id) {
-      return [{ id: state.profile.id, name: state.profile.businessName || 'Me', role: 'coach' } as any];
+      const self = { id: state.profile.id, name: state.profile.businessName || 'Me', role: 'coach' };
+      const others = state.staff.filter(s => s.id !== state.profile.id);
+      return [self, ...others];
     }
     const assigned = state.staff.filter(s => assignedCoachIds.includes(s.id));
     const others = state.staff.filter(s => !assignedCoachIds.includes(s.id));
@@ -4319,7 +4321,7 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
           const targetTeamId = compTargetGymIds[teamId] || teamId;
           const targetTeam = state.gyms.find(g => g.id === targetTeamId);
           const isMainOrg = targetTeam && !targetTeam.parent_gym_id;
-          const finalEventName = isMainOrg ? (selectedPreset === 'Custom' ? customEventName : selectedPreset) : undefined;
+          const finalEventName = gymType === 'tumbling' ? (selectedPreset === 'Custom' ? customEventName : selectedPreset) : undefined;
           
           sessions.push({
             id: undefined,
@@ -4348,8 +4350,7 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
     } else {
       sessions = selectedTeamIds.map(teamId => {
         const team = state.gyms.find(g => g.id === teamId);
-        const isMainOrg = team && !team.parent_gym_id;
-        const finalEventName = isMainOrg ? (selectedPreset === 'Custom' ? customEventName : selectedPreset) : undefined;
+        const finalEventName = gymType === 'tumbling' ? (selectedPreset === 'Custom' ? customEventName : selectedPreset) : undefined;
         const covCoach = coveringCoachNames[teamId];
         const customInput = customCoveringInputs[teamId];
         const finalCoveringCoachName = covCoach === '__custom__' ? (customInput ? customInput.trim() : undefined) : (covCoach ? covCoach.trim() : undefined);
@@ -4432,11 +4433,11 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
           )}
         </div>
 
-        {activeTeams.some(t => !t.parent_gym_id) && (
+        {gymType === 'tumbling' && activeTeams.length > 0 && (
           <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-2xl space-y-3">
             <div className="flex items-center gap-2">
               <ClipboardCheck size={14} className="text-blue-500" />
-              <span className="text-[9px] font-black uppercase text-blue-600 dark:text-blue-400">Main Org Event Type</span>
+              <span className="text-[9px] font-black uppercase text-blue-600 dark:text-blue-400">Gym Event Type</span>
             </div>
             
             <div className="grid grid-cols-3 gap-2">
@@ -4479,12 +4480,12 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
           </div>
         )}
 
-        {(isCompetition || (isOwner && (activeTeams.length > 1 || gymType === 'cheer'))) && (
+        {activeTeams.length > 0 && (
           <div className="space-y-3">
             <div className="flex items-center gap-2 px-1">
               <UserCircle size={14} className="text-blue-500" />
               <span className="text-[9px] font-black uppercase text-blue-600 dark:text-blue-400">
-                {isCompetition ? 'Attending Coaches' : 'Assigned Coaches'}
+                {isCompetition ? 'Attending Coaches' : 'Assigned Coach & Covering'}
               </span>
             </div>
             
