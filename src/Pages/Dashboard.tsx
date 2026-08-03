@@ -18,7 +18,8 @@ import {
   ClassType, 
   Gym, 
   ClassSchedule, 
-  HistoryMonth 
+  HistoryMonth,
+  getStudentSessionPrice 
 } from '../../types';
 import { SyncStatusBadge } from '../components/SyncStatusBadge';
 
@@ -372,7 +373,12 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
     if (gym) {
       return acc + (price * (sess.hours_coached || gym.default_hours || 1));
     }
-    return acc + (price * (sess.studentIds?.length || 0));
+    const className = ct ? ct.name : '';
+    const sessionSum = (sess.studentIds || []).reduce((sum, sid) => {
+      const student = (state.students || []).find(s => s.id === sid);
+      return sum + getStudentSessionPrice(student, sess, price, className);
+    }, 0);
+    return acc + sessionSum;
   }, 0), [state.sessions, state.classTypes, state.gyms]);
 
   const staffPay = useMemo(() => {

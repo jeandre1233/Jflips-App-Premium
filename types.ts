@@ -24,6 +24,27 @@ export interface Student {
   signature_data?: string; // Base64 signature
   is_cheer?: boolean;
   sub_team_ids?: string[];
+  custom_group_rate?: number;
+  custom_private_rate?: number;
+}
+
+export function getStudentSessionPrice(
+  student: Student | undefined,
+  session: { custom_event_name?: string },
+  basePrice: number,
+  className?: string
+): number {
+  if (!student) return basePrice;
+  const eventName = (session.custom_event_name || className || '').toLowerCase();
+  const isPrivate = eventName.includes('private');
+
+  if (isPrivate && student.custom_private_rate != null && Number(student.custom_private_rate) > 0) {
+    return Number(student.custom_private_rate);
+  }
+  if (!isPrivate && student.custom_group_rate != null && Number(student.custom_group_rate) > 0) {
+    return Number(student.custom_group_rate);
+  }
+  return basePrice;
 }
 
 export interface Gym {

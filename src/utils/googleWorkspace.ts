@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { supabase } from '../../supabase';
+import { getStudentSessionPrice } from '../../types';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -593,16 +594,19 @@ export async function syncFinancesToGoogleSheet(
       price = gym.competition_rate;
     }
 
+    const className = ct?.name || gym?.name || 'Session';
     let revenue = 0;
     if (gym) {
       revenue = price * (sess.hours_coached || gym.default_hours || 1);
     } else {
-      revenue = price * (sess.studentIds?.length || 0);
+      revenue = (sess.studentIds || []).reduce((sum: number, sid: string) => {
+        const student = sStudents.find((s: any) => s.id === sid);
+        return sum + getStudentSessionPrice(student, sess, price, className);
+      }, 0);
     }
 
     const coach = sStaff.find((s: any) => s.id === sess.coach_id);
     const coachName = coach ? coach.name : 'Unassigned';
-    const className = ct?.name || gym?.name || 'Session';
 
     return {
       date: sess.date || new Date().toISOString().split('T')[0],

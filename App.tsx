@@ -75,7 +75,7 @@ import {
   Globe,
   Link
 } from 'lucide-react';
-import { View, Student, Gym, ClassType, AttendanceSession, AppState, HistoryMonth, Profile, Payment, ClassSchedule, Staff, InvoiceSnapshot, AppNotification, Competition } from './types';
+import { View, Student, Gym, ClassType, AttendanceSession, AppState, HistoryMonth, Profile, Payment, ClassSchedule, Staff, InvoiceSnapshot, AppNotification, Competition, getStudentSessionPrice } from './types';
 import { toPng } from 'html-to-image';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
@@ -1994,12 +1994,16 @@ const App: React.FC = () => {
         const { monthName, year } = getSessionBillingMonth(sess.date, billingDay);
         const monthLabelKey = `${monthName} ${year}`;
 
+        const className = ct ? ct.name : '';
         // -- Global --
         let sessionRev = 0;
         if (gym) {
           sessionRev = price * (sess.hours_coached || gym.default_hours || 1);
         } else {
-          sessionRev = price * (sess.studentIds?.length || 0);
+          sessionRev = (sess.studentIds || []).reduce((sum, sid) => {
+            const student = state.students.find(s => s.id === sid);
+            return sum + getStudentSessionPrice(student, sess, price, className);
+          }, 0);
         }
         
         if (!globalRevByMonth.has(monthLabelKey)) {
@@ -2027,14 +2031,17 @@ const App: React.FC = () => {
           if (gym && (gym.id === famId || gym.parent_gym_id === famId)) {
             famRev = price * (sess.hours_coached || gym.default_hours || 1);
           } else {
-            const count = (sess.studentIds || []).filter(sid => {
+            const familyStudents = (sess.studentIds || []).filter(sid => {
               const student = state.students.find(st => st.id === sid);
               if (!student) return false;
               const studentFamId = student.groupKey || student.id;
               const studentGym = state.gyms.find(g => g.id === studentFamId);
               return studentFamId === famId || studentGym?.parent_gym_id === famId;
-            }).length;
-            famRev = price * count;
+            });
+            famRev = familyStudents.reduce((sum, sid) => {
+              const student = state.students.find(st => st.id === sid);
+              return sum + getStudentSessionPrice(student, sess, price, className);
+            }, 0);
           }
 
           if (famRev > 0) {
@@ -2351,7 +2358,11 @@ const App: React.FC = () => {
       if (gym) {
         sessionRev = price * (sess.hours_coached || gym.default_hours || 1);
       } else {
-        sessionRev = price * (sess.studentIds?.length || 0);
+        const className = ct ? ct.name : '';
+        sessionRev = (sess.studentIds || []).reduce((sum, sid) => {
+          const student = state.students.find(s => s.id === sid);
+          return sum + getStudentSessionPrice(student, sess, price, className);
+        }, 0);
       }
 
       let billingDay = gym?.billing_day || 1;
@@ -7259,13 +7270,15 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
 
       const matching = (s.studentIds || []).filter(sid => billableIds.includes(sid));
       return matching.map(sid => {
+        const studentObj = state.students.find(st => st.id === sid);
+        const studentPrice = getStudentSessionPrice(studentObj, s, price, baseClassName);
         const displayName = s.custom_event_name 
           ? `${s.custom_event_name}${coverSuffix} (${s.hours_coached || gym?.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`
           : `${baseClassName}${coverSuffix}${customSuffix}`;
         return {
           ...s,
-          targetStudentName: state.students.find(st => st.id === sid)?.name || (sid === selectedGroup?.family_id ? selectedGroup.label : 'Client'),
-          displayPrice: price || 0,
+          targetStudentName: studentObj?.name || (sid === selectedGroup?.family_id ? selectedGroup.label : 'Client'),
+          displayPrice: studentPrice || 0,
           displayClassName: displayName
         };
       });
@@ -7349,7 +7362,8 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       if (gym && (gym.id === group.family_id || gym.parent_gym_id === group.family_id)) {
         return acc + (price * (s.hours_coached || gym.default_hours || 1));
       } else {
-        const countInSession = (s.studentIds || []).filter(sid => {
+        const className = ct ? ct.name : (gym ? gym.name : '');
+        const matchingStudents = (s.studentIds || []).filter(sid => {
           if (monthLabel) {
             const student = state.students.find(st => st.id === sid);
             if (!student) return false;
@@ -7358,8 +7372,12 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
             return studentFamId === group.family_id || studentGym?.parent_gym_id === group.family_id;
           }
           return (group.studentIds || []).includes(sid);
-        }).length;
-        return acc + ((price || 0) * countInSession);
+        });
+        const sessionSum = matchingStudents.reduce((sum, sid) => {
+          const student = state.students.find(st => st.id === sid);
+          return sum + getStudentSessionPrice(student, s, price, className);
+        }, 0);
+        return acc + sessionSum;
       }
     }, 0);
   }, [state.sessions, state.classTypes, state.gyms, state.students, monthLabel]);
@@ -8056,6 +8074,12 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
   const [parent1Email, setParent1Email] = useState(initialData?.parent1_email || '');
   const [parent2Name, setParent2Name] = useState(initialData?.parent2_name || '');
   const [parent2Phone, setParent2Phone] = useState(initialData?.parent2_phone || '');
+  const [customGroupRate, setCustomGroupRate] = useState<string>(
+    initialData?.custom_group_rate != null ? initialData.custom_group_rate.toString() : ''
+  );
+  const [customPrivateRate, setCustomPrivateRate] = useState<string>(
+    initialData?.custom_private_rate != null ? initialData.custom_private_rate.toString() : ''
+  );
   const [isDownloading, setIsDownloading] = useState(false);
 
   const isTeamOnly = initialData?.is_gym_member || initialExtra?.is_cheer;
@@ -8136,6 +8160,8 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
       parent1_email: parent1Email, 
       parent2_name: parent2Name, 
       parent2_phone: parent2Phone,
+      custom_group_rate: customGroupRate ? parseFloat(customGroupRate) : null,
+      custom_private_rate: customPrivateRate ? parseFloat(customPrivateRate) : null,
       ...initialExtra
     });
   };
@@ -8161,6 +8187,114 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
             {!isTeamOnly && (
               <div className="grid grid-cols-1 gap-3">
                 <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Link Sibling</label><select value={linkedSiblingId} onChange={e => setLinkedSiblingId(e.target.value)} className="w-full p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none"><option value="">- NONE -</option>{(otherStudents || []).map((s: any, idx: number) => <option key={`${s.id}-${idx}`} value={s.id}>{s.name}</option>)}</select></div>
+              </div>
+            )}
+
+            {/* Custom Athlete Pricing (Gauges) */}
+            {!isTeamOnly && (
+              <div className="p-4 bg-emerald-50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-100 dark:border-emerald-900/30 space-y-4">
+                <div>
+                  <p className="text-[9px] font-black text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">Custom Athlete Session Rates (Rand)</p>
+                  <p className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase mt-0.5">Set individual custom rates for class tumbling vs private sessions</p>
+                </div>
+
+                {/* Group Class Rate */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[8px] font-black text-slate-500 dark:text-slate-400 uppercase">Class / Group Tumbling Rate</label>
+                    <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400">
+                      {customGroupRate ? `R${customGroupRate} / session` : 'Standard Rate'}
+                    </span>
+                  </div>
+
+                  {/* Price Gauges */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {[100, 150, 200, 250, 300, 350, 400].map(amount => (
+                      <button
+                        key={`group-gauge-${amount}`}
+                        type="button"
+                        onClick={() => setCustomGroupRate(customGroupRate === amount.toString() ? '' : amount.toString())}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${
+                          customGroupRate === amount.toString()
+                            ? 'bg-[#1e4da1] text-white shadow-md scale-105'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:border-blue-400'
+                        }`}
+                      >
+                        R{amount}
+                      </button>
+                    ))}
+                    {customGroupRate && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomGroupRate('')}
+                        className="px-2 py-1.5 rounded-lg text-[9px] font-black uppercase bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-red-500"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Manual Amount Input */}
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-xs font-black text-slate-400">R</span>
+                    <input
+                      type="number"
+                      placeholder="CUSTOM GROUP AMOUNT"
+                      value={customGroupRate}
+                      onChange={e => setCustomGroupRate(e.target.value)}
+                      className="w-full pl-8 pr-3 py-2 bg-white dark:bg-slate-800/80 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 border border-slate-200 dark:border-slate-700 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Private Session Rate */}
+                <div className="space-y-2 pt-2 border-t border-emerald-100/60 dark:border-emerald-900/30">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[8px] font-black text-slate-500 dark:text-slate-400 uppercase">Private Session Rate</label>
+                    <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400">
+                      {customPrivateRate ? `R${customPrivateRate} / session` : 'Standard Private Rate'}
+                    </span>
+                  </div>
+
+                  {/* Price Gauges */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {[100, 150, 200, 250, 300, 350, 400].map(amount => (
+                      <button
+                        key={`private-gauge-${amount}`}
+                        type="button"
+                        onClick={() => setCustomPrivateRate(customPrivateRate === amount.toString() ? '' : amount.toString())}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${
+                          customPrivateRate === amount.toString()
+                            ? 'bg-[#1e4da1] text-white shadow-md scale-105'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:border-blue-400'
+                        }`}
+                      >
+                        R{amount}
+                      </button>
+                    ))}
+                    {customPrivateRate && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomPrivateRate('')}
+                        className="px-2 py-1.5 rounded-lg text-[9px] font-black uppercase bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-red-500"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Manual Amount Input */}
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-xs font-black text-slate-400">R</span>
+                    <input
+                      type="number"
+                      placeholder="CUSTOM PRIVATE AMOUNT"
+                      value={customPrivateRate}
+                      onChange={e => setCustomPrivateRate(e.target.value)}
+                      className="w-full pl-8 pr-3 py-2 bg-white dark:bg-slate-800/80 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 border border-slate-200 dark:border-slate-700 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
               </div>
             )}
 
