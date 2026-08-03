@@ -1114,9 +1114,20 @@ const App: React.FC = () => {
         bill_to_phone: pay.bill_to_phone
       }));
 
+      const rawStudentsList = studentsRes.data || [];
+      const studentMap = new Map<string, any>();
+      rawStudentsList.forEach((s: any) => {
+        if (!studentMap.has(s.id)) {
+          studentMap.set(s.id, s);
+        } else {
+          studentMap.set(s.id, { ...studentMap.get(s.id), ...s });
+        }
+      });
+      const uniqueStudentsList = Array.from(studentMap.values());
+
       setState(prev => ({
         ...prev,
-        students: (studentsRes.data || []).map((s: any) => {
+        students: uniqueStudentsList.map((s: any) => {
           let parsedSubTeamIds: string[] = [];
           if (s.sub_team_ids) {
             if (Array.isArray(s.sub_team_ids)) {
@@ -1265,15 +1276,20 @@ const App: React.FC = () => {
   const handleSaveStudent = async (name: string, phone?: string, linkedSiblingId?: string, extraData?: Partial<Student>) => {
     if (!user) return;
 
-    // Check for duplicates (case-insensitive)
-    const isDuplicate = state.students.some(s => 
-      s.name.toLowerCase().trim() === name.toLowerCase().trim() && 
-      (!editingStudent || s.id !== editingStudent.id)
-    );
+    // Check for duplicates only if creating a new student OR if changing the student's name
+    const isNameChanged = editingStudent && name.toLowerCase().trim() !== editingStudent.name.toLowerCase().trim();
+    const isNewStudent = !editingStudent;
 
-    if (isDuplicate) {
-      alert(`An athlete with the name "${name}" already exists. Duplicate athletes are not allowed.`);
-      return;
+    if (isNewStudent || isNameChanged) {
+      const isDuplicate = state.students.some(s => 
+        s.name.toLowerCase().trim() === name.toLowerCase().trim() && 
+        (!editingStudent || s.id !== editingStudent.id)
+      );
+
+      if (isDuplicate) {
+        alert(`An athlete with the name "${name}" already exists. Duplicate athletes are not allowed.`);
+        return;
+      }
     }
 
     let finalGroupKey = '';
@@ -1295,6 +1311,14 @@ const App: React.FC = () => {
     const isGymMember = extraData?.is_gym_member ?? (editingStudent?.is_gym_member || false);
     const table = isGymMember ? 'team_athletes' : 'tumbling_students';
     
+    // If athlete switched table type, remove from old table first to prevent duplicate entries
+    if (editingStudent) {
+      const oldTable = editingStudent.is_gym_member ? 'team_athletes' : 'tumbling_students';
+      if (oldTable !== table) {
+        await supabase.from(oldTable).delete().eq('id', editingStudent.id).eq('user_id', user.id);
+      }
+    }
+
     let payload: any;
     if (isGymMember) {
       payload = {
@@ -1303,8 +1327,10 @@ const App: React.FC = () => {
         name,
         associated_gym_id: extraData?.associated_gym_id || null,
         is_cheer: extraData?.is_cheer ?? true,
-        sub_team_ids: extraData?.sub_team_ids || []
+        sub_team_ids: extraData?.sub_team_ids || [],
+        ...extraData
       };
+      delete (payload as any).is_gym_member;
     } else {
       payload = {
         id: studentId,
