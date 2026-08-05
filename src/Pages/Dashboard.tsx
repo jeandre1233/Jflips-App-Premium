@@ -243,7 +243,7 @@ export const CalendarView = memo(({ sessions, classTypes, gyms, month, year, sch
           const isToday = new Date().toISOString().split('T')[0] === dateStr;
 
           return (
-            <div key={`${viewYear}-${viewMonth}-${day}`} className="flex flex-col items-center justify-center relative h-12">
+            <div key={`${viewYear}-${viewMonth}-${day}-${idx}`} className="flex flex-col items-center justify-center relative h-12">
               <button
                 onClick={() => handleDateClick(day)}
                 className={`
@@ -530,7 +530,7 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
               const status = getDayStatus(day, now.getMonth(), now.getFullYear(), state);
               const isToday = now.getDate() === day;
               return (
-                <div key={`mini-${day}`} className="flex flex-col items-center justify-center relative h-5 w-full">
+                <div key={`mini-${day}-${idx}`} className="flex flex-col items-center justify-center relative h-5 w-full">
                   <span className={`text-[7px] font-bold leading-none ${isToday ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-500'}`}>
                     {day}
                   </span>

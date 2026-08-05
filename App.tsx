@@ -780,7 +780,7 @@ const App: React.FC = () => {
             console.error('Detected active invalid refresh token on startup. Clean purging auth state...');
             await supabase.auth.signOut().catch(() => {});
             Object.keys(localStorage).forEach(key => {
-              if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
+              if (key.startsWith('sb-') && (key.endsWith('-auth-token') || key.includes('auth'))) {
                 localStorage.removeItem(key);
               }
             });
@@ -792,6 +792,20 @@ const App: React.FC = () => {
         console.error('Error during initial session verification check:', err);
       }
     };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reasonStr = String(event?.reason?.message || event?.reason || '').toLowerCase();
+      if (reasonStr.includes('refresh token') || reasonStr.includes('token not found') || reasonStr.includes('invalid grant')) {
+        event.preventDefault();
+        console.warn('Handled stale refresh token rejection.');
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('sb-') && (key.endsWith('-auth-token') || key.includes('auth'))) {
+            localStorage.removeItem(key);
+          }
+        });
+      }
+    };
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
 
     checkInitialSession();
 
@@ -824,6 +838,7 @@ const App: React.FC = () => {
       }
     });
     return () => {
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
       authListener.subscription.unsubscribe();
     };
   }, []);
@@ -1022,29 +1037,15 @@ const App: React.FC = () => {
           const teamAthletes = (team.data || []).map(s => ({ ...s, is_gym_member: true }));
           return { data: [...tumblingStudents, ...teamAthletes], error: tumb.error || team.error };
         } else {
-          const teamIds = coachAssignedGymIds;
-          const enrolledIds = [...coachEnrolledStudentIds];
-          const hasTumblingClassAccess = coachAssignedClassIds.length > 0;
+          const hasCoachingAccess = coachAssignedGymIds.length > 0 || coachAssignedClassIds.length > 0;
 
-          if (teamIds.length === 0 && enrolledIds.length === 0 && !hasTumblingClassAccess) return { data: [], error: null };
+          if (!hasCoachingAccess) return { data: [], error: null };
           
-          const promises = [];
-          if (hasTumblingClassAccess) {
-            // Coach assigned to tumbling classes -> load all tumbling students
-            promises.push(supabase.from('tumbling_students').select('*').eq('user_id', targetUserId));
-          } else if (enrolledIds.length > 0) {
-            promises.push(supabase.from('tumbling_students').select('*').eq('user_id', targetUserId).in('id', enrolledIds));
-          } else {
-            promises.push(Promise.resolve({ data: [], error: null }));
-          }
+          const [tumb, team] = await Promise.all([
+            supabase.from('tumbling_students').select('*').eq('user_id', targetUserId),
+            supabase.from('team_athletes').select('*').eq('user_id', targetUserId)
+          ]);
           
-          if (teamIds.length > 0) {
-            promises.push(supabase.from('team_athletes').select('*').eq('user_id', targetUserId).in('associated_gym_id', teamIds));
-          } else {
-            promises.push(Promise.resolve({ data: [], error: null }));
-          }
-          
-          const [tumb, team] = await Promise.all(promises);
           const tumblingStudents = (tumb.data || []).map(s => ({ ...s, is_gym_member: false }));
           const teamAthletes = (team.data || []).map(s => ({ ...s, is_gym_member: true }));
           return { data: [...tumblingStudents, ...teamAthletes], error: tumb.error || team.error };
