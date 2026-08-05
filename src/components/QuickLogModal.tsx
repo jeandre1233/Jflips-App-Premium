@@ -36,13 +36,17 @@ export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, d
         }
       } else {
         const ct = (state.classTypes || []).find(c => c.id === firstId);
-        if (ct && ct.studentIds && ct.studentIds.length > 0) {
-          entities = state.students.filter(s => ct.studentIds?.includes(s.id));
+        const allTumbling = (state.students || []).filter(s => !s.is_gym_member);
+        if (ct) {
+          const assignedSet = new Set(ct.studentIds || []);
+          const assigned = allTumbling.filter(s => assignedSet.has(s.id));
+          const unassigned = allTumbling.filter(s => !assignedSet.has(s.id));
+          entities = [...assigned, ...unassigned];
         } else {
-          entities = state.students.filter(s => !s.is_gym_member);
-          if (athleteIds && athleteIds.length > 0) {
-             entities = entities.filter(s => athleteIds.includes(s.id));
-          }
+          entities = allTumbling;
+        }
+        if (athleteIds && athleteIds.length > 0) {
+          entities = entities.filter(s => athleteIds.includes(s.id));
         }
       }
     }
@@ -52,14 +56,21 @@ export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, d
   const isClubOrGym = classOptions.length > 0 && classOptions.every(o => 'isGym' in o && o.isGym && (o as Gym).gym_type !== 'cheer');
 
   useEffect(() => {
-    // Auto-select if there is only 1 entity or if we are using strict initial athleteIds!
-    if (entitiesToShow.length === 1 && selectedAthletes.length === 0) {
-      setSelectedAthletes([entitiesToShow[0].id]);
-    } else if (athleteIds && athleteIds.length > 0 && selectedAthletes.length === 0) {
-      // Auto select the pre-assigned athletes for private sessions
-      setSelectedAthletes(athleteIds);
+    if (selectedAthletes.length === 0) {
+      if (athleteIds && athleteIds.length > 0) {
+        setSelectedAthletes(athleteIds);
+      } else if (classIds.length === 1) {
+        const ct = (state.classTypes || []).find(c => c.id === classIds[0]);
+        if (ct && ct.studentIds && ct.studentIds.length > 0) {
+          setSelectedAthletes(ct.studentIds);
+        } else if (entitiesToShow.length === 1) {
+          setSelectedAthletes([entitiesToShow[0].id]);
+        }
+      } else if (entitiesToShow.length === 1) {
+        setSelectedAthletes([entitiesToShow[0].id]);
+      }
     }
-  }, [entitiesToShow, athleteIds]);
+  }, [entitiesToShow, athleteIds, classIds]);
 
   const toggleEntity = (id: string) => {
     setSelectedAthletes(prev => prev.includes(id) ? prev.filter(a => a !== id) : [...prev, id]);
@@ -136,17 +147,30 @@ export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, d
             </div>
           ) : (
             <div className="space-y-2">
-              {entitiesToShow.map((entity, idx) => (
-                <motion.button key={`qm-${entity.id}-${idx}`} whileTap={{ scale: 0.97 }} onClick={() => toggleEntity(entity.id)} className={`w-full p-4 rounded-xl border flex items-center gap-3.5 transition-colors ${selectedAthletes.includes(entity.id) ? 'bg-[#eff6ff] dark:bg-blue-900/30 border-[#1e4da1] text-[#1e4da1] shadow-md' : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-[#1a1a1a] dark:text-slate-300'}`}>
-                  <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${selectedAthletes.includes(entity.id) ? 'bg-[#1e4da1] border-[#1e4da1]' : 'border-slate-200'}`}>
-                    {selectedAthletes.includes(entity.id) && <CheckCircle2 size={12} className="text-white" />}
-                  </div>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <User size={14} className="opacity-50" />
-                    <span className="font-black uppercase italic text-[13px]">{entity.name}</span>
-                  </div>
-                </motion.button>
-              ))}
+              {entitiesToShow.map((entity, idx) => {
+                const firstId = classIds[0];
+                const ct = (state.classTypes || []).find(c => c.id === firstId);
+                const isAssignedToClass = ct?.studentIds?.includes(entity.id);
+
+                return (
+                  <motion.button key={`qm-${entity.id}-${idx}`} whileTap={{ scale: 0.97 }} onClick={() => toggleEntity(entity.id)} className={`w-full p-4 rounded-xl border flex items-center justify-between transition-colors ${selectedAthletes.includes(entity.id) ? 'bg-[#eff6ff] dark:bg-blue-900/30 border-[#1e4da1] text-[#1e4da1] shadow-md' : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-[#1a1a1a] dark:text-slate-300'}`}>
+                    <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                      <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${selectedAthletes.includes(entity.id) ? 'bg-[#1e4da1] border-[#1e4da1]' : 'border-slate-200'}`}>
+                        {selectedAthletes.includes(entity.id) && <CheckCircle2 size={12} className="text-white" />}
+                      </div>
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <User size={14} className="opacity-50 shrink-0" />
+                        <span className="font-black uppercase italic text-[13px] truncate">{entity.name}</span>
+                      </div>
+                      {isAssignedToClass && (
+                        <span className="text-[8px] font-black uppercase px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/50 text-[#1e4da1] dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0">
+                          Enrolled
+                        </span>
+                      )}
+                    </div>
+                  </motion.button>
+                );
+              })}
             </div>
           )}
         </div>

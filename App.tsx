@@ -1024,10 +1024,15 @@ const App: React.FC = () => {
         } else {
           const teamIds = coachAssignedGymIds;
           const enrolledIds = [...coachEnrolledStudentIds];
-          if (teamIds.length === 0 && enrolledIds.length === 0) return { data: [], error: null };
+          const hasTumblingClassAccess = coachAssignedClassIds.length > 0;
+
+          if (teamIds.length === 0 && enrolledIds.length === 0 && !hasTumblingClassAccess) return { data: [], error: null };
           
           const promises = [];
-          if (enrolledIds.length > 0) {
+          if (hasTumblingClassAccess) {
+            // Coach assigned to tumbling classes -> load all tumbling students
+            promises.push(supabase.from('tumbling_students').select('*').eq('user_id', targetUserId));
+          } else if (enrolledIds.length > 0) {
             promises.push(supabase.from('tumbling_students').select('*').eq('user_id', targetUserId).in('id', enrolledIds));
           } else {
             promises.push(Promise.resolve({ data: [], error: null }));
@@ -6781,19 +6786,25 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
     if (!selectedClassId) return [];
 
     const selectedClass = (state.classTypes || []).find(ct => ct.id === selectedClassId);
-    if (!selectedClass || !selectedClass.studentIds || selectedClass.studentIds.length === 0) {
-      return (state.students || []).filter(s => !s.is_gym_member);
-    }
-    return (state.students || []).filter(s => (selectedClass.studentIds || []).includes(s.id));
+    const allTumbling = (state.students || []).filter(s => !s.is_gym_member);
+    if (!selectedClass) return allTumbling;
+
+    const assignedSet = new Set(selectedClass.studentIds || []);
+    const assigned = allTumbling.filter(s => assignedSet.has(s.id));
+    const unassigned = allTumbling.filter(s => !assignedSet.has(s.id));
+
+    return [...assigned, ...unassigned];
   }, [selectedClassId, state.students, state.classTypes]);
 
   useEffect(() => {
-    // If only one entity to show, and we haven't selected any, auto-select it
-    if (entitiesToShow.length === 1 && selectedStudents.length === 0) {
-      setSelectedStudents([entitiesToShow[0].id]);
+    // Auto-select enrolled students when selecting a class
+    if (selectedClassId && selectedStudents.length === 0) {
+      const selectedClass = (state.classTypes || []).find(ct => ct.id === selectedClassId);
+      if (selectedClass && selectedClass.studentIds && selectedClass.studentIds.length > 0) {
+        setSelectedStudents(selectedClass.studentIds);
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClassId, entitiesToShow]);
+  }, [selectedClassId, state.classTypes]);
 
   const toggleEntity = useCallback((id: string) =>
     setSelectedStudents(prev => prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id]),
@@ -6841,7 +6852,7 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
         <label className="text-[10px] font-black text-[#94a3b8] uppercase px-1">Select Class / Individual Gym</label>
         <motion.div variants={staggerContainer} initial="hidden" animate="show" className="grid grid-cols-1 gap-2.5">
           {(classOptions || []).map((opt, idx) => (
-            <motion.button key={`class-reg-${opt.isGym ? 'gym' : 'class'}-${opt.id}-${idx}`} variants={registerItemVariants} whileTap={{ scale: 0.98 }} onClick={() => { setSelectedClassId(opt.id); setSelectedStudents([]); }} className={`p-4 rounded-xl border text-left flex justify-between items-center transition-all ${selectedClassId === opt.id ? 'bg-[#1e4da1] dark:bg-blue-600 border-[#1e4da1] text-white shadow-lg' : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-[#1a1a1a] dark:text-slate-300'}`}>
+            <motion.button key={`class-reg-${opt.isGym ? 'gym' : 'class'}-${opt.id}-${idx}`} variants={registerItemVariants} whileTap={{ scale: 0.98 }} onClick={() => { setSelectedClassId(opt.id); const ct = (state.classTypes || []).find(c => c.id === opt.id); setSelectedStudents(ct?.studentIds || []); }} className={`p-4 rounded-xl border text-left flex justify-between items-center transition-all ${selectedClassId === opt.id ? 'bg-[#1e4da1] dark:bg-blue-600 border-[#1e4da1] text-white shadow-lg' : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-[#1a1a1a] dark:text-slate-300'}`}>
               <div className="flex items-center gap-2">
                 {opt.isGym ? <Building2 size={14} className="opacity-70" /> : <Dumbbell size={14} className="opacity-70" />}
                 <span className="font-black text-sm italic uppercase">{opt.name}</span>
@@ -6867,19 +6878,29 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
                 <p className="text-[8px] text-blue-400 uppercase mt-1">Invoice will be sent to {selectedOption.name}</p>
               </div>
             </div>
-          ) : (entitiesToShow || []).map((entity, idx) => (
-            <motion.button key={`entity-reg-${entity.id}-${idx}`} variants={registerItemVariants} whileTap={{ scale: 0.97 }} onClick={() => toggleEntity(entity.id)} className={`w-full p-4 rounded-xl border flex items-center justify-between transition-colors ${selectedStudents.includes(entity.id) ? 'bg-[#eff6ff] dark:bg-blue-900/30 border-[#1e4da1] text-[#1e4da1] shadow-md' : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-[#1a1a1a] dark:text-slate-300'}`}>
-              <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${selectedStudents.includes(entity.id) ? 'bg-[#1e4da1] border-[#1e4da1]' : 'border-slate-200'}`}>
-                  {selectedStudents.includes(entity.id) && <CheckCircle2 size={12} className="text-white" />}
+          ) : (entitiesToShow || []).map((entity, idx) => {
+            const selectedClass = (state.classTypes || []).find(ct => ct.id === selectedClassId);
+            const isAssignedToClass = selectedClass?.studentIds?.includes(entity.id);
+
+            return (
+              <motion.button key={`entity-reg-${entity.id}-${idx}`} variants={registerItemVariants} whileTap={{ scale: 0.97 }} onClick={() => toggleEntity(entity.id)} className={`w-full p-4 rounded-xl border flex items-center justify-between transition-colors ${selectedStudents.includes(entity.id) ? 'bg-[#eff6ff] dark:bg-blue-900/30 border-[#1e4da1] text-[#1e4da1] shadow-md' : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-[#1a1a1a] dark:text-slate-300'}`}>
+                <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                  <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${selectedStudents.includes(entity.id) ? 'bg-[#1e4da1] border-[#1e4da1]' : 'border-slate-200'}`}>
+                    {selectedStudents.includes(entity.id) && <CheckCircle2 size={12} className="text-white" />}
+                  </div>
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <User size={14} className="opacity-50 shrink-0" />
+                    <span className="font-black uppercase italic text-[13px] truncate">{entity.name}</span>
+                  </div>
+                  {isAssignedToClass && (
+                    <span className="text-[8px] font-black uppercase px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/50 text-[#1e4da1] dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0">
+                      Enrolled
+                    </span>
+                  )}
                 </div>
-                <div className="flex items-center gap-2 min-w-0">
-                  <User size={14} className="opacity-50 shrink-0" />
-                  <span className="font-black uppercase italic text-[13px] truncate">{entity.name}</span>
-                </div>
-              </div>
-            </motion.button>
-          ))}
+              </motion.button>
+            );
+          })}
         </div>
       </div>
 
@@ -9076,15 +9097,80 @@ const StaffForm: React.FC<{
   const toggleGym = (id: string) => setAssignedGymIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const toggleClass = (id: string) => setAssignedClassIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
-  // Group gyms: tumbling gyms, cheer parent teams, cheer sub-teams
-  const tumblingGyms = gyms.filter(g => g.gym_type !== 'cheer');
+  // Groupings: Tumbling Classes (classTypes), Gym Organisations, and Cheer Teams & Sub-Teams
+  const tumblingClasses = classTypes;
+  const gymOrgClasses = gyms.filter(g => g.gym_type !== 'cheer');
   const cheerParents = gyms.filter(g => g.gym_type === 'cheer' && !g.parent_gym_id);
   const cheerSubs = gyms.filter(g => g.gym_type === 'cheer' && !!g.parent_gym_id);
+  const allTeams = [...cheerParents, ...cheerSubs];
+
+  const isAllTumblingSelected = tumblingClasses.length > 0 && tumblingClasses.every(c => assignedClassIds.includes(c.id));
+  const isAllGymOrgsSelected = gymOrgClasses.length > 0 && gymOrgClasses.every(g => assignedGymIds.includes(g.id));
+  const isAllTeamsSelected = allTeams.length > 0 && allTeams.every(g => assignedGymIds.includes(g.id));
+
+  const totalAccessCount = tumblingClasses.length + gymOrgClasses.length + allTeams.length;
+  const isMasterAllSelected = totalAccessCount > 0 && 
+    (tumblingClasses.length === 0 || isAllTumblingSelected) && 
+    (gymOrgClasses.length === 0 || isAllGymOrgsSelected) && 
+    (allTeams.length === 0 || isAllTeamsSelected);
+
+  const toggleAllTumbling = () => {
+    if (isAllTumblingSelected) {
+      const idsToRemove = new Set(tumblingClasses.map(c => c.id));
+      setAssignedClassIds(prev => prev.filter(id => !idsToRemove.has(id)));
+    } else {
+      const allIds = tumblingClasses.map(c => c.id);
+      setAssignedClassIds(prev => Array.from(new Set([...prev, ...allIds])));
+    }
+  };
+
+  const toggleAllGymOrgs = () => {
+    if (isAllGymOrgsSelected) {
+      const idsToRemove = new Set(gymOrgClasses.map(g => g.id));
+      setAssignedGymIds(prev => prev.filter(id => !idsToRemove.has(id)));
+    } else {
+      const allIds = gymOrgClasses.map(g => g.id);
+      setAssignedGymIds(prev => Array.from(new Set([...prev, ...allIds])));
+    }
+  };
+
+  const toggleAllTeams = () => {
+    if (isAllTeamsSelected) {
+      const idsToRemove = new Set(allTeams.map(g => g.id));
+      setAssignedGymIds(prev => prev.filter(id => !idsToRemove.has(id)));
+    } else {
+      const allIds = allTeams.map(g => g.id);
+      setAssignedGymIds(prev => Array.from(new Set([...prev, ...allIds])));
+    }
+  };
+
+  const toggleMasterAll = () => {
+    if (isMasterAllSelected) {
+      setAssignedClassIds([]);
+      setAssignedGymIds([]);
+    } else {
+      setAssignedClassIds(tumblingClasses.map(c => c.id));
+      setAssignedGymIds([...gymOrgClasses.map(g => g.id), ...allTeams.map(g => g.id)]);
+    }
+  };
 
   const handleSubmit = () => {
     if (!name || !email) return alert('Name and Email are required');
     onSubmit(name, email, parseFloat(payRate), initialData?.id, bankName, accountNumber, branchCode, accountType, password, isOwner, assignedGymIds, assignedClassIds);
   };
+
+  const ToggleSwitch = ({ checked, onChange, label }: { checked: boolean, onChange: () => void, label?: string }) => (
+    <button 
+      type="button" 
+      onClick={onChange}
+      className="flex items-center gap-2 cursor-pointer group shrink-0"
+    >
+      {label && <span className="text-[9px] font-black uppercase text-slate-400 group-hover:text-[#1e4da1] dark:group-hover:text-blue-400 transition-colors">{label}</span>}
+      <div className={`w-8 h-4 rounded-full transition-colors relative ${checked ? 'bg-[#1e4da1] dark:bg-blue-600' : 'bg-slate-200 dark:bg-slate-700'}`}>
+        <motion.div animate={{ x: checked ? 16 : 2 }} className="absolute top-0.5 w-3 h-3 bg-white rounded-full shadow-sm" />
+      </div>
+    </button>
+  );
 
   const AssignBtn = ({ id, label, icon }: { id: string, label: string, icon: React.ReactNode }) => {
     const active = assignedGymIds.includes(id);
@@ -9127,52 +9213,116 @@ const StaffForm: React.FC<{
       <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Coach Password / Passcode</label><input placeholder="SET OR VIEW PASSWORD" type="text" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
 
       {/* ── ACCESS ASSIGNMENT ─────────────────────────────────────────────── */}
-      <div className="space-y-3 border-t border-slate-100 dark:border-slate-800 pt-4">
-        <div>
-          <p className="text-[8px] font-black text-[#1e4da1] uppercase tracking-widest mb-1">Access — Classes</p>
-          <p className="text-[8px] font-bold text-slate-400 uppercase mb-2">Coach can log individual sessions for these</p>
-          {classTypes.length === 0 ? (
-            <p className="text-[8px] text-slate-400 italic">No classes set up yet</p>
+      <div className="space-y-4 border-t border-slate-100 dark:border-slate-800 pt-4">
+        {/* Top Header & Master Select All */}
+        <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-100 dark:border-slate-800">
+          <div>
+            <p className="text-[10px] font-black uppercase text-slate-800 dark:text-slate-200 italic">Class & Team Access</p>
+            <p className="text-[8px] font-bold text-slate-400 uppercase">Manage permissions for this staff member</p>
+          </div>
+          {totalAccessCount > 0 && (
+            <ToggleSwitch 
+              checked={isMasterAllSelected} 
+              onChange={toggleMasterAll} 
+              label={isMasterAllSelected ? "Deselect All" : "Select All"} 
+            />
+          )}
+        </div>
+
+        {/* 1. Tumbling Classes */}
+        <div className="p-3 bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[9px] font-black text-[#1e4da1] dark:text-blue-400 uppercase tracking-widest flex items-center gap-1.5">
+                <BookOpen size={12} />
+                Tumbling Classes
+              </p>
+              <p className="text-[8px] font-bold text-slate-400 uppercase">Individual class types & sessions</p>
+            </div>
+            {tumblingClasses.length > 0 && (
+              <ToggleSwitch 
+                checked={isAllTumblingSelected} 
+                onChange={toggleAllTumbling} 
+                label={isAllTumblingSelected ? "All Selected" : "Select All"} 
+              />
+            )}
+          </div>
+          {tumblingClasses.length === 0 ? (
+            <p className="text-[8px] text-slate-400 italic">No tumbling classes created yet</p>
           ) : (
-            <div className="flex flex-wrap gap-2">
-              {classTypes.map((ct, idx) => <ClassBtn key={ct.id || `class-assign-${idx}`} id={ct.id} label={ct.name} />)}
+            <div className="flex flex-wrap gap-2 pt-1">
+              {tumblingClasses.map((ct, idx) => <ClassBtn key={ct.id || `class-assign-${idx}`} id={ct.id} label={ct.name} />)}
             </div>
           )}
         </div>
 
-        {tumblingGyms.length > 0 && (
-          <div>
-            <p className="text-[8px] font-black text-[#1e4da1] uppercase tracking-widest mb-1">Access — Gyms</p>
-            <p className="text-[8px] font-bold text-slate-400 uppercase mb-2">Tumbling / individual gym sessions</p>
-            <div className="flex flex-wrap gap-2">
-              {tumblingGyms.map((g, idx) => <AssignBtn key={g.id || `gym-assign-${idx}`} id={g.id} label={g.name} icon={<Building2 size={10} />} />)}
+        {/* 2. Gym Organisation Classes */}
+        <div className="p-3 bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[9px] font-black text-[#1e4da1] dark:text-blue-400 uppercase tracking-widest flex items-center gap-1.5">
+                <Building2 size={12} />
+                Gym Organisation Classes
+              </p>
+              <p className="text-[8px] font-bold text-slate-400 uppercase">Tumbling & gym organisation sessions</p>
             </div>
+            {gymOrgClasses.length > 0 && (
+              <ToggleSwitch 
+                checked={isAllGymOrgsSelected} 
+                onChange={toggleAllGymOrgs} 
+                label={isAllGymOrgsSelected ? "All Selected" : "Select All"} 
+              />
+            )}
           </div>
-        )}
+          {gymOrgClasses.length === 0 ? (
+            <p className="text-[8px] text-slate-400 italic">No gym organisations created yet</p>
+          ) : (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {gymOrgClasses.map((g, idx) => <AssignBtn key={g.id || `gym-assign-${idx}`} id={g.id} label={g.name} icon={<Building2 size={10} />} />)}
+            </div>
+          )}
+        </div>
 
-        {cheerParents.length > 0 && (
-          <div>
-            <p className="text-[8px] font-black text-[#1e4da1] uppercase tracking-widest mb-1">Access — Cheer Teams</p>
-            <p className="text-[8px] font-bold text-slate-400 uppercase mb-2">Coach can log team sessions + competitions</p>
-            <div className="flex flex-wrap gap-2">
-              {cheerParents.map((g, idx) => (
-                <AssignBtn key={g.id || `cheer-parent-${idx}`} id={g.id} label={g.name} icon={<Trophy size={10} />} />
-              ))}
+        {/* 3. Teams & Sub-Teams */}
+        <div className="p-3 bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[9px] font-black text-[#1e4da1] dark:text-blue-400 uppercase tracking-widest flex items-center gap-1.5">
+                <Trophy size={12} />
+                Teams & Sub-Teams
+              </p>
+              <p className="text-[8px] font-bold text-slate-400 uppercase">Cheer teams, sub-teams & competition sessions</p>
             </div>
+            {allTeams.length > 0 && (
+              <ToggleSwitch 
+                checked={isAllTeamsSelected} 
+                onChange={toggleAllTeams} 
+                label={isAllTeamsSelected ? "All Selected" : "Select All"} 
+              />
+            )}
           </div>
-        )}
-
-        {cheerSubs.length > 0 && (
-          <div>
-            <p className="text-[8px] font-black text-[#1e4da1] uppercase tracking-widest mb-1">Access — Sub-Teams</p>
-            <div className="flex flex-wrap gap-2">
-              {cheerSubs.map((g, idx) => {
-                const parent = gyms.find(p => p.id === g.parent_gym_id);
-                return <AssignBtn key={g.id || `cheer-sub-${idx}`} id={g.id} label={`${parent ? parent.name + ' › ' : ''}${g.name}`} icon={<Users size={10} />} />;
-              })}
+          {allTeams.length === 0 ? (
+            <p className="text-[8px] text-slate-400 italic">No cheer teams created yet</p>
+          ) : (
+            <div className="space-y-2 pt-1">
+              {cheerParents.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {cheerParents.map((g, idx) => (
+                    <AssignBtn key={g.id || `cheer-parent-${idx}`} id={g.id} label={g.name} icon={<Trophy size={10} />} />
+                  ))}
+                </div>
+              )}
+              {cheerSubs.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {cheerSubs.map((g, idx) => {
+                    const parent = gyms.find(p => p.id === g.parent_gym_id);
+                    return <AssignBtn key={g.id || `cheer-sub-${idx}`} id={g.id} label={`${parent ? parent.name + ' › ' : ''}${g.name}`} icon={<Users size={10} />} />;
+                  })}
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {assignedGymIds.length === 0 && assignedClassIds.length === 0 && (
           <p className="text-[8px] text-amber-500 font-bold uppercase">⚠ No access assigned — coach will see nothing</p>
