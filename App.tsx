@@ -1276,22 +1276,6 @@ const App: React.FC = () => {
   const handleSaveStudent = async (name: string, phone?: string, linkedSiblingId?: string, extraData?: Partial<Student>) => {
     if (!user) return;
 
-    // Check for duplicates only if creating a new student OR if changing the student's name
-    const isNameChanged = editingStudent && name.toLowerCase().trim() !== editingStudent.name.toLowerCase().trim();
-    const isNewStudent = !editingStudent;
-
-    if (isNewStudent || isNameChanged) {
-      const isDuplicate = state.students.some(s => 
-        s.name.toLowerCase().trim() === name.toLowerCase().trim() && 
-        (!editingStudent || s.id !== editingStudent.id)
-      );
-
-      if (isDuplicate) {
-        alert(`An athlete with the name "${name}" already exists. Duplicate athletes are not allowed.`);
-        return;
-      }
-    }
-
     let finalGroupKey = '';
     if (linkedSiblingId && linkedSiblingId !== '') {
       const sibling = state.students.find(s => s.id === linkedSiblingId);
@@ -1395,17 +1379,6 @@ const App: React.FC = () => {
   const handleUpdateStudentName = async (studentId: string, newName: string) => {
     if (!user) return;
     if (!newName.trim()) return;
-    
-    // Check for duplicates (case-insensitive)
-    const isDuplicate = state.students.some(s => 
-      s.name.toLowerCase().trim() === newName.toLowerCase().trim() && 
-      s.id !== studentId
-    );
-
-    if (isDuplicate) {
-      alert(`An athlete with the name "${newName}" already exists. Duplicate athletes are not allowed.`);
-      return;
-    }
 
     const student = state.students.find(s => s.id === studentId);
     if (!student) return;
@@ -1443,16 +1416,7 @@ const App: React.FC = () => {
     if (!user || !bulkImportParentId) return;
     setIsSyncing(true);
 
-    // Filter out duplicates from the import list itself and against existing athletes
-    const uniqueNames = Array.from(new Set(names.map(n => n.trim())));
-    const existingNames = state.students.map(s => s.name.toLowerCase().trim());
-    
-    const namesToAdd = uniqueNames.filter(n => !existingNames.includes(n.toLowerCase()));
-    const duplicatesCount = uniqueNames.length - namesToAdd.length;
-
-    if (duplicatesCount > 0) {
-      alert(`${duplicatesCount} duplicate athlete(s) were found and skipped.`);
-    }
+    const namesToAdd = Array.from(new Set(names.map(n => n.trim()).filter(Boolean)));
 
     if (namesToAdd.length === 0) {
       setIsSyncing(false);
@@ -1535,28 +1499,13 @@ const App: React.FC = () => {
     }
 
     const currentTeamAthletes = state.students.filter(s => s.associated_gym_id === gymId && s.is_gym_member);
-    const otherAthletes = state.students.filter(s => s.associated_gym_id !== gymId);
     
     // Filter out duplicates from the input list itself
-    const uniqueInputNames = Array.from(new Set(teamAthleteNames.map(n => n.trim())));
+    const uniqueInputNames = Array.from(new Set(teamAthleteNames.map(n => n.trim()).filter(Boolean)));
     
-    // Check if any of the input names already exist in other gyms/rosters
-    const skippedDuplicates: string[] = [];
     const namesToAdd = uniqueInputNames.filter(n => {
-      const alreadyExistsInCurrent = currentTeamAthletes.some(a => a.name.toLowerCase().trim() === n.toLowerCase().trim());
-      const alreadyExistsInOther = otherAthletes.some(a => a.name.toLowerCase().trim() === n.toLowerCase().trim());
-      
-      if (alreadyExistsInOther) {
-        skippedDuplicates.push(n);
-        return false;
-      }
-      
-      return !alreadyExistsInCurrent;
+      return !currentTeamAthletes.some(a => a.name.toLowerCase().trim() === n.toLowerCase().trim());
     });
-
-    if (skippedDuplicates.length > 0) {
-      alert(`The following athletes already exist in the system and were skipped to prevent duplicates: ${skippedDuplicates.join(', ')}`);
-    }
 
     const athletesToRemove = currentTeamAthletes.filter(a => !uniqueInputNames.some(n => n.toLowerCase().trim() === a.name.toLowerCase().trim()));
 
