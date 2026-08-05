@@ -1028,28 +1028,14 @@ const App: React.FC = () => {
 
       // ── Main data fetch ────────────────────────────────────────────────────────
       const fetchStudents = async () => {
-        if (isOwner) {
-          const [tumb, team] = await Promise.all([
-            supabase.from('tumbling_students').select('*').eq('user_id', targetUserId),
-            supabase.from('team_athletes').select('*').eq('user_id', targetUserId)
-          ]);
-          const tumblingStudents = (tumb.data || []).map(s => ({ ...s, is_gym_member: false }));
-          const teamAthletes = (team.data || []).map(s => ({ ...s, is_gym_member: true }));
-          return { data: [...tumblingStudents, ...teamAthletes], error: tumb.error || team.error };
-        } else {
-          const hasCoachingAccess = coachAssignedGymIds.length > 0 || coachAssignedClassIds.length > 0;
-
-          if (!hasCoachingAccess) return { data: [], error: null };
-          
-          const [tumb, team] = await Promise.all([
-            supabase.from('tumbling_students').select('*').eq('user_id', targetUserId),
-            supabase.from('team_athletes').select('*').eq('user_id', targetUserId)
-          ]);
-          
-          const tumblingStudents = (tumb.data || []).map(s => ({ ...s, is_gym_member: false }));
-          const teamAthletes = (team.data || []).map(s => ({ ...s, is_gym_member: true }));
-          return { data: [...tumblingStudents, ...teamAthletes], error: tumb.error || team.error };
-        }
+        const [tumb, team] = await Promise.all([
+          supabase.from('tumbling_students').select('*').eq('user_id', targetUserId),
+          supabase.from('team_athletes').select('*').eq('user_id', targetUserId)
+        ]);
+        
+        const tumblingStudents = (tumb.data || []).map(s => ({ ...s, is_gym_member: false }));
+        const teamAthletes = (team.data || []).map(s => ({ ...s, is_gym_member: true }));
+        return { data: [...tumblingStudents, ...teamAthletes], error: tumb.error || team.error };
       };
 
       const [studentsRes, gymsRes, classesRes, sessionsRes, historyRes, paymentsRes, schedulesRes, staffRes, snapshotsRes, notificationsRes, competitionsRes, cheerRegistrationsRes] = await Promise.all([
