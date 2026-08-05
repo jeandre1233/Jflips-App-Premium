@@ -62,6 +62,7 @@ export interface Gym {
   bill_to_phone?: string;
   parent_gym_id?: string;
   coach_ids?: string[];
+  coach_rates?: Record<string, number>;
   default_coach_id?: string;
   secondary_coach_id?: string;
   auto_reset_invoice?: boolean;

@@ -1628,6 +1628,7 @@ const App: React.FC = () => {
         account_number: accountNumber || null,
         branch_code: branchCode || null,
         account_type: accountType || null,
+        password: password || null,
         is_owner: isOwnerProfile || false,
         assigned_gym_ids: assignedGymIds || [],
         assigned_class_ids: assignedClassIds || [],
@@ -1641,9 +1642,10 @@ const App: React.FC = () => {
       }
 
       if (saveError) {
-        // Resilience: if is_owner column is missing, retry without it
-        if (saveError.message.includes('is_owner') && (saveError.message.includes('not found') || saveError.message.includes('column'))) {
-          delete payload.is_owner;
+        // Resilience: if is_owner or password column is missing, retry without them
+        if (saveError.message.includes('password') || saveError.message.includes('is_owner')) {
+          delete payload.password;
+          if (saveError.message.includes('is_owner')) delete payload.is_owner;
           if (id) {
             ({ error: saveError } = await supabase.from('staff').update(payload).eq('id', id).eq('owner_id', user.id));
           } else {
@@ -1673,6 +1675,27 @@ const App: React.FC = () => {
     const { error } = await supabase.from('staff').delete().eq('id', id).eq('owner_id', user.id);
     if (error) alert("Delete failed: " + error.message);
     loadCloudData(true);
+  };
+
+  const handleUpdateOrgCoaches = async (orgId: string, coachIds: string[], coachRates: Record<string, number>) => {
+    if (!user) return;
+    try {
+      const payload: any = {
+        coach_ids: coachIds,
+        coach_rates: coachRates,
+      };
+      let { error } = await supabase.from('gyms').update(payload).eq('id', orgId).eq('user_id', user.id);
+      if (error && (error.message.includes('coach_rates') || error.message.includes('column'))) {
+        delete payload.coach_rates;
+        const { error: err2 } = await supabase.from('gyms').update(payload).eq('id', orgId).eq('user_id', user.id);
+        if (err2) alert('Error updating organization coaches: ' + err2.message);
+      } else if (error) {
+        alert('Error updating organization coaches: ' + error.message);
+      }
+      await loadCloudData(true);
+    } catch (err: any) {
+      console.error('Update org coaches exception:', err);
+    }
   };
 
   const removeClassType = async (id: string) => {
@@ -2688,6 +2711,7 @@ const App: React.FC = () => {
             setBulkImportParentId(parentId);
             setShowBulkImport(true);
           }}
+          onUpdateOrgCoaches={handleUpdateOrgCoaches}
           onRefresh={() => loadCloudData(true)}
         />
       )}
@@ -4788,7 +4812,7 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
   );
 });
 
-const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onUpdateCompetition, onDeleteCompetition, onAddAthlete, onUpdateStudentName, onAddSubTeam, onBulkImport, onRefresh }: { 
+const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onUpdateCompetition, onDeleteCompetition, onAddAthlete, onUpdateStudentName, onAddSubTeam, onBulkImport, onUpdateOrgCoaches, onRefresh }: { 
   state: AppState, 
   onRemoveStudent: (studentId: string) => void,
   onUpdateSubTeams: (studentId: string, subTeamIds: string[]) => void,
@@ -4798,6 +4822,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
   onUpdateStudentName: (studentId: string, newName: string) => void,
   onAddSubTeam: (parentGymId: string) => void,
   onBulkImport: (parentGymId: string) => void,
+  onUpdateOrgCoaches?: (orgId: string, coachIds: string[], coachRates: Record<string, number>) => void,
   onRefresh?: () => void
 }) => {
   const [activeTab, setActiveTab] = useState<'roster' | 'competitions' | 'registrations'>('roster');
@@ -5720,6 +5745,121 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
                     )}
                   </div>
                 </div>
+
+                {/* ── ORGANIZATION COACHES & CUSTOM HOURLY RATES ─────────────────── */}
+                <div className="bg-white dark:bg-slate-800 rounded-[2.5rem] p-8 border border-slate-100 dark:border-slate-700 shadow-sm space-y-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-xl font-black uppercase italic text-[#1e4da1] dark:text-blue-400 flex items-center gap-2">
+                        <Users size={20} />
+                        Organization Coaches & Custom Rates
+                      </h3>
+                      <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-1">
+                        Assign coaches & set custom hourly pay rates for {state.gyms.find(g => g.id === selectedMainId)?.name}
+                      </p>
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const currentOrg = state.gyms.find(g => g.id === selectedMainId);
+                    if (!currentOrg) return null;
+                    const assignedCoachIds = currentOrg.coach_ids || [];
+                    const coachRates = currentOrg.coach_rates || {};
+                    const assignedCoaches = (state.staff || []).filter(st => assignedCoachIds.includes(st.id));
+                    const unassignedCoaches = (state.staff || []).filter(st => !assignedCoachIds.includes(st.id));
+
+                    const handleRateChange = (coachId: string, rate: number) => {
+                      const newRates = { ...coachRates, [coachId]: rate };
+                      if (onUpdateOrgCoaches) {
+                        onUpdateOrgCoaches(currentOrg.id, assignedCoachIds, newRates);
+                      }
+                    };
+
+                    const handleAddCoach = (coachId: string) => {
+                      if (!coachId) return;
+                      const newIds = Array.from(new Set([...assignedCoachIds, coachId]));
+                      const coachObj = state.staff.find(s => s.id === coachId);
+                      const newRates = { ...coachRates, [coachId]: coachRates[coachId] ?? (coachObj?.pay_rate || 150) };
+                      if (onUpdateOrgCoaches) {
+                        onUpdateOrgCoaches(currentOrg.id, newIds, newRates);
+                      }
+                    };
+
+                    const handleRemoveCoach = (coachId: string) => {
+                      const newIds = assignedCoachIds.filter(id => id !== coachId);
+                      const newRates = { ...coachRates };
+                      delete newRates[coachId];
+                      if (onUpdateOrgCoaches) {
+                        onUpdateOrgCoaches(currentOrg.id, newIds, newRates);
+                      }
+                    };
+
+                    return (
+                      <div className="space-y-4">
+                        {assignedCoaches.length > 0 ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {assignedCoaches.map((coach, cIdx) => {
+                              const currentRate = coachRates[coach.id] !== undefined ? coachRates[coach.id] : (coach.pay_rate || 150);
+                              return (
+                                <div key={`assigned-coach-${coach.id}-${cIdx}`} className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-900/30 text-[#1e4da1] dark:text-blue-400 font-black italic flex items-center justify-center text-xs">
+                                        {coach.name.charAt(0)}
+                                      </div>
+                                      <div>
+                                        <p className="text-xs font-black uppercase italic text-slate-800 dark:text-slate-100">{coach.name}</p>
+                                        <p className="text-[8px] font-bold text-slate-400 uppercase">Default: R{coach.pay_rate || 0}/hr</p>
+                                      </div>
+                                    </div>
+                                    <button 
+                                      onClick={() => handleRemoveCoach(coach.id)}
+                                      className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg transition-colors"
+                                      title="Remove coach from organization"
+                                    >
+                                      <X size={14} />
+                                    </button>
+                                  </div>
+                                  <div className="flex items-center gap-2 pt-2 border-t border-slate-200/50 dark:border-slate-800">
+                                    <label className="text-[8px] font-black uppercase text-slate-500 shrink-0">Org Hourly Rate (R):</label>
+                                    <input 
+                                      type="number"
+                                      value={currentRate}
+                                      onChange={(e) => handleRateChange(coach.id, parseFloat(e.target.value) || 0)}
+                                      className="w-24 px-2.5 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-black text-[#1e4da1] dark:text-blue-400 outline-none focus:border-blue-500"
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="py-6 text-center border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-2xl">
+                            <p className="text-[10px] font-black uppercase text-slate-300 tracking-widest">No coaches assigned to this organization</p>
+                          </div>
+                        )}
+
+                        {unassignedCoaches.length > 0 && (
+                          <div className="flex items-center gap-3 pt-2">
+                            <select 
+                              onChange={(e) => {
+                                handleAddCoach(e.target.value);
+                                e.target.value = '';
+                              }}
+                              className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs font-black uppercase text-slate-700 dark:text-slate-200 outline-none cursor-pointer"
+                            >
+                              <option value="">+ Assign Coach to {currentOrg.name}...</option>
+                              {unassignedCoaches.map((c, uIdx) => (
+                                <option key={`unassigned-coach-${c.id}-${uIdx}`} value={c.id}>{c.name} (Default: R{c.pay_rate || 0}/hr)</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
                 <div className="p-8 bg-blue-50 dark:bg-blue-900/10 rounded-[2.5rem] border border-blue-100 dark:border-blue-900/30">
                   <h4 className="text-[10px] font-black uppercase text-blue-600 dark:text-blue-400 tracking-widest mb-2">How it works</h4>
                   <p className="text-[11px] text-blue-700/70 dark:text-blue-300/50 leading-relaxed italic">
@@ -7087,26 +7227,59 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       });
     });
 
-    // Add Staff Invoices
+    // Add Staff Invoices (split into Turn-in & Organization invoices)
     if (state.profile.role === 'owner') {
-      const seenIds = new Set(res.map(r => r.family_id));
       (state.staff || []).forEach(coach => {
-        if (!coach.id || seenIds.has(coach.id)) return;
-        
-        const coachSessions = (state.sessions || []).filter(s => s.coach_id === coach.id);
-        if (coachSessions.length > 0) {
-          seenIds.add(coach.id);
+        if (!coach.id) return;
+
+        // 1. Turn-in Invoice (Owner pays coach for Tumbling/ClassType/Direct sessions)
+        res.push({
+          id: `staff-turnin-${coach.id}`,
+          label: `${coach.name} - Turn-in`,
+          subLabel: `Turn-in Pay (JFlips Owes Coach)`,
+          studentIds: [],
+          family_id: `turnin_${coach.id}`,
+          coachId: coach.id,
+          invoiceType: 'turnin',
+          isGym: false,
+          isStaff: true,
+          isHistory: false,
+          isOrganization: false
+        } as any);
+
+        // 2. Organization Invoices (Coaching for cheer organizations)
+        const cheerOrgSessions = (state.sessions || []).filter(s => {
+          if (s.coach_id !== coach.id) return false;
+          const gym = state.gyms.find(g => g.id === s.classTypeId);
+          return gym && gym.gym_type === 'cheer';
+        });
+
+        const orgsWithSessions = new Set<string>();
+        cheerOrgSessions.forEach(s => {
+          const gym = state.gyms.find(g => g.id === s.classTypeId);
+          if (gym) {
+            const parentId = gym.parent_gym_id || gym.id;
+            orgsWithSessions.add(parentId);
+          }
+        });
+
+        orgsWithSessions.forEach(orgId => {
+          const org = state.gyms.find(g => g.id === orgId);
           res.push({
-            id: `staff-${coach.id}`,
-            label: coach.name,
+            id: `staff-org-${coach.id}-${orgId}`,
+            label: `${coach.name} @ ${org?.name || 'Organization'}`,
+            subLabel: `Org Invoice for ${org?.name || 'Organization'}`,
             studentIds: [],
-            family_id: coach.id,
+            family_id: `org_${coach.id}_${orgId}`,
+            coachId: coach.id,
+            orgId: orgId,
+            invoiceType: 'organization',
             isGym: false,
             isStaff: true,
             isHistory: false,
             isOrganization: false
-          });
-        }
+          } as any);
+        });
       });
     }
 
@@ -7156,22 +7329,55 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
     if (!selectedGroup) return [];
 
     if (selectedGroup.isStaff) {
-      return (state.sessions || []).filter(s => s.coach_id === selectedGroup.family_id).map(s => {
-        const gym = (state.gyms || []).find(g => g.id === s.classTypeId);
-        const coach = state.staff.find(st => st.id === s.coach_id);
-        const payRate = coach?.pay_rate || 0;
-        const className = gym ? gym.name : 'Session';
-        const baseClassName = className;
-        const coverSuffix = s.covering_coach_name ? ` - ${s.covering_coach_name}` : '';
-        const customSuffix = s.custom_event_name ? ` - ${s.custom_event_name}` : '';
-        
-        return {
-          ...s,
-          targetStudentName: 'Coaching Fee',
-          displayPrice: payRate * (s.hours_coached || 1),
-          displayClassName: `${baseClassName}${coverSuffix}${customSuffix}${s.is_competition ? ' Competition' : ''} (${s.hours_coached || 1} hrs)`
-        };
-      }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      const g = selectedGroup as any;
+      const coachId = g.coachId || selectedGroup.family_id.replace(/^(turnin_|org_[^_]+_)/, '');
+      const invoiceType = g.invoiceType || (selectedGroup.family_id.startsWith('org_') ? 'organization' : 'turnin');
+      const orgId = g.orgId || (selectedGroup.family_id.startsWith('org_') ? selectedGroup.family_id.split('_')[2] : null);
+
+      const coach = state.staff.find(st => st.id === coachId);
+      const defaultPayRate = coach?.pay_rate || 0;
+
+      if (invoiceType === 'organization' && orgId) {
+        const orgGym = state.gyms.find(gym => gym.id === orgId);
+        const orgPayRate = orgGym?.coach_rates?.[coachId] !== undefined ? orgGym.coach_rates[coachId] : defaultPayRate;
+
+        return (state.sessions || []).filter(s => {
+          if (s.coach_id !== coachId) return false;
+          const gym = state.gyms.find(gm => gm.id === s.classTypeId);
+          return gym && (gym.id === orgId || gym.parent_gym_id === orgId);
+        }).map(s => {
+          const gym = (state.gyms || []).find(gm => gm.id === s.classTypeId);
+          const className = gym ? gym.name : 'Cheer Session';
+          const coverSuffix = s.covering_coach_name ? ` - ${s.covering_coach_name}` : '';
+          const customSuffix = s.custom_event_name ? ` - ${s.custom_event_name}` : '';
+          
+          return {
+            ...s,
+            targetStudentName: orgGym?.name || 'Organization Coaching',
+            displayPrice: orgPayRate * (s.hours_coached || 1),
+            displayClassName: `${className}${coverSuffix}${customSuffix}${s.is_competition ? ' Competition' : ''} (${s.hours_coached || 1} hrs)`
+          };
+        }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      } else {
+        return (state.sessions || []).filter(s => {
+          if (s.coach_id !== coachId) return false;
+          const gym = state.gyms.find(gm => gm.id === s.classTypeId);
+          return !gym || gym.gym_type !== 'cheer';
+        }).map(s => {
+          const gym = (state.gyms || []).find(gm => gm.id === s.classTypeId);
+          const ct = (state.classTypes || []).find(c => c.id === s.classTypeId);
+          const className = ct ? ct.name : (gym ? gym.name : 'Tumbling / Class Session');
+          const coverSuffix = s.covering_coach_name ? ` - ${s.covering_coach_name}` : '';
+          const customSuffix = s.custom_event_name ? ` - ${s.custom_event_name}` : '';
+          
+          return {
+            ...s,
+            targetStudentName: 'Turn-in Coaching Fee',
+            displayPrice: defaultPayRate * (s.hours_coached || 1),
+            displayClassName: `${className}${coverSuffix}${customSuffix}${s.is_competition ? ' Competition' : ''} (${s.hours_coached || 1} hrs)`
+          };
+        }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      }
     }
 
     let billableIds: string[] = [];
@@ -7288,10 +7494,29 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
 
   const calculateTotal = useCallback((group: { family_id: string, studentIds?: string[], isGym?: boolean, isStaff?: boolean }) => {
     if (group.isStaff) {
-      const coach = state.staff.find(s => s.id === group.family_id);
-      const payRate = coach?.pay_rate || 0;
-      return (state.sessions || []).filter(s => s.coach_id === group.family_id)
-        .reduce((acc: number, s) => acc + (payRate * (s.hours_coached || 1)), 0);
+      const g = group as any;
+      const coachId = g.coachId || group.family_id.replace(/^(turnin_|org_[^_]+_)/, '');
+      const invoiceType = g.invoiceType || (group.family_id.startsWith('org_') ? 'organization' : 'turnin');
+      const orgId = g.orgId || (group.family_id.startsWith('org_') ? group.family_id.split('_')[2] : null);
+
+      const coach = state.staff.find(s => s.id === coachId);
+      const defaultPayRate = coach?.pay_rate || 0;
+
+      if (invoiceType === 'organization' && orgId) {
+        const orgGym = state.gyms.find(gym => gym.id === orgId);
+        const orgPayRate = orgGym?.coach_rates?.[coachId] !== undefined ? orgGym.coach_rates[coachId] : defaultPayRate;
+        return (state.sessions || []).filter(s => {
+          if (s.coach_id !== coachId) return false;
+          const gym = state.gyms.find(gm => gm.id === s.classTypeId);
+          return gym && (gym.id === orgId || gym.parent_gym_id === orgId);
+        }).reduce((acc: number, s) => acc + (orgPayRate * (s.hours_coached || 1)), 0);
+      } else {
+        return (state.sessions || []).filter(s => {
+          if (s.coach_id !== coachId) return false;
+          const gym = state.gyms.find(gm => gm.id === s.classTypeId);
+          return !gym || gym.gym_type !== 'cheer';
+        }).reduce((acc: number, s) => acc + (defaultPayRate * (s.hours_coached || 1)), 0);
+      }
     }
     const billableSessions = (state.sessions || []).filter(s => {
       const gym = state.gyms.find(g => g.id === s.classTypeId);
@@ -7674,25 +7899,33 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                               const isCheerTeam = gymEntity?.gym_type === 'cheer';
                               
                               if (selectedGroup?.isStaff) {
-                                const coach = state.staff.find(s => s.id === selectedGroup.family_id);
-                                // Find the org by looking at which gym the coach's sessions belong to
-                                const coachSessions = (state.sessions || []).filter(s => s.coach_id === selectedGroup.family_id);
-                                const firstGymId = coachSessions.map(s => {
-                                  const g = state.gyms.find(gg => gg.id === s.classTypeId);
-                                  return g?.parent_gym_id || g?.id;
-                                }).find(Boolean);
-                                const orgGym = state.gyms.find(g => g.id === firstGymId);
-                                return (
-                                  <>
-                                    <p className="text-xl font-black uppercase italic text-slate-900 dark:text-slate-100">{orgGym?.bill_to_name || orgGym?.name || 'Organization'}</p>
-                                    {orgGym?.bill_to_address && <p className="text-[12px] text-slate-500 mt-1 whitespace-pre-wrap leading-relaxed">{orgGym.bill_to_address}</p>}
-                                    {orgGym?.bill_to_phone && <p className="text-[12px] text-slate-500 mt-1">{orgGym.bill_to_phone}</p>}
-                                    <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-                                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Coached by</p>
-                                      <p className="text-[14px] font-black uppercase italic text-[#1e4da1]">{coach?.name}</p>
-                                    </div>
-                                  </>
-                                );
+                                const g = selectedGroup as any;
+                                const coachId = g.coachId || selectedGroup.family_id.replace(/^(turnin_|org_[^_]+_)/, '');
+                                const invoiceType = g.invoiceType || (selectedGroup.family_id.startsWith('org_') ? 'organization' : 'turnin');
+                                const orgId = g.orgId || (selectedGroup.family_id.startsWith('org_') ? selectedGroup.family_id.split('_')[2] : null);
+                                const coach = state.staff.find(s => s.id === coachId);
+                                const orgGym = orgId ? state.gyms.find(gym => gym.id === orgId) : null;
+
+                                if (invoiceType === 'organization' && orgGym) {
+                                  return (
+                                    <>
+                                      <p className="text-xl font-black uppercase italic text-slate-900 dark:text-slate-100">{orgGym?.bill_to_name || orgGym?.name}</p>
+                                      {orgGym?.bill_to_address && <p className="text-[12px] text-slate-500 mt-1 whitespace-pre-wrap leading-relaxed">{orgGym.bill_to_address}</p>}
+                                      {orgGym?.bill_to_phone && <p className="text-[12px] text-slate-500 mt-1">{orgGym.bill_to_phone}</p>}
+                                      <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Coached by</p>
+                                        <p className="text-[14px] font-black uppercase italic text-[#1e4da1]">{coach?.name}</p>
+                                      </div>
+                                    </>
+                                  );
+                                } else {
+                                  return (
+                                    <>
+                                      <p className="text-xl font-black uppercase italic text-slate-900 dark:text-slate-100">{coach?.name || 'Coach'}</p>
+                                      <p className="text-[12px] text-slate-500 mt-1">Coach Turn-in Payout (Jay Flips Payout)</p>
+                                    </>
+                                  );
+                                }
                               }
 
                               if (currentPayment?.bill_to_address || currentPayment?.bill_to_phone) {
@@ -7899,7 +8132,16 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
         {(!filteredInvoices || filteredInvoices.length === 0) ? <div className="bg-white dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-[2rem] p-10 text-center shadow-sm"><UserCircle className="mx-auto text-slate-200 dark:text-slate-600 mb-4" size={48} /><p className="text-[#94a3b8] text-[10px] font-black uppercase">No Invoices Found</p></div> : filteredInvoices.map((group, idx) => {
           const count = (state.sessions || []).filter(sess => {
             if (group.isStaff) {
-              return sess.coach_id === group.family_id && state.gyms.some(g => g.id === sess.classTypeId);
+              const g = group as any;
+              const coachId = g.coachId || group.family_id.replace(/^(turnin_|org_[^_]+_)/, '');
+              const invoiceType = g.invoiceType || (group.family_id.startsWith('org_') ? 'organization' : 'turnin');
+              const orgId = g.orgId || (group.family_id.startsWith('org_') ? group.family_id.split('_')[2] : null);
+
+              if (invoiceType === 'organization' && orgId) {
+                return sess.coach_id === coachId && state.gyms.some(gm => (gm.id === orgId || gm.parent_gym_id === orgId) && gm.id === sess.classTypeId);
+              } else {
+                return sess.coach_id === coachId && (!state.gyms.some(gm => gm.id === sess.classTypeId && gm.gym_type === 'cheer'));
+              }
             }
             
             const gym = state.gyms.find(g => g.id === sess.classTypeId);
@@ -7937,6 +8179,11 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                 <div className="overflow-hidden flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-black text-slate-800 dark:text-slate-100 text-[17px] uppercase italic group-hover:text-[#1e4da1] transition-colors">{group.label}</p>
+                    {(group as any).subLabel && (
+                      <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-100 dark:border-emerald-900/40 uppercase tracking-wider">
+                        {(group as any).subLabel}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5 mt-0.5"><Calendar size={9} className="text-[#94a3b8]" /><p className="text-[9px] text-slate-500 font-black uppercase">{count} logs</p></div>
                 </div>
@@ -8821,6 +9068,7 @@ const StaffForm: React.FC<{
   const [accountNumber, setAccountNumber] = useState(initialData?.account_number || '');
   const [branchCode, setBranchCode] = useState(initialData?.branch_code || '');
   const [accountType, setAccountType] = useState(initialData?.account_type || 'Current');
+  const [password, setPassword] = useState(initialData?.password || '');
   const [isOwner, setIsOwner] = useState(initialData?.is_owner || false);
   const [assignedGymIds, setAssignedGymIds] = useState<string[]>(initialData?.assigned_gym_ids || []);
   const [assignedClassIds, setAssignedClassIds] = useState<string[]>(initialData?.assigned_class_ids || []);
@@ -8835,7 +9083,7 @@ const StaffForm: React.FC<{
 
   const handleSubmit = () => {
     if (!name || !email) return alert('Name and Email are required');
-    onSubmit(name, email, parseFloat(payRate), initialData?.id, bankName, accountNumber, branchCode, accountType, undefined, isOwner, assignedGymIds, assignedClassIds);
+    onSubmit(name, email, parseFloat(payRate), initialData?.id, bankName, accountNumber, branchCode, accountType, password, isOwner, assignedGymIds, assignedClassIds);
   };
 
   const AssignBtn = ({ id, label, icon }: { id: string, label: string, icon: React.ReactNode }) => {
@@ -8876,6 +9124,7 @@ const StaffForm: React.FC<{
       <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Coach Name</label><input placeholder="NAME" value={name} onChange={e => setName(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
       <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Coach Email</label><input placeholder="coach@email.com" type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
       <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Pay Rate (R/hr)</label><input placeholder="150" type="number" value={payRate} onChange={e => setPayRate(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
+      <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Coach Password / Passcode</label><input placeholder="SET OR VIEW PASSWORD" type="text" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
 
       {/* ── ACCESS ASSIGNMENT ─────────────────────────────────────────────── */}
       <div className="space-y-3 border-t border-slate-100 dark:border-slate-800 pt-4">

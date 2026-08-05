@@ -912,7 +912,7 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                         <p className="text-sm font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">{item.name}</p>
                         {item.is_owner && <span className="bg-[#eff6ff] dark:bg-blue-950 text-[#1e4da1] text-[6px] font-black px-1 py-0.5 rounded uppercase tracking-wider shrink-0">Owner</span>}
                       </div>
-                      <p className="text-[8px] text-slate-400 font-bold uppercase">{item.email} • R{item.pay_rate || 0}/hr</p>
+                      <p className="text-[8px] text-slate-400 font-bold uppercase">{item.email} • R{item.pay_rate || 0}/hr{item.password ? ` • Password: ${item.password}` : ''}</p>
                     </div>
                   </div>
                   {isOwner && onEditStaff && <ChevronRight size={18} className="text-slate-300" />}
