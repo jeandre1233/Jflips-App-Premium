@@ -20,7 +20,10 @@ import {
   FileSpreadsheet, 
   Calendar,
   Settings2,
-  Download
+  Download,
+  Zap,
+  Key,
+  Copy
 } from 'lucide-react';
 import { 
   AppState, 
@@ -31,6 +34,7 @@ import {
   ClassSchedule, 
   Staff 
 } from '../../types';
+import { supabase } from '../../supabase';
 import { 
   initAuth as initGoogleAuth, 
   googleSignIn, 
@@ -887,10 +891,10 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
           </div>
         ) : activeTab === 'staff' ? (
           <div className="space-y-4">
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex justify-between items-center mb-2">
               <div>
                 <h2 className="text-2xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">Coaches</h2>
-                <p className="text-[8px] font-black text-[#94a3b8] uppercase">Staff Access</p>
+                <p className="text-[8px] font-black text-[#94a3b8] uppercase">Staff Access & Permissions</p>
               </div>
               {isOwner && onAddStaff && (
                 <motion.button whileTap={{ scale: 0.8 }} onClick={onAddStaff} className="w-10 h-10 bg-[#1e4da1] text-white rounded-xl flex items-center justify-center shadow-lg">
@@ -898,9 +902,68 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                 </motion.button>
               )}
             </div>
+
+            {/* Pending Coach Access Requests Banner for Owners */}
+            {isOwner && (state.staff || []).some(s => s.status === 'pending' || s.is_approved === false) && (
+              <div className="p-4 bg-gradient-to-r from-amber-900/30 via-amber-950/20 to-amber-900/30 border border-amber-500/30 rounded-2xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="text-amber-400 shrink-0" size={18} />
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-wider text-amber-300">Pending Coach Access Requests</h3>
+                    <p className="text-[8.5px] text-amber-200/60 font-bold uppercase">Coaches requesting website access to your gym</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {(state.staff || []).filter(s => s.status === 'pending' || s.is_approved === false).map((coach, idx) => (
+                    <div key={`pending-coach-${coach.id}-${idx}`} className="p-3 bg-white/5 border border-amber-500/20 rounded-xl flex items-center justify-between gap-3 flex-wrap">
+                      <div>
+                        <p className="text-xs font-black text-white uppercase italic">{coach.name || coach.email}</p>
+                        <p className="text-[9px] font-bold text-slate-400 uppercase">{coach.email}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await supabase.from('staff').update({ is_approved: true, status: 'approved' }).eq('id', coach.id);
+                              try {
+                                await supabase.from('profiles').update({ is_approved: true, status: 'approved' }).eq('id', coach.id);
+                              } catch (_) {}
+                              alert(`Access granted for Coach ${coach.name || coach.email}! They can now log in and access the gym.`);
+                              window.location.reload();
+                            } catch (e) {
+                              console.error('Coach approval failed:', e);
+                            }
+                          }}
+                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md transition-colors"
+                        >
+                          <Check size={12} /> Grant Access
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await supabase.from('staff').delete().eq('id', coach.id);
+                              alert(`Registration request for ${coach.email} declined.`);
+                              window.location.reload();
+                            } catch (e) {
+                              console.error('Coach rejection failed:', e);
+                            }
+                          }}
+                          className="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl text-[9px] font-black uppercase tracking-wider transition-colors"
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-3 pb-20">
               {(!state.staff || state.staff.length === 0) ? (
-                <div className="py-12 bg-white dark:bg-slate-850 border border-slate-100 rounded-3xl text-center"><p className="text-slate-400 text-[10px] font-black uppercase">No Staff Registered</p></div>
+                <div className="py-12 bg-white dark:bg-slate-850 border border-slate-100 dark:border-slate-800 rounded-3xl text-center"><p className="text-slate-400 text-[10px] font-black uppercase">No Staff Registered</p></div>
               ) : state.staff.map((item, idx) => (
                 <motion.div key={`staff-${item.id}-${idx}`} variants={athleteItemVariants} onClick={isOwner && onEditStaff ? () => onEditStaff(item) : undefined} className={`p-4 bg-white dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 rounded-2xl flex items-center justify-between shadow-sm ${isOwner && onEditStaff ? 'cursor-pointer hover:border-blue-100/50' : ''}`}>
                   <div className="flex items-center gap-3 overflow-hidden">
@@ -908,11 +971,16 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                       {item.name.charAt(0)}
                     </div>
                     <div>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <p className="text-sm font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">{item.name}</p>
                         {item.is_owner && <span className="bg-[#eff6ff] dark:bg-blue-950 text-[#1e4da1] text-[6px] font-black px-1 py-0.5 rounded uppercase tracking-wider shrink-0">Owner</span>}
+                        {item.is_approved === false || item.status === 'pending' ? (
+                          <span className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[6.5px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0">Pending Approval</span>
+                        ) : (
+                          <span className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[6.5px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0">Approved Coach</span>
+                        )}
                       </div>
-                      <p className="text-[8px] text-slate-400 font-bold uppercase">{item.email} • R{item.pay_rate || 0}/hr{item.password ? ` • Password: ${item.password}` : ''}</p>
+                      <p className="text-[8px] text-slate-400 font-bold uppercase">{item.email} • R{item.pay_rate || 0}/hr{item.password ? ` • Passcode: ${item.password}` : ''}</p>
                     </div>
                   </div>
                   {isOwner && onEditStaff && <ChevronRight size={18} className="text-slate-300" />}

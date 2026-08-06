@@ -125,6 +125,9 @@ export interface Profile {
   owner_id?: string; // If coach, this links to their owner
   pay_rate?: number; // Default pay rate for coach
   email?: string;
+  access_code?: string;
+  status?: 'pending' | 'approved' | 'rejected';
+  is_approved?: boolean;
 }
 
 export interface Staff {
@@ -141,8 +144,11 @@ export interface Staff {
   account_type?: string;
   password?: string;
   is_owner?: boolean;
+  access_code?: string;
   assigned_gym_ids?: string[];    // gyms/teams this coach can access
   assigned_class_ids?: string[];  // class types this coach can access
+  status?: 'pending' | 'approved' | 'rejected';
+  is_approved?: boolean;
 }
 
 export interface AppNotification {

@@ -106,7 +106,7 @@ const StatusPips = ({ status, size = "w-1 h-1" }: { status: { logged: Attendance
     <div className="flex gap-0.5 justify-center flex-row absolute bottom-1 left-0 right-0 px-1 overflow-hidden">
       {pipList.slice(0, 3).map((pip, idx) => (
          <div 
-            key={idx} 
+            key={`pip-${pip.bg}-${idx}`} 
             className={`${size} rounded-full ${pip.bg} ${pip.isLogged ? 'opacity-100 ring-1 ring-white/20' : 'opacity-40 dark:opacity-60'} shrink-0`} 
           />
       ))}
@@ -228,7 +228,7 @@ export const CalendarView = memo(({ sessions, classTypes, gyms, month, year, sch
 
       <div className="grid grid-cols-7 gap-y-4 text-center mb-2">
         {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
-          <span key={i} className="text-[10px] font-black text-slate-400 uppercase">{d}</span>
+          <span key={`day-hdr-${d}-${i}`} className="text-[10px] font-black text-slate-400 uppercase">{d}</span>
         ))}
       </div>
 
@@ -348,6 +348,22 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
   const [isCalendarExpanded, setIsCalendarExpanded] = useState(false);
   const isOwner = state.profile.role === 'owner';
 
+  const myStaff = useMemo(() => {
+    return (state.staff || []).find(s => 
+      (s.id && s.id === state.profile?.id) ||
+      (s.email && state.profile?.email && s.email.toLowerCase() === state.profile.email.toLowerCase())
+    );
+  }, [state.staff, state.profile]);
+
+  const coachSessions = useMemo(() => {
+    if (isOwner) return state.sessions || [];
+    const myIds = new Set<string>();
+    if (state.profile?.id) myIds.add(state.profile.id);
+    if (myStaff?.id) myIds.add(myStaff.id);
+    if (myStaff?.email) myIds.add(myStaff.email);
+    return (state.sessions || []).filter(s => myIds.has(s.coach_id));
+  }, [state.sessions, isOwner, state.profile, myStaff]);
+
   const revenue = useMemo(() => (state.sessions || []).reduce((acc, sess) => {
     const ct = (state.classTypes || []).find(c => c.id === sess.classTypeId);
     const gym = (state.gyms || []).find(g => g.id === sess.classTypeId);
@@ -382,19 +398,19 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
   }, 0), [state.sessions, state.classTypes, state.gyms]);
 
   const staffPay = useMemo(() => {
-    return (state.sessions || []).reduce((acc, sess) => {
+    return (coachSessions || []).reduce((acc, sess) => {
       const coach = state.staff.find(s => s.id === sess.coach_id);
       const coachPayRate = isOwner ? (coach?.pay_rate || 0) : (state.profile.pay_rate || 0);
       return acc + (coachPayRate * (sess.hours_coached || 1));
     }, 0);
-  }, [state.sessions, state.staff, isOwner, state.profile.pay_rate]);
+  }, [coachSessions, state.staff, isOwner, state.profile.pay_rate]);
 
   const matTime = useMemo(() => {
-    return (state.sessions || []).reduce((acc, sess) => acc + (sess.hours_coached || 1), 0);
-  }, [state.sessions]);
+    return (coachSessions || []).reduce((acc, sess) => acc + (sess.hours_coached || 1), 0);
+  }, [coachSessions]);
 
   const recentLogs = useMemo(() => {
-    const logs = [...(state.sessions || [])].sort((a, b) => {
+    const logs = [...(coachSessions || [])].sort((a, b) => {
       const dateA = a.date ? new Date(a.date).getTime() : 0;
       const dateB = b.date ? new Date(b.date).getTime() : 0;
       if (dateB !== dateA) {

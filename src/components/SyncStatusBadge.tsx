@@ -108,8 +108,8 @@ export const SyncStatusBadge: React.FC = () => {
                 {items.length === 0 ? (
                   <p className="text-center py-12 text-slate-400 text-[10px] font-black uppercase">Queue is empty</p>
                 ) : (
-                  items.map((item) => (
-                    <div key={item.id} className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-100 dark:border-slate-800 flex items-center gap-4">
+                  items.map((item, idx) => (
+                    <div key={`sync-${item.id || idx}-${idx}`} className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-100 dark:border-slate-800 flex items-center gap-4">
                       <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
                         item.status === 'pending' ? 'bg-amber-100 text-amber-600 dark:bg-amber-950/30' :
                         item.status === 'synced' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-950/30' :

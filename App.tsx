@@ -871,73 +871,149 @@ const App: React.FC = () => {
     setIsSyncing(true);
     setDbError(null);
     try {
-      // First, get the profile to determine role
-      let { data: p, error: pErr } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      
-      if (pErr && pErr.code === 'PGRST116') {
-        // Profile not found — this is a new user. Check if their email was pre-registered
-        // in any owner's staff table. If so, auto-create a coach profile for them.
-        const userEmail = (user.email || '').toLowerCase().trim();
-        const { data: staffMatch } = await supabase
-          .from('staff')
-          .select('*')
-          .ilike('email', userEmail)
-          .single();
+      // First, get the profile to determine role and business connection
+      const pendingKey = (localStorage.getItem('pending_access_key') || '').trim().toUpperCase();
+      const userEmail = (user.email || '').toLowerCase().trim();
 
-        if (staffMatch) {
-          // ── Coach first login: auto-create their profile linked to the owner ──
+      let { data: p, error: pErr } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+
+      // Check if user is registered in staff table or provided an access key
+      let matchedOwnerId: string | null = null;
+      let matchedPayRate = 0;
+      let matchedBizName = '';
+      let matchedStaffName = '';
+
+      // Check staff table or pending key if profile is missing, unlinked, or marked as owner
+      if ((pErr && pErr.code === 'PGRST116') || (!pErr && p && (p.role === 'owner' || !p.owner_id))) {
+        // 1. Check pendingKey against staff access code/passcode or owner access code
+        if (pendingKey) {
+          try {
+            const { data: staffMatch } = await supabase
+              .from('staff')
+              .select('*')
+              .or(`access_code.ilike.${pendingKey},password.ilike.${pendingKey}`)
+              .limit(1);
+
+            if (staffMatch && staffMatch.length > 0) {
+              const s = staffMatch[0];
+              matchedOwnerId = s.owner_id;
+              matchedPayRate = s.pay_rate || 0;
+              matchedBizName = s.name || '';
+              matchedStaffName = s.name;
+            } else {
+              const { data: ownerMatch } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('role', 'owner')
+                .ilike('access_code', pendingKey)
+                .limit(1);
+
+              if (ownerMatch && ownerMatch.length > 0) {
+                const o = ownerMatch[0];
+                matchedOwnerId = o.id;
+                matchedBizName = o.business_name || 'Gym Business';
+              }
+            }
+          } catch (e) {
+            console.warn('Access key lookup exception:', e);
+          }
+        }
+
+        // 2. Email pre-registration fallback: check if user's email is in staff table
+        if (!matchedOwnerId && userEmail) {
+          try {
+            const { data: emailMatch } = await supabase
+              .from('staff')
+              .select('*')
+              .ilike('email', userEmail)
+              .neq('owner_id', user.id)
+              .limit(1);
+
+            if (emailMatch && emailMatch.length > 0) {
+              const s = emailMatch[0];
+              matchedOwnerId = s.owner_id;
+              matchedPayRate = s.pay_rate || 0;
+              matchedBizName = s.name || '';
+              matchedStaffName = s.name;
+            }
+          } catch (e) {
+            console.warn('Email staff lookup exception:', e);
+          }
+        }
+
+        // 3. Link or convert profile to coach if matched to an Owner
+        if (matchedOwnerId && matchedOwnerId !== user.id) {
           const newProfile = {
             id: user.id,
             role: 'coach',
-            owner_id: staffMatch.owner_id,
-            pay_rate: staffMatch.pay_rate || 0,
-            bank_name: staffMatch.bank_name || '',
-            account_number: staffMatch.account_number || '',
-            branch_code: staffMatch.branch_code || '',
-            account_type: staffMatch.account_type || 'Current',
-            business_name: staffMatch.name || '',
-            logo: '',
+            owner_id: matchedOwnerId,
+            pay_rate: matchedPayRate,
+            business_name: matchedBizName,
+            email: userEmail
           };
           const { error: insErr } = await supabase.from('profiles').upsert(newProfile);
           if (!insErr) {
-            p = newProfile as any;
-            // Notify the owner that this coach just activated their account
-            await supabase.from('notifications').insert({
-              user_id: staffMatch.owner_id,
-              message: `${staffMatch.name} (${userEmail}) just signed up and connected to your workspace as a coach.`,
-              type: 'coach_joined',
-              metadata: { coach_user_id: user.id, staff_id: staffMatch.id },
-            });
-          } else {
-            console.warn('Auto-profile creation failed:', insErr.message);
+            p = { ...(p || {}), ...newProfile } as any;
+            localStorage.removeItem('pending_access_key');
+            try {
+              await supabase.from('notifications').insert({
+                user_id: matchedOwnerId,
+                message: `${matchedStaffName || userEmail} joined your gym business as a coach.`,
+                type: 'coach_joined',
+                metadata: { coach_user_id: user.id }
+              });
+            } catch (_) {}
+          }
+        } else if (pErr && pErr.code === 'PGRST116') {
+          // New Owner Profile Creation
+          const defaultKey = `JFLIPS-${Math.floor(1000 + Math.random() * 9000)}`;
+          const ownerProfile = {
+            id: user.id,
+            role: 'owner',
+            business_name: INITIAL_PROFILE.businessName,
+            access_code: defaultKey,
+            email: userEmail
+          };
+          const { error: insErr } = await supabase.from('profiles').upsert(ownerProfile);
+          if (!insErr) {
+            p = ownerProfile as any;
           }
         }
-      } else if (!pErr && p && p.role === 'coach') {
-        // ── Returning coach: sync banking details from owner's staff record ──
-        // This keeps banking details up to date if the owner edits them.
-        const userEmail = (user.email || '').toLowerCase().trim();
-        const { data: staffSync } = await supabase
-          .from('staff')
-          .select('bank_name, account_number, branch_code, account_type, pay_rate, name')
-          .ilike('email', userEmail)
-          .single();
-        if (staffSync) {
-          const updates: any = {};
-          if (staffSync.bank_name)     updates.bank_name     = staffSync.bank_name;
-          if (staffSync.account_number) updates.account_number = staffSync.account_number;
-          if (staffSync.branch_code)   updates.branch_code   = staffSync.branch_code;
-          if (staffSync.account_type)  updates.account_type  = staffSync.account_type;
-          if (staffSync.pay_rate)      updates.pay_rate      = staffSync.pay_rate;
-          if (Object.keys(updates).length > 0) {
-            await supabase.from('profiles').update(updates).eq('id', user.id);
-            // Apply to in-memory p so the profile renders correctly this session
-            p = { ...p, ...updates };
+      }
+
+      if (!pErr && p) {
+        // Owner Profile: Ensure access_code exists
+        if (p.role === 'owner' && !p.access_code) {
+          const defaultKey = `JFLIPS-${Math.floor(1000 + Math.random() * 9000)}`;
+          try {
+            await supabase.from('profiles').update({ access_code: defaultKey }).eq('id', user.id);
+          } catch (_) {}
+          p.access_code = defaultKey;
+        }
+
+        // Returning coach: Sync pay rate / banking info from staff table if updated by owner
+        if (p.role === 'coach') {
+          const { data: staffSync } = await supabase
+            .from('staff')
+            .select('bank_name, account_number, branch_code, account_type, pay_rate, name')
+            .ilike('email', userEmail)
+            .limit(1);
+          if (staffSync && staffSync.length > 0) {
+            const s = staffSync[0];
+            const updates: any = {};
+            if (s.bank_name)      updates.bank_name      = s.bank_name;
+            if (s.account_number) updates.account_number = s.account_number;
+            if (s.branch_code)    updates.branch_code    = s.branch_code;
+            if (s.account_type)   updates.account_type   = s.account_type;
+            if (s.pay_rate)       updates.pay_rate       = s.pay_rate;
+            if (Object.keys(updates).length > 0) {
+              try {
+                await supabase.from('profiles').update(updates).eq('id', user.id);
+              } catch (_) {}
+              p = { ...p, ...updates };
+            }
           }
         }
-        // If no staff match: this is a brand new owner signing up — they'll get
-        // the default owner profile via the fallback below.
-      } else if (pErr) {
-        console.error("Profile fetch error", pErr);
       }
 
       const savedBizBank = localStorage.getItem(`jflips_biz_bankName_${user.id}`) || '';
@@ -959,6 +1035,7 @@ const App: React.FC = () => {
         role: p.role || 'owner',
         owner_id: p.owner_id,
         pay_rate: p.pay_rate,
+        access_code: p.access_code,
         id: user.id  // ← always set so coach assignment checks work
       } : { 
         ...INITIAL_PROFILE, 
@@ -980,52 +1057,6 @@ const App: React.FC = () => {
         return;
       }
 
-      // ── For coaches: pre-fetch assignment lists to filter what they can see ─────
-      let coachAssignedGymIds: string[] = [];
-      let coachAssignedClassIds: string[] = [];
-      let coachEnrolledStudentIds: Set<string> = new Set();
-
-      if (!isOwner) {
-        // Load the coach's own staff record to get their assigned gym/class lists
-        const userEmail = (user.email || '').toLowerCase().trim();
-        const { data: staffRow } = await supabase
-          .from('staff')
-          .select('assigned_gym_ids, assigned_class_ids')
-          .ilike('email', userEmail)
-          .eq('owner_id', targetUserId)
-          .single();
-
-        const rawGymIds: string[] = staffRow?.assigned_gym_ids || [];
-        const rawClassIds: string[] = staffRow?.assigned_class_ids || [];
-
-        // Expand: include sub-teams of any assigned parent cheer gym
-        if (rawGymIds.length > 0) {
-          const { data: allGymsExpand } = await supabase
-            .from('gyms')
-            .select('id, parent_gym_id')
-            .eq('user_id', targetUserId);
-          const parentSet = new Set(rawGymIds);
-          (allGymsExpand || []).forEach((g: any) => {
-            if (g.parent_gym_id && parentSet.has(g.parent_gym_id)) rawGymIds.push(g.id);
-          });
-        }
-
-        coachAssignedGymIds = [...new Set(rawGymIds)];
-        coachAssignedClassIds = [...new Set(rawClassIds)];
-
-        // Get enrolled students from assigned classes
-        if (coachAssignedClassIds.length > 0) {
-          const { data: assignedClasses } = await supabase
-            .from('class_types')
-            .select('enrolled_student_ids')
-            .in('id', coachAssignedClassIds)
-            .eq('user_id', targetUserId);
-          (assignedClasses || []).forEach((ct: any) => {
-            (ct.enrolled_student_ids || []).forEach((id: string) => coachEnrolledStudentIds.add(id));
-          });
-        }
-      }
-
       // ── Main data fetch ────────────────────────────────────────────────────────
       const fetchStudents = async () => {
         const [tumb, team] = await Promise.all([
@@ -1040,22 +1071,12 @@ const App: React.FC = () => {
 
       const [studentsRes, gymsRes, classesRes, sessionsRes, historyRes, paymentsRes, schedulesRes, staffRes, snapshotsRes, notificationsRes, competitionsRes, cheerRegistrationsRes] = await Promise.all([
         fetchStudents(),
-        // Gyms: owner=all; coach=only assigned
-        isOwner
-          ? supabase.from('gyms').select('*').eq('user_id', targetUserId)
-          : coachAssignedGymIds.length > 0
-            ? supabase.from('gyms').select('*').eq('user_id', targetUserId).in('id', coachAssignedGymIds)
-            : Promise.resolve({ data: [], error: null }),
-        // Class types: owner=all; coach=only assigned (with or without explicit assignment)
-        isOwner
-          ? supabase.from('class_types').select('*').eq('user_id', targetUserId)
-          : coachAssignedClassIds.length > 0
-            ? supabase.from('class_types').select('*').eq('user_id', targetUserId).in('id', coachAssignedClassIds)
-            : Promise.resolve({ data: [], error: null }),
-        // Sessions: coach only sees their own
-        isOwner
-          ? supabase.from('sessions').select('*').eq('user_id', targetUserId)
-          : supabase.from('sessions').select('*').eq('user_id', targetUserId).eq('coach_id', user.id),
+        // Gyms & Organizations: return all for business so coaches can view all organizations/teams
+        supabase.from('gyms').select('*').eq('user_id', targetUserId),
+        // Class types: return all for business
+        supabase.from('class_types').select('*').eq('user_id', targetUserId),
+        // Sessions: fetch all business sessions so coaches see their sessions regardless of coach_id identifier format
+        supabase.from('sessions').select('*').eq('user_id', targetUserId),
         // History: owner only
         isOwner
           ? supabase.from('history').select('*').eq('user_id', targetUserId)
@@ -1064,13 +1085,10 @@ const App: React.FC = () => {
         isOwner
           ? supabase.from('payments').select('*').eq('user_id', targetUserId)
           : Promise.resolve({ data: [], error: null }),
-        // Schedules: coach only sees their assigned ones
-        isOwner
-          ? supabase.from('class_schedules').select('*').eq('user_id', targetUserId)
-          : supabase.from('class_schedules').select('*').eq('user_id', targetUserId).eq('coach_id', user.id),
-        isOwner
-          ? supabase.from('staff').select('*').eq('owner_id', user.id)
-          : Promise.resolve({ data: [], error: null }),
+        // Schedules: return all schedules for business so coaches see classes & timetable
+        supabase.from('class_schedules').select('*').eq('user_id', targetUserId),
+        // Staff list:
+        supabase.from('staff').select('*').eq('owner_id', targetUserId),
         supabase.from('invoice_snapshots').select('*').eq('coach_id', user.id).order('created_at', { ascending: false }),
         isOwner
           ? supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20)
@@ -1611,6 +1629,8 @@ const App: React.FC = () => {
         }
       }
 
+      const generatedCode = 'JF-' + Math.floor(1000 + Math.random() * 9000);
+
       const payload: any = {
         email: email.toLowerCase().trim(),
         name,
@@ -1621,6 +1641,7 @@ const App: React.FC = () => {
         branch_code: branchCode || null,
         account_type: accountType || null,
         password: password || null,
+        access_code: generatedCode,
         is_owner: isOwnerProfile || false,
         assigned_gym_ids: assignedGymIds || [],
         assigned_class_ids: assignedClassIds || [],
@@ -1634,9 +1655,10 @@ const App: React.FC = () => {
       }
 
       if (saveError) {
-        // Resilience: if is_owner or password column is missing, retry without them
-        if (saveError.message.includes('password') || saveError.message.includes('is_owner')) {
-          delete payload.password;
+        // Resilience: if access_code, password, or is_owner column is missing, retry without them
+        if (saveError.message.includes('access_code') || saveError.message.includes('password') || saveError.message.includes('is_owner')) {
+          if (saveError.message.includes('access_code')) delete payload.access_code;
+          if (saveError.message.includes('password')) delete payload.password;
           if (saveError.message.includes('is_owner')) delete payload.is_owner;
           if (id) {
             ({ error: saveError } = await supabase.from('staff').update(payload).eq('id', id).eq('owner_id', user.id));
@@ -3729,71 +3751,143 @@ const LandingPage3D: React.FC<{ onSignIn: () => void }> = ({ onSignIn }) => {
 
 // --- AUTH VIEW ---
 
-const AuthView: React.FC<{ initialMode?: 'signin' | 'signup'; onBack?: () => void }> = ({ initialMode = 'signin', onBack }) => {
+const AuthView: React.FC<{ initialMode?: 'signin' | 'register_coach'; onBack?: () => void }> = ({ initialMode = 'signin', onBack }) => {
+  const [mode, setMode] = useState<'signin' | 'register_coach' | 'success_request'>(initialMode === 'register_coach' ? 'register_coach' : 'signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isSignUp, setIsSignUp] = useState(initialMode === 'signup');
+  const [fullName, setFullName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [signUpSuccess, setSignUpSuccess] = useState(false);
 
-  const handleGoogleSignInWithSupabase = async () => {
+  const OWNER_EMAIL = 'jeandreblacq@gmail.com';
+
+  const handleSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
     setLoading(true);
     setError(null);
     try {
-      const { error: authError } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: window.location.origin,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent'
-          },
-          scopes: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/calendar'
-        }
-      });
+      const { error: authError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (authError) setError(authError.message);
     } catch (err: any) {
-      setError(err.message || 'Google Sign-In failed');
+      setError(err.message || 'An unexpected error occurred during sign in');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAuth = async (e: React.FormEvent) => {
+  const handleRegisterCoach = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
+    const coachEmail = email.trim().toLowerCase();
+    const coachName = fullName.trim() || coachEmail.split('@')[0];
+
     try {
-      if (isSignUp) {
-        // ── SIGN UP ──────────────────────────────────────────────────────────
-        // Anyone can sign up. If the email matches a staff record in any owner's
-        // account, loadCloudData will auto-create a coach profile for them.
-        // If not, they get a fresh owner workspace.
-        const { data: authData, error: authError } = await supabase.auth.signUp({ email, password });
-        if (authError) {
-          setError(authError.message);
-        } else {
-          // Check if email confirmation is required (session will be null if so)
-          if (!authData.session) {
-            setSignUpSuccess(true);
-          }
-          // If session exists, onAuthStateChange will log them in automatically
+      // 1. Save credentials in Supabase Auth (same standard auth method as owner)
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: coachEmail,
+        password,
+        options: {
+          data: { full_name: coachName, role: 'coach' }
         }
-      } else {
-        // ── SIGN IN ──────────────────────────────────────────────────────────
-        const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
-        if (authError) setError(authError.message);
+      });
+
+      if (authError) {
+        setError(authError.message);
+        setLoading(false);
+        return;
       }
+
+      const coachUserId = authData.user?.id;
+
+      // 2. Fetch Owner ID if available in profiles
+      let ownerId = null;
+      try {
+        const { data: ownerProfiles } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('role', 'owner')
+          .limit(1);
+        if (ownerProfiles && ownerProfiles.length > 0) {
+          ownerId = ownerProfiles[0].id;
+        }
+      } catch (_) {}
+
+      // 3. Create or update profile record in Supabase profiles
+      if (coachUserId) {
+        try {
+          const { error: upsertErr } = await supabase.from('profiles').upsert({
+            id: coachUserId,
+            email: coachEmail,
+            role: 'coach',
+            owner_id: ownerId,
+            status: 'pending',
+            is_approved: false
+          });
+          if (upsertErr) {
+            await supabase.from('profiles').upsert({
+              id: coachUserId,
+              role: 'coach',
+              owner_id: ownerId,
+              status: 'pending',
+              is_approved: false
+            });
+          }
+        } catch (e) {
+          console.warn('Profiles upsert exception:', e);
+        }
+      }
+
+      // 4. Create pending entry in staff table
+      try {
+        await supabase.from('staff').upsert({
+          id: coachUserId || `pending-${Date.now()}`,
+          email: coachEmail,
+          name: coachName,
+          role: 'coach',
+          status: 'pending',
+          is_approved: false,
+          pay_rate: 0,
+          owner_id: ownerId || 'pending-owner'
+        });
+      } catch (e) {
+        console.warn('Staff upsert exception:', e);
+      }
+
+      // 5. Send Notification record to owner
+      if (ownerId) {
+        try {
+          await supabase.from('notifications').insert({
+            user_id: ownerId,
+            message: `Coach access request from ${coachName} (${coachEmail}). Approve access in Setup -> Staff.`,
+            type: 'coach_request',
+            is_read: false,
+            metadata: { coach_email: coachEmail, coach_name: coachName, coach_id: coachUserId }
+          });
+        } catch (_) {}
+      }
+
+      // 6. Generate mailto request email to owner
+      const approvalUrl = `${window.location.origin}?approve_coach_email=${encodeURIComponent(coachEmail)}`;
+      const mailSubject = encodeURIComponent(`JFLIPS Coach Access Request - ${coachName}`);
+      const mailBody = encodeURIComponent(
+        `Hi Jeandre,\n\nCoach ${coachName} (${coachEmail}) has registered on JFLIPS and is requesting access to your gym workspace.\n\nClick the link below to approve access:\n${approvalUrl}\n\nOr open JFLIPS and grant access under Setup -> Staff.`
+      );
+      
+      try {
+        window.open(`mailto:${OWNER_EMAIL}?subject=${mailSubject}&body=${mailBody}`, '_blank');
+      } catch (_) {}
+
+      setMode('success_request');
     } catch (err: any) {
-      setError(err.message || 'An unexpected error occurred');
+      setError(err.message || 'Coach registration failed. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  if (signUpSuccess) {
+  if (mode === 'success_request') {
     return (
       <div className="flex flex-col min-h-screen items-center justify-center p-6 bg-[#07090f]">
         <motion.div
@@ -3801,17 +3895,20 @@ const AuthView: React.FC<{ initialMode?: 'signin' | 'signup'; onBack?: () => voi
           animate={{ opacity: 1, scale: 1 }}
           className="w-full max-w-sm text-center space-y-6 bg-[#0d1117] border border-white/8 p-8 rounded-[2.5rem] shadow-2xl"
         >
-          <div className="w-16 h-16 bg-emerald-900/30 rounded-full flex items-center justify-center mx-auto">
-            <CheckCircle2 size={32} className="text-emerald-400" />
+          <div className="w-16 h-16 bg-blue-900/30 border border-blue-500/30 rounded-full flex items-center justify-center mx-auto text-blue-400">
+            <Mail size={32} />
           </div>
           <div>
-            <h2 className="text-xl font-black italic uppercase text-white mb-2">Check Your Email</h2>
-            <p className="text-sm text-white/40 leading-relaxed">
-              We sent a confirmation link to <strong className="text-white/70">{email}</strong>. Click it to activate your account, then sign in.
+            <h2 className="text-xl font-black italic uppercase text-white mb-2">Access Request Sent!</h2>
+            <p className="text-xs text-white/50 leading-relaxed font-medium">
+              Your coach account (<strong className="text-white">{email}</strong>) has been registered. An email request was sent to the owner (<strong className="text-blue-400">{OWNER_EMAIL}</strong>) for access approval.
+            </p>
+            <p className="text-[10px] text-emerald-400/80 font-bold uppercase mt-3 p-2 bg-emerald-950/40 border border-emerald-800/40 rounded-xl">
+              Once the owner approves your request, you can log in below.
             </p>
           </div>
           <button
-            onClick={() => { setSignUpSuccess(false); setIsSignUp(false); }}
+            onClick={() => { setMode('signin'); setPassword(''); }}
             className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl transition-colors"
           >
             Back to Sign In
@@ -3832,6 +3929,7 @@ const AuthView: React.FC<{ initialMode?: 'signin' | 'signup'; onBack?: () => voi
           Back
         </button>
       )}
+
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -3839,24 +3937,40 @@ const AuthView: React.FC<{ initialMode?: 'signin' | 'signup'; onBack?: () => voi
       >
         <div className="text-center">
           <h1 className="text-4xl font-[1000] italic text-blue-400 tracking-tighter mb-2">JFLIPS</h1>
-          <p className="text-[10px] font-black uppercase text-white/30 tracking-[0.2em]">
-            {isSignUp ? 'Create Your Account' : 'Secure Access'}
+          <p className="text-[10px] font-black uppercase text-white/40 tracking-[0.2em]">
+            {mode === 'register_coach' ? 'Coach Registration' : 'Gym Portal Login'}
           </p>
         </div>
 
-        {isSignUp && (
-          <div className="p-3 bg-blue-600/10 border border-blue-500/20 rounded-2xl">
-            <p className="text-[10px] font-bold text-blue-300 leading-relaxed text-center">
-              <span className="font-black uppercase block mb-1">Coaches</span>
-              Sign up with the email your owner added to your staff profile. You'll automatically get coach access.
+        {mode === 'register_coach' && (
+          <div className="p-3 bg-blue-600/10 border border-blue-500/20 rounded-2xl text-center">
+            <p className="text-[10px] font-bold text-blue-300 leading-relaxed">
+              Register with your email and password. An email will be sent to the owner for access approval.
             </p>
           </div>
         )}
 
-        <form onSubmit={handleAuth} className="space-y-4">
+        <form onSubmit={mode === 'register_coach' ? handleRegisterCoach : handleSignIn} className="space-y-4">
           {error && (
             <div className="p-3 bg-red-900/20 border border-red-500/30 rounded-xl text-red-400 text-[10px] font-bold uppercase text-center">
               {error}
+            </div>
+          )}
+
+          {mode === 'register_coach' && (
+            <div className="space-y-1">
+              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Coach Full Name</label>
+              <div className="relative">
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={e => setFullName(e.target.value)}
+                  placeholder="e.g. Coach Sarah"
+                  className="w-full bg-white/5 border border-white/8 rounded-2xl py-4 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
+                  required
+                />
+              </div>
             </div>
           )}
 
@@ -3890,53 +4004,50 @@ const AuthView: React.FC<{ initialMode?: 'signin' | 'signup'; onBack?: () => voi
             </div>
           </div>
 
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl shadow-blue-600/20 flex items-center justify-center gap-2 mt-6 transition-colors"
-          >
-            {loading ? <Loader2 className="animate-spin" size={18} /> : (isSignUp ? 'Create Account' : 'Sign In')}
-            {!loading && <ArrowRight size={18} />}
-          </motion.button>
-        </form>
+          {mode === 'signin' ? (
+            <div className="space-y-3 pt-2">
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                disabled={loading}
+                type="submit"
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl shadow-blue-600/20 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              >
+                {loading ? <Loader2 className="animate-spin" size={18} /> : 'Sign In'}
+                {!loading && <ArrowRight size={18} />}
+              </motion.button>
 
-        <div className="relative flex py-1 items-center">
-          <div className="flex-grow border-t border-white/5"></div>
-          <span className="flex-shrink mx-4 text-[8px] font-black uppercase text-white/20 tracking-wider">or continue with</span>
-          <div className="flex-grow border-t border-white/5"></div>
-        </div>
-
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          type="button"
-          onClick={handleGoogleSignInWithSupabase}
-          disabled={loading}
-          className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-50 text-slate-900 py-4 rounded-2xl font-black text-xs uppercase shadow-xl transition-colors cursor-pointer"
-        >
-          {loading ? (
-            <Loader2 className="animate-spin text-slate-900" size={18} />
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                type="button"
+                onClick={() => { setMode('register_coach'); setError(null); }}
+                className="w-full bg-white/5 hover:bg-white/10 text-blue-300 border border-blue-500/30 py-4 rounded-2xl font-black text-xs uppercase flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              >
+                <UserCheck size={16} className="text-blue-400" />
+                Register Coach
+              </motion.button>
+            </div>
           ) : (
-            <>
-              <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4 shrink-0">
-                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-              </svg>
-              Continue with Google
-            </>
-          )}
-        </motion.button>
+            <div className="space-y-3 pt-2">
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                disabled={loading}
+                type="submit"
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl shadow-blue-600/20 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              >
+                {loading ? <Loader2 className="animate-spin" size={18} /> : 'Register Coach & Request Access'}
+                {!loading && <ArrowRight size={18} />}
+              </motion.button>
 
-        <div className="text-center pt-2">
-          <button
-            type="button"
-            onClick={() => { setIsSignUp(!isSignUp); setError(null); }}
-            className="text-[9px] font-black uppercase text-white/30 hover:text-blue-400 transition-colors"
-          >
-            {isSignUp ? 'Already have an account? Sign In' : 'New here? Sign Up'}
-          </button>
-        </div>
+              <button
+                type="button"
+                onClick={() => { setMode('signin'); setError(null); }}
+                className="w-full text-center py-2 text-[9px] font-black uppercase text-white/30 hover:text-white transition-colors"
+              >
+                ← Back to Sign In
+              </button>
+            </div>
+          )}
+        </form>
       </motion.div>
     </div>
   );
@@ -4453,10 +4564,10 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
             </div>
             
             <div className="grid grid-cols-3 gap-2">
-              {availablePresets.map(preset => (
+              {availablePresets.map((preset, presetIdx) => (
                 <button
                   type="button"
-                  key={preset}
+                  key={`preset-${preset}-${presetIdx}`}
                   onClick={() => {
                     setSelectedPreset(preset);
                     if (preset !== 'Custom') {
@@ -7164,7 +7275,9 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
 
     // ── COACH VIEW: only show their own payable invoice ───────────────────────
     if (state.profile.role === 'coach') {
-      const coachSessions = (state.sessions || []).filter(s => s.coach_id === user?.id);
+      const myStaff = (state.staff || []).find(st => st.id === user?.id || (st.email && user?.email && st.email.toLowerCase() === user.email.toLowerCase()));
+      const myIds = new Set([user?.id, myStaff?.id, myStaff?.email].filter(Boolean));
+      const coachSessions = (state.sessions || []).filter(s => myIds.has(s.coach_id));
       if (coachSessions.length === 0) return [];
       return [{
         id: `coach-self-${user?.id || 'coach'}`,
@@ -8171,7 +8284,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
           const groupPayment = (state.payments || []).find(p => p.family_id === group.family_id && p.invoice_id === dbInvoiceId);
           return (
             <motion.div
-              key={`${group.id}-${idx}`}
+              key={`invoice-group-${group.family_id || group.id || 'idx'}-${idx}`}
               variants={invoiceItemVariants}
               whileTap={{ scale: 0.97 }}
               onClick={() => setSel(group.family_id)}
@@ -9078,18 +9191,21 @@ const StaffForm: React.FC<{
   const [accountType, setAccountType] = useState(initialData?.account_type || 'Current');
   const [password, setPassword] = useState(initialData?.password || '');
   const [isOwner, setIsOwner] = useState(initialData?.is_owner || false);
-  const [assignedGymIds, setAssignedGymIds] = useState<string[]>(initialData?.assigned_gym_ids || []);
-  const [assignedClassIds, setAssignedClassIds] = useState<string[]>(initialData?.assigned_class_ids || []);
-
-  const toggleGym = (id: string) => setAssignedGymIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  const toggleClass = (id: string) => setAssignedClassIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-
-  // Groupings: Tumbling Classes (classTypes), Gym Organisations, and Cheer Teams & Sub-Teams
   const tumblingClasses = classTypes;
   const gymOrgClasses = gyms.filter(g => g.gym_type !== 'cheer');
   const cheerParents = gyms.filter(g => g.gym_type === 'cheer' && !g.parent_gym_id);
   const cheerSubs = gyms.filter(g => g.gym_type === 'cheer' && !!g.parent_gym_id);
   const allTeams = [...cheerParents, ...cheerSubs];
+
+  const [assignedGymIds, setAssignedGymIds] = useState<string[]>(
+    initialData ? (initialData.assigned_gym_ids || []) : gyms.map(g => g.id)
+  );
+  const [assignedClassIds, setAssignedClassIds] = useState<string[]>(
+    initialData ? (initialData.assigned_class_ids || []) : classTypes.map(c => c.id)
+  );
+
+  const toggleGym = (id: string) => setAssignedGymIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const toggleClass = (id: string) => setAssignedClassIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
   const isAllTumblingSelected = tumblingClasses.length > 0 && tumblingClasses.every(c => assignedClassIds.includes(c.id));
   const isAllGymOrgsSelected = gymOrgClasses.length > 0 && gymOrgClasses.every(g => assignedGymIds.includes(g.id));
