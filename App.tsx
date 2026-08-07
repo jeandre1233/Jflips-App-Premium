@@ -3692,12 +3692,12 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         return;
       }
 
-      // 1. Validate Access Code against owner_profiles
-      const { data: owner, error: codeErr } = await supabase
-        .from('owner_profiles')
-        .select('id, email, business_name')
-        .eq('access_code', accessCode.trim().toUpperCase())
-        .maybeSingle();
+      // 1. Validate Access Code via secure lookup function (owner_profiles
+      // itself isn't publicly readable, since it holds banking details)
+      const { data: ownerRows, error: codeErr } = await supabase
+        .rpc('lookup_owner_by_access_code', { code: accessCode.trim().toUpperCase() });
+
+      const owner = ownerRows && ownerRows.length > 0 ? ownerRows[0] : null;
 
       if (codeErr || !owner) {
         setError('Invalid gym owner access code. Please verify the code with your owner.');
