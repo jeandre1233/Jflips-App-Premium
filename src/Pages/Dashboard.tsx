@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ChevronRight, 
+  ChevronLeft,
   History, 
   Users, 
   User, 
@@ -10,7 +11,11 @@ import {
   Building2, 
   Pencil, 
   Trash2, 
-  Calendar 
+  Calendar,
+  X,
+  GraduationCap,
+  TrendingUp,
+  PieChart
 } from 'lucide-react';
 import { 
   AppState, 
@@ -346,6 +351,10 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
   onShowAllLogs: (v: boolean) => void
 }) => {
   const [isCalendarExpanded, setIsCalendarExpanded] = useState(false);
+  const [showRevenueBreakdown, setShowRevenueBreakdown] = useState(false);
+  const now = new Date();
+  const [breakdownMonth, setBreakdownMonth] = useState(now.getMonth());
+  const [breakdownYear, setBreakdownYear] = useState(now.getFullYear());
   const isOwner = state.profile.role === 'owner';
 
   const coachSessions = useMemo(() => {
@@ -386,6 +395,126 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
     }, 0);
     return acc + sessionSum;
   }, 0), [state.sessions, state.classTypes, state.gyms]);
+
+  const monthlyData = useMemo(() => {
+    const sessionsInMonth = (state.sessions || []).filter(sess => {
+      if (!sess.date) return false;
+      const d = new Date(sess.date);
+      return d.getMonth() === breakdownMonth && d.getFullYear() === breakdownYear;
+    });
+
+    let tumblingRevenue = 0;
+    let tumblingCount = 0;
+    let tumblingStudentsCount = 0;
+
+    let schoolsRevenue = 0;
+    let schoolsCount = 0;
+    let schoolsHours = 0;
+
+    let gymsRevenue = 0;
+    let gymsCount = 0;
+    let gymsHours = 0;
+
+    const itemizedList: {
+      id: string;
+      date: string;
+      title: string;
+      category: 'tumbling' | 'schools' | 'gyms';
+      amount: number;
+      subtext: string;
+    }[] = [];
+
+    sessionsInMonth.forEach(sess => {
+      const ct = (state.classTypes || []).find(c => c.id === sess.classTypeId);
+      const gym = (state.gyms || []).find(g => g.id === sess.classTypeId);
+
+      let price = ct ? ct.price : (gym ? gym.pay_amount : 0);
+      if (gym && sess.custom_event_name) {
+        const customPreset = gym.custom_event_presets?.find(p => {
+          const name = p.includes(':') ? p.split(':')[0] : p;
+          return name.toLowerCase() === sess.custom_event_name?.toLowerCase();
+        });
+        if (customPreset && customPreset.includes(':')) {
+          const ratePart = customPreset.split(':')[1];
+          const parsed = parseFloat(ratePart);
+          if (!isNaN(parsed)) {
+            price = parsed;
+          }
+        }
+      }
+      if (sess.is_competition && gym?.competition_rate) {
+        price = gym.competition_rate;
+      }
+
+      if (gym) {
+        const hours = sess.hours_coached || gym.default_hours || 1;
+        const amt = price * hours;
+        const isSchool = gym.gym_type === 'cheer' || gym.name.toLowerCase().includes('school');
+
+        if (isSchool) {
+          schoolsRevenue += amt;
+          schoolsCount += 1;
+          schoolsHours += hours;
+          itemizedList.push({
+            id: sess.id,
+            date: sess.date,
+            title: gym.name + (sess.custom_event_name ? ` (${sess.custom_event_name})` : ''),
+            category: 'schools',
+            amount: amt,
+            subtext: `${hours} HR${hours > 1 ? 'S' : ''} @ R${price}/hr`
+          });
+        } else {
+          gymsRevenue += amt;
+          gymsCount += 1;
+          gymsHours += hours;
+          itemizedList.push({
+            id: sess.id,
+            date: sess.date,
+            title: gym.name + (sess.custom_event_name ? ` (${sess.custom_event_name})` : ''),
+            category: 'gyms',
+            amount: amt,
+            subtext: `${hours} HR${hours > 1 ? 'S' : ''} @ R${price}/hr`
+          });
+        }
+      } else {
+        const className = ct ? ct.name : 'Tumbling Session';
+        const studentCount = sess.studentIds?.length || 0;
+        const sessionSum = (sess.studentIds || []).reduce((sum, sid) => {
+          const student = (state.students || []).find(s => s.id === sid);
+          return sum + getStudentSessionPrice(student, sess, price, className);
+        }, 0);
+
+        tumblingRevenue += sessionSum;
+        tumblingCount += 1;
+        tumblingStudentsCount += studentCount;
+
+        itemizedList.push({
+          id: sess.id,
+          date: sess.date,
+          title: className + (sess.custom_event_name ? ` (${sess.custom_event_name})` : ''),
+          category: 'tumbling',
+          amount: sessionSum,
+          subtext: `${studentCount} Student${studentCount !== 1 ? 's' : ''}`
+        });
+      }
+    });
+
+    const total = tumblingRevenue + schoolsRevenue + gymsRevenue;
+
+    return {
+      total,
+      tumblingRevenue,
+      tumblingCount,
+      tumblingStudentsCount,
+      schoolsRevenue,
+      schoolsCount,
+      schoolsHours,
+      gymsRevenue,
+      gymsCount,
+      gymsHours,
+      itemizedList: itemizedList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    };
+  }, [breakdownMonth, breakdownYear, state.sessions, state.classTypes, state.gyms, state.students]);
 
   const matTime = useMemo(() => {
     return (coachSessions || []).reduce((acc, sess) => acc + (sess.hours_coached || 1), 0);
@@ -476,7 +605,6 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
     return results;
   }, [state.schedules, state.classTypes, state.gyms, state.sessions]);
 
-  const now = new Date();
   const currentMonthName = now.toLocaleString('default', { month: 'short' }).toUpperCase();
 
   return (
@@ -489,8 +617,8 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
           initial={{ y: 20, opacity: 0 }} 
           animate={{ y: 0, opacity: 1 }} 
           whileTap={{ scale: 0.95 }}
-          onClick={() => onShowAllLogs(true)}
-          className={`${isOwner ? 'bg-[#1e4da1] dark:bg-blue-900/40' : 'bg-emerald-600 dark:bg-emerald-900/40'} rounded-3xl p-5 text-white shadow-lg flex flex-col justify-between relative overflow-hidden text-left aspect-square lg:aspect-auto lg:h-44`}
+          onClick={isOwner ? () => setShowRevenueBreakdown(true) : () => onShowAllLogs(true)}
+          className={`${isOwner ? 'bg-[#1e4da1] dark:bg-blue-900/40 cursor-pointer' : 'bg-emerald-600 dark:bg-emerald-900/40'} rounded-3xl p-5 text-white shadow-lg flex flex-col justify-between relative overflow-hidden text-left aspect-square lg:aspect-auto lg:h-44`}
         >
           <div className="z-10">
             <p className="text-white/60 text-[9px] font-black uppercase tracking-[0.15em] mb-1">
@@ -646,6 +774,265 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
           })}
         </motion.div>
       </div>
+
+      {/* Revenue Breakdown Modal (Owner Only) */}
+      <AnimatePresence>
+        {showRevenueBreakdown && isOwner && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-2xl max-w-xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto"
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="p-2 bg-blue-50 dark:bg-blue-900/40 text-[#1e4da1] dark:text-blue-400 rounded-xl">
+                      <PieChart size={20} />
+                    </span>
+                    <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase italic">
+                      Revenue Breakdown
+                    </h3>
+                  </div>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">
+                    Monthly income across revenue streams
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowRevenueBreakdown(false)}
+                  className="p-2.5 bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-2xl transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Month Selector */}
+              <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/60 p-3 rounded-2xl border border-slate-100 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (breakdownMonth === 0) {
+                      setBreakdownMonth(11);
+                      setBreakdownYear(prev => prev - 1);
+                    } else {
+                      setBreakdownMonth(prev => prev - 1);
+                    }
+                  }}
+                  className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors text-slate-600 dark:text-slate-300"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <div className="text-center">
+                  <span className="text-sm font-black uppercase text-slate-900 dark:text-white italic tracking-wide">
+                    {MONTHS[breakdownMonth]} {breakdownYear}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (breakdownMonth === 11) {
+                      setBreakdownMonth(0);
+                      setBreakdownYear(prev => prev + 1);
+                    } else {
+                      setBreakdownMonth(prev => prev + 1);
+                    }
+                  }}
+                  className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors text-slate-600 dark:text-slate-300"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+
+              {/* Total Monthly Card */}
+              <div className="bg-gradient-to-br from-[#1e4da1] to-blue-700 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden">
+                <div className="flex justify-between items-start relative z-10">
+                  <div>
+                    <p className="text-blue-200 text-[9px] font-black uppercase tracking-widest">
+                      Total Monthly Revenue
+                    </p>
+                    <h2 className="text-4xl font-black italic mt-1">R{monthlyData.total}</h2>
+                  </div>
+                  <span className="px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-[9px] font-black uppercase tracking-wider">
+                    {monthlyData.itemizedList.length} Sessions
+                  </span>
+                </div>
+                <TrendingUp className="absolute -bottom-4 -right-4 text-white/10 w-28 h-28 rotate-12" />
+              </div>
+
+              {/* 3 Categories Grid */}
+              <div className="space-y-3">
+                <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  Revenue Stream Breakdown
+                </h4>
+
+                {/* 1. Tumbling */}
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
+                        <User size={16} />
+                      </div>
+                      <div>
+                        <h5 className="text-xs font-black uppercase italic text-slate-900 dark:text-white">
+                          Tumbling
+                        </h5>
+                        <p className="text-[8px] font-bold text-slate-400 uppercase">
+                          Classes & Private Sessions
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-black italic text-[#1e4da1] dark:text-blue-400">
+                        R{monthlyData.tumblingRevenue}
+                      </span>
+                      <p className="text-[8px] font-bold text-slate-400">
+                        {monthlyData.total > 0 ? Math.round((monthlyData.tumblingRevenue / monthlyData.total) * 100) : 0}% of total
+                      </p>
+                    </div>
+                  </div>
+                  <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
+                    <div
+                      className="bg-[#1e4da1] dark:bg-blue-500 h-full transition-all duration-500"
+                      style={{ width: `${monthlyData.total > 0 ? (monthlyData.tumblingRevenue / monthlyData.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[8px] font-bold text-slate-400 uppercase pt-0.5">
+                    <span>{monthlyData.tumblingCount} Sessions</span>
+                    <span>{monthlyData.tumblingStudentsCount} Student Attendances</span>
+                  </div>
+                </div>
+
+                {/* 2. Schools */}
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold">
+                        <GraduationCap size={16} />
+                      </div>
+                      <div>
+                        <h5 className="text-xs font-black uppercase italic text-slate-900 dark:text-white">
+                          Schools
+                        </h5>
+                        <p className="text-[8px] font-bold text-slate-400 uppercase">
+                          School Orgs & Cheer Teams
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-black italic text-amber-600 dark:text-amber-400">
+                        R{monthlyData.schoolsRevenue}
+                      </span>
+                      <p className="text-[8px] font-bold text-slate-400">
+                        {monthlyData.total > 0 ? Math.round((monthlyData.schoolsRevenue / monthlyData.total) * 100) : 0}% of total
+                      </p>
+                    </div>
+                  </div>
+                  <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
+                    <div
+                      className="bg-amber-500 h-full transition-all duration-500"
+                      style={{ width: `${monthlyData.total > 0 ? (monthlyData.schoolsRevenue / monthlyData.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[8px] font-bold text-slate-400 uppercase pt-0.5">
+                    <span>{monthlyData.schoolsCount} Sessions</span>
+                    <span>{monthlyData.schoolsHours} Hours Coached</span>
+                  </div>
+                </div>
+
+                {/* 3. Gym Sessions */}
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
+                        <Building2 size={16} />
+                      </div>
+                      <div>
+                        <h5 className="text-xs font-black uppercase italic text-slate-900 dark:text-white">
+                          Gym Sessions
+                        </h5>
+                        <p className="text-[8px] font-bold text-slate-400 uppercase">
+                          External Partner Gyms
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-black italic text-emerald-600 dark:text-emerald-400">
+                        R{monthlyData.gymsRevenue}
+                      </span>
+                      <p className="text-[8px] font-bold text-slate-400">
+                        {monthlyData.total > 0 ? Math.round((monthlyData.gymsRevenue / monthlyData.total) * 100) : 0}% of total
+                      </p>
+                    </div>
+                  </div>
+                  <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
+                    <div
+                      className="bg-emerald-500 h-full transition-all duration-500"
+                      style={{ width: `${monthlyData.total > 0 ? (monthlyData.gymsRevenue / monthlyData.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[8px] font-bold text-slate-400 uppercase pt-0.5">
+                    <span>{monthlyData.gymsCount} Sessions</span>
+                    <span>{monthlyData.gymsHours} Hours Coached</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Itemized Session Logs for the Month */}
+              <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  {MONTHS[breakdownMonth]} Session Logs ({monthlyData.itemizedList.length})
+                </h4>
+                {monthlyData.itemizedList.length === 0 ? (
+                  <p className="text-center py-6 text-slate-400 text-[10px] font-bold uppercase">
+                    No sessions logged for {MONTHS[breakdownMonth]} {breakdownYear}
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                    {monthlyData.itemizedList.map((item, idx) => (
+                      <div
+                        key={`itemized-${item.id}-${idx}`}
+                        className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800 text-xs"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span
+                            className={`text-[8px] font-black px-2 py-0.5 rounded-md uppercase shrink-0 ${
+                              item.category === 'tumbling'
+                                ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+                                : item.category === 'schools'
+                                ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+                                : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
+                            }`}
+                          >
+                            {item.category}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="font-bold text-slate-800 dark:text-slate-200 truncate uppercase text-[10px]">
+                              {item.title}
+                            </p>
+                            <p className="text-[8px] text-slate-400 font-medium">
+                              {new Date(item.date).toLocaleDateString()} • {item.subtext}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="font-black text-slate-900 dark:text-white text-xs italic shrink-0">
+                          +R{item.amount}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 });
