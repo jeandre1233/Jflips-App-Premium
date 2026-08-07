@@ -57,6 +57,9 @@ import {
   BellOff,
   Wallet,
   Clock,
+  ShieldAlert,
+  Key,
+  Building2,
   RotateCcw as RevertIcon,
   CheckCircle,
   Trophy,
@@ -64,7 +67,6 @@ import {
   Zap,
   Star,
   Phone,
-  Building2,
   Dumbbell,
   FileSpreadsheet,
   Flashlight,
@@ -75,7 +77,7 @@ import {
   Globe,
   Link
 } from 'lucide-react';
-import { View, Student, Gym, ClassType, AttendanceSession, AppState, HistoryMonth, Profile, Payment, ClassSchedule, Staff, InvoiceSnapshot, AppNotification, Competition, getStudentSessionPrice } from './types';
+import { View, Student, Gym, ClassType, AttendanceSession, AppState, HistoryMonth, Profile, Payment, ClassSchedule, InvoiceSnapshot, AppNotification, Competition, getStudentSessionPrice, StaffProfile, OwnerProfile } from './types';
 import { toPng } from 'html-to-image';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
@@ -112,8 +114,8 @@ import {
   syncFinancesToGoogleSheet 
 } from './src/utils/googleWorkspace';
 
-const DashboardView = React.lazy(() => import('./src/Pages/Dashboard').then(m => ({ default: m.DashboardView })));
-const RosterView = React.lazy(() => import('./src/Pages/Setup').then(m => ({ default: m.RosterView })));
+import { DashboardView } from './src/Pages/Dashboard';
+import { RosterView } from './src/Pages/Setup';
 
 export function getSessionBillingMonth(dateStr: string, billingDay: number = 1): { monthName: string, year: number } {
   const d = new Date(dateStr);
@@ -734,7 +736,6 @@ const App: React.FC = () => {
   const [editingClassType, setEditingClassType] = useState<ClassType | null>(null);
   const [editingSession, setEditingSession] = useState<AttendanceSession | null>(null);
   const [editingSchedule, setEditingSchedule] = useState<ClassSchedule | null>(null);
-  const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
   const [editingExtra, setEditingExtra] = useState<Partial<Student> | null>(null);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [bulkImportParentId, setBulkImportParentId] = useState<string | null>(null);
@@ -744,7 +745,7 @@ const App: React.FC = () => {
   const [initialCoachId, setInitialCoachId] = useState<string | null>(null);
   const [initialAthleteIds, setInitialAthleteIds] = useState<string[]>([]);
   const [quickLogModalData, setQuickLogModalData] = useState<{ classIds: string[], date: string, coachId?: string, athleteIds?: string[] } | null>(null);
-  const [rosterTab, setRosterTab] = useState<'students' | 'classes' | 'schedule' | 'profile' | 'staff'>('students');
+  const [rosterTab, setRosterTab] = useState<'students' | 'classes' | 'schedule' | 'staff' | 'profile'>('students');
   const [rosterEntityType, setRosterEntityType] = useState<'athletes' | 'gyms' | 'teams'>('athletes');
   const isOwner = state.profile.role === 'owner';
 
@@ -865,238 +866,191 @@ const App: React.FC = () => {
 
 
 
+  const [coachStatus, setCoachStatus] = useState<'pending' | 'approved' | 'rejected' | null>(null);
+
   const loadCloudData = useCallback(async (silent = true) => {
     if (!user) return;
     if (!silent) setIsLoading(true);
     setIsSyncing(true);
     setDbError(null);
+    setCoachStatus(null);
+
     try {
-      // First, get the profile to determine role and business connection
-      const pendingKey = (localStorage.getItem('pending_access_key') || '').trim().toUpperCase();
-      const userEmail = (user.email || '').toLowerCase().trim();
+      // 1. Try fetching owner_profiles
+      let { data: ownerP, error: ownerErr } = await supabase
+        .from('owner_profiles')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle();
 
-      let { data: p, error: pErr } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      let isOwner = false;
+      let targetUserId = user.id;
+      let canViewTumbling = true;
+      let assignedCheerOrgIds: string[] = [];
+      let mappedProfile: Profile = { ...INITIAL_PROFILE, role: 'owner', id: user.id };
+      let staffList: StaffProfile[] = [];
 
-      // Check if user is registered in staff table or provided an access key
-      let matchedOwnerId: string | null = null;
-      let matchedPayRate = 0;
-      let matchedBizName = '';
-      let matchedStaffName = '';
-
-      // Check staff table or pending key if profile is missing, unlinked, or marked as owner
-      if ((pErr && pErr.code === 'PGRST116') || (!pErr && p && (p.role === 'owner' || !p.owner_id))) {
-        // 1. Check pendingKey against staff access code/passcode or owner access code
-        if (pendingKey) {
-          try {
-            const { data: staffMatch } = await supabase
-              .from('staff')
-              .select('*')
-              .or(`access_code.ilike.${pendingKey},password.ilike.${pendingKey}`)
-              .limit(1);
-
-            if (staffMatch && staffMatch.length > 0) {
-              const s = staffMatch[0];
-              matchedOwnerId = s.owner_id;
-              matchedPayRate = s.pay_rate || 0;
-              matchedBizName = s.name || '';
-              matchedStaffName = s.name;
-            } else {
-              const { data: ownerMatch } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('role', 'owner')
-                .ilike('access_code', pendingKey)
-                .limit(1);
-
-              if (ownerMatch && ownerMatch.length > 0) {
-                const o = ownerMatch[0];
-                matchedOwnerId = o.id;
-                matchedBizName = o.business_name || 'Gym Business';
-              }
-            }
-          } catch (e) {
-            console.warn('Access key lookup exception:', e);
-          }
+      if (ownerP) {
+        isOwner = true;
+        if (!ownerP.access_code) {
+          const defaultKey = `JFLIPS-${Math.floor(1000 + Math.random() * 9000)}`;
+          await supabase.from('owner_profiles').update({ access_code: defaultKey }).eq('id', user.id);
+          ownerP.access_code = defaultKey;
         }
 
-        // 2. Email pre-registration fallback: check if user's email is in staff table
-        if (!matchedOwnerId && userEmail) {
-          try {
-            const { data: emailMatch } = await supabase
-              .from('staff')
-              .select('*')
-              .ilike('email', userEmail)
-              .neq('owner_id', user.id)
-              .limit(1);
+        const savedBizBank = localStorage.getItem(`jflips_biz_bankName_${user.id}`) || '';
+        const savedBizAcc = localStorage.getItem(`jflips_biz_accountNumber_${user.id}`) || '';
+        const savedBizBranch = localStorage.getItem(`jflips_biz_branchCode_${user.id}`) || '';
+        const savedBizType = localStorage.getItem(`jflips_biz_accountType_${user.id}`) || 'Current';
 
-            if (emailMatch && emailMatch.length > 0) {
-              const s = emailMatch[0];
-              matchedOwnerId = s.owner_id;
-              matchedPayRate = s.pay_rate || 0;
-              matchedBizName = s.name || '';
-              matchedStaffName = s.name;
-            }
-          } catch (e) {
-            console.warn('Email staff lookup exception:', e);
-          }
+        mappedProfile = {
+          businessName: ownerP.business_name || INITIAL_PROFILE.businessName,
+          bankName: ownerP.bank_name || INITIAL_PROFILE.bankName,
+          accountNumber: ownerP.account_number || INITIAL_PROFILE.accountNumber,
+          branchCode: ownerP.branch_code || INITIAL_PROFILE.branchCode,
+          accountType: ownerP.account_type || INITIAL_PROFILE.accountType,
+          bizBankName: ownerP.biz_bank_name || savedBizBank,
+          bizAccountNumber: ownerP.biz_account_number || savedBizAcc,
+          bizBranchCode: ownerP.biz_branch_code || savedBizBranch,
+          bizAccountType: ownerP.biz_account_type || savedBizType,
+          logo: ownerP.logo || INITIAL_PROFILE.logo,
+          role: 'owner',
+          access_code: ownerP.access_code,
+          email: ownerP.email || user.email,
+          id: user.id
+        };
+
+        // Fetch staff profiles for owner
+        const { data: sData, error: sErr } = await supabase
+          .from('staff_profiles')
+          .select('*')
+          .eq('owner_id', user.id);
+
+        if (!sErr && sData) {
+          staffList = sData.map(s => ({
+            id: s.id,
+            ownerId: s.owner_id,
+            name: s.name,
+            email: s.email,
+            payRate: s.pay_rate,
+            bankName: s.bank_name,
+            accountNumber: s.account_number,
+            branchCode: s.branch_code,
+            accountType: s.account_type,
+            status: s.status || 'pending',
+            canViewTumbling: s.can_view_tumbling ?? false,
+            assignedCheerOrgIds: s.assigned_cheer_org_ids || [],
+            createdAt: s.created_at,
+            approvedAt: s.approved_at
+          }));
         }
+      } else {
+        // 2. Check staff_profiles
+        let { data: staffP, error: staffErr } = await supabase
+          .from('staff_profiles')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle();
 
-        // 3. Link or convert profile to coach if matched to an Owner
-        if (matchedOwnerId && matchedOwnerId !== user.id) {
-          const newProfile = {
-            id: user.id,
+        if (staffP) {
+          if (staffP.status === 'pending') {
+            setCoachStatus('pending');
+            setIsLoading(false);
+            setIsSyncing(false);
+            return;
+          }
+          if (staffP.status === 'rejected') {
+            setCoachStatus('rejected');
+            setIsLoading(false);
+            setIsSyncing(false);
+            return;
+          }
+
+          // Approved coach
+          setCoachStatus('approved');
+          targetUserId = staffP.owner_id;
+          canViewTumbling = staffP.can_view_tumbling ?? false;
+          assignedCheerOrgIds = staffP.assigned_cheer_org_ids || [];
+
+          // Fetch owner details for display
+          const { data: coachOwnerP } = await supabase
+            .from('owner_profiles')
+            .select('*')
+            .eq('id', staffP.owner_id)
+            .maybeSingle();
+
+          mappedProfile = {
+            ...INITIAL_PROFILE,
+            businessName: coachOwnerP?.business_name || INITIAL_PROFILE.businessName,
+            logo: coachOwnerP?.logo || INITIAL_PROFILE.logo,
             role: 'coach',
-            owner_id: matchedOwnerId,
-            pay_rate: matchedPayRate,
-            business_name: matchedBizName,
-            email: userEmail
+            owner_id: staffP.owner_id,
+            pay_rate: staffP.pay_rate,
+            email: staffP.email || user.email,
+            can_view_tumbling: canViewTumbling,
+            assigned_cheer_org_ids: assignedCheerOrgIds,
+            id: user.id
           };
-          const { error: insErr } = await supabase.from('profiles').upsert(newProfile);
-          if (!insErr) {
-            p = { ...(p || {}), ...newProfile } as any;
-            localStorage.removeItem('pending_access_key');
-            try {
-              await supabase.from('notifications').insert({
-                user_id: matchedOwnerId,
-                message: `${matchedStaffName || userEmail} joined your gym business as a coach.`,
-                type: 'coach_joined',
-                metadata: { coach_user_id: user.id }
-              });
-            } catch (_) {}
-          }
-        } else if (pErr && pErr.code === 'PGRST116') {
-          // New Owner Profile Creation
+        } else {
+          // New owner auto-creation
           const defaultKey = `JFLIPS-${Math.floor(1000 + Math.random() * 9000)}`;
-          const ownerProfile = {
+          const newOwner = {
             id: user.id,
-            role: 'owner',
+            email: (user.email || '').toLowerCase().trim(),
             business_name: INITIAL_PROFILE.businessName,
-            access_code: defaultKey,
-            email: userEmail
+            access_code: defaultKey
           };
-          const { error: insErr } = await supabase.from('profiles').upsert(ownerProfile);
+          const { error: insErr } = await supabase.from('owner_profiles').insert(newOwner);
           if (!insErr) {
-            p = ownerProfile as any;
+            isOwner = true;
+            mappedProfile.role = 'owner';
+            mappedProfile.access_code = defaultKey;
+            mappedProfile.email = user.email;
+          } else {
+            console.error("Owner auto-creation error:", insErr.message);
           }
         }
       }
 
-      if (!pErr && p) {
-        // Owner Profile: Ensure access_code exists
-        if (p.role === 'owner' && !p.access_code) {
-          const defaultKey = `JFLIPS-${Math.floor(1000 + Math.random() * 9000)}`;
-          try {
-            await supabase.from('profiles').update({ access_code: defaultKey }).eq('id', user.id);
-          } catch (_) {}
-          p.access_code = defaultKey;
-        }
-
-        // Returning coach: Sync pay rate / banking info from staff table if updated by owner
-        if (p.role === 'coach') {
-          const { data: staffSync } = await supabase
-            .from('staff')
-            .select('bank_name, account_number, branch_code, account_type, pay_rate, name')
-            .ilike('email', userEmail)
-            .limit(1);
-          if (staffSync && staffSync.length > 0) {
-            const s = staffSync[0];
-            const updates: any = {};
-            if (s.bank_name)      updates.bank_name      = s.bank_name;
-            if (s.account_number) updates.account_number = s.account_number;
-            if (s.branch_code)    updates.branch_code    = s.branch_code;
-            if (s.account_type)   updates.account_type   = s.account_type;
-            if (s.pay_rate)       updates.pay_rate       = s.pay_rate;
-            if (Object.keys(updates).length > 0) {
-              try {
-                await supabase.from('profiles').update(updates).eq('id', user.id);
-              } catch (_) {}
-              p = { ...p, ...updates };
-            }
-          }
-        }
-      }
-
-      const savedBizBank = localStorage.getItem(`jflips_biz_bankName_${user.id}`) || '';
-      const savedBizAcc = localStorage.getItem(`jflips_biz_accountNumber_${user.id}`) || '';
-      const savedBizBranch = localStorage.getItem(`jflips_biz_branchCode_${user.id}`) || '';
-      const savedBizType = localStorage.getItem(`jflips_biz_accountType_${user.id}`) || 'Current';
-
-      const mappedProfile: Profile = p ? {
-        businessName: p.business_name || INITIAL_PROFILE.businessName,
-        bankName: p.bank_name || INITIAL_PROFILE.bankName,
-        accountNumber: p.account_number || INITIAL_PROFILE.accountNumber,
-        branchCode: p.branch_code || INITIAL_PROFILE.branchCode,
-        accountType: p.account_type || INITIAL_PROFILE.accountType,
-        bizBankName: p.biz_bank_name || savedBizBank,
-        bizAccountNumber: p.biz_account_number || savedBizAcc,
-        bizBranchCode: p.biz_branch_code || savedBizBranch,
-        bizAccountType: p.biz_account_type || savedBizType,
-        logo: p.logo || INITIAL_PROFILE.logo,
-        role: p.role || 'owner',
-        owner_id: p.owner_id,
-        pay_rate: p.pay_rate,
-        access_code: p.access_code,
-        id: user.id  // ← always set so coach assignment checks work
-      } : { 
-        ...INITIAL_PROFILE, 
-        bizBankName: savedBizBank,
-        bizAccountNumber: savedBizAcc,
-        bizBranchCode: savedBizBranch,
-        bizAccountType: savedBizType,
-        role: 'owner', 
-        id: user.id 
-      };
-
-      const isOwner = mappedProfile.role === 'owner';
-      const targetUserId = isOwner ? user.id : mappedProfile.owner_id;
-
-      if (!targetUserId) {
-        console.warn("No target user ID found for data fetching");
-        setIsSyncing(false);
-        setIsLoading(false);
-        return;
-      }
-
-      // ── Main data fetch ────────────────────────────────────────────────────────
+      // 3. Fetch data gated by permissions
       const fetchStudents = async () => {
-        const [tumb, team] = await Promise.all([
-          supabase.from('tumbling_students').select('*').eq('user_id', targetUserId),
-          supabase.from('team_athletes').select('*').eq('user_id', targetUserId)
-        ]);
-        
-        const tumblingStudents = (tumb.data || []).map(s => ({ ...s, is_gym_member: false }));
-        const teamAthletes = (team.data || []).map(s => ({ ...s, is_gym_member: true }));
-        return { data: [...tumblingStudents, ...teamAthletes], error: tumb.error || team.error };
+        let tumblingStudents: any[] = [];
+        let teamAthletes: any[] = [];
+
+        // Tumbling students gating
+        if (isOwner || canViewTumbling) {
+          const tumb = await supabase.from('tumbling_students').select('*').eq('user_id', targetUserId);
+          tumblingStudents = (tumb.data || []).map(s => ({ ...s, is_gym_member: false }));
+        }
+
+        // Team athletes gating
+        if (isOwner) {
+          const team = await supabase.from('team_athletes').select('*').eq('user_id', targetUserId);
+          teamAthletes = (team.data || []).map(s => ({ ...s, is_gym_member: true }));
+        } else if (assignedCheerOrgIds.length > 0) {
+          const team = await supabase
+            .from('team_athletes')
+            .select('*')
+            .eq('user_id', targetUserId)
+            .in('associated_gym_id', assignedCheerOrgIds);
+          teamAthletes = (team.data || []).map(s => ({ ...s, is_gym_member: true }));
+        }
+
+        return { data: [...tumblingStudents, ...teamAthletes], error: null };
       };
 
-      const [studentsRes, gymsRes, classesRes, sessionsRes, historyRes, paymentsRes, schedulesRes, staffRes, snapshotsRes, notificationsRes, competitionsRes, cheerRegistrationsRes] = await Promise.all([
+      const [studentsRes, gymsRes, classesRes, sessionsRes, historyRes, paymentsRes, schedulesRes, snapshotsRes, notificationsRes, competitionsRes, cheerRegistrationsRes] = await Promise.all([
         fetchStudents(),
-        // Gyms & Organizations: return all for business so coaches can view all organizations/teams
         supabase.from('gyms').select('*').eq('user_id', targetUserId),
-        // Class types: return all for business
         supabase.from('class_types').select('*').eq('user_id', targetUserId),
-        // Sessions: fetch all business sessions so coaches see their sessions regardless of coach_id identifier format
         supabase.from('sessions').select('*').eq('user_id', targetUserId),
-        // History: owner only
-        isOwner
-          ? supabase.from('history').select('*').eq('user_id', targetUserId)
-          : Promise.resolve({ data: [], error: null }),
-        // Payments: owner only (coach invoice built from their sessions in InvoicesView)
-        isOwner
-          ? supabase.from('payments').select('*').eq('user_id', targetUserId)
-          : Promise.resolve({ data: [], error: null }),
-        // Schedules: return all schedules for business so coaches see classes & timetable
+        supabase.from('history').select('*').eq('user_id', targetUserId),
+        supabase.from('payments').select('*').eq('user_id', targetUserId),
         supabase.from('class_schedules').select('*').eq('user_id', targetUserId),
-        // Staff list:
-        supabase.from('staff').select('*').eq('owner_id', targetUserId),
         supabase.from('invoice_snapshots').select('*').eq('coach_id', user.id).order('created_at', { ascending: false }),
-        isOwner
-          ? supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20)
-          : Promise.resolve({ data: [], error: null }),
+        supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20),
         supabase.from('competitions').select('*').eq('user_id', targetUserId).order('date', { ascending: true }),
-        isOwner
-          ? supabase.from('cheer_registrations').select('*').eq('user_id', targetUserId).order('created_at', { ascending: false })
-          : Promise.resolve({ data: [], error: null })
+        supabase.from('cheer_registrations').select('*').eq('user_id', targetUserId).order('created_at', { ascending: false })
       ]);
 
       const errors = [
@@ -1213,13 +1167,7 @@ const App: React.FC = () => {
             athlete_ids
           };
         }),
-        staff: (staffRes.data || []).map((s: any) => ({ 
-          ...s, 
-          role: 'coach', 
-          pay_rate: s.pay_rate || 0,
-          assigned_gym_ids: s.assigned_gym_ids || [],
-          assigned_class_ids: s.assigned_class_ids || [],
-        })),
+        staff: staffList,
         competitions: (competitionsRes.data || []).map((c: any) => ({
           ...c,
           gym_ids: c.gym_ids || []
@@ -1605,90 +1553,16 @@ const App: React.FC = () => {
         alert("Cloud Save Error: " + error.message); return; 
       }
     }
-    // Notify owner when coach adds a new class
+    // Notify owner when adding a new class
     if (!isOwnerRole && isNewClass && targetUserId) {
-      const coachName = state.staff.find((s: any) => s.id === user.id)?.name || user.email || 'A coach';
       await supabase.from('notifications').insert({
         user_id: targetUserId,
-        message: `${coachName} added a new class: "${name}"`,
+        message: `New class added: "${name}"`,
         type: 'class_added',
         metadata: { class_id: classId, class_name: name, coach_id: user.id },
       });
     }
     setShowModal(null); setEditingClassType(null); loadCloudData(true);
-  };
-
-  const handleSaveStaff = async (name: string, email: string, payRate: number, id?: string, bankName?: string, accountNumber?: string, branchCode?: string, accountType?: string, password?: string, isOwnerProfile?: boolean, assignedGymIds?: string[], assignedClassIds?: string[]) => {
-    if (!user) return;
-    try {
-      if (isOwnerProfile) {
-        try {
-          await supabase.from('staff').update({ is_owner: false }).eq('owner_id', user.id);
-        } catch (e) {
-          console.warn('is_owner column might not exist', e);
-        }
-      }
-
-      const generatedCode = 'JF-' + Math.floor(1000 + Math.random() * 9000);
-
-      const payload: any = {
-        email: email.toLowerCase().trim(),
-        name,
-        pay_rate: payRate,
-        owner_id: user.id,
-        bank_name: bankName || null,
-        account_number: accountNumber || null,
-        branch_code: branchCode || null,
-        account_type: accountType || null,
-        password: password || null,
-        access_code: generatedCode,
-        is_owner: isOwnerProfile || false,
-        assigned_gym_ids: assignedGymIds || [],
-        assigned_class_ids: assignedClassIds || [],
-      };
-
-      let saveError;
-      if (id) {
-        ({ error: saveError } = await supabase.from('staff').update(payload).eq('id', id).eq('owner_id', user.id));
-      } else {
-        ({ error: saveError } = await supabase.from('staff').insert(payload));
-      }
-
-      if (saveError) {
-        // Resilience: if access_code, password, or is_owner column is missing, retry without them
-        if (saveError.message.includes('access_code') || saveError.message.includes('password') || saveError.message.includes('is_owner')) {
-          if (saveError.message.includes('access_code')) delete payload.access_code;
-          if (saveError.message.includes('password')) delete payload.password;
-          if (saveError.message.includes('is_owner')) delete payload.is_owner;
-          if (id) {
-            ({ error: saveError } = await supabase.from('staff').update(payload).eq('id', id).eq('owner_id', user.id));
-          } else {
-            ({ error: saveError } = await supabase.from('staff').insert(payload));
-          }
-        }
-      }
-
-      if (saveError) {
-        console.error('Staff Save Error:', saveError);
-        alert('Staff Save Error: ' + saveError.message);
-        return;
-      }
-
-      sendLocalNotification('Staff Profile Saved', `${name} has been added. They can now sign up or sign in at the app login screen using ${email} — they\'ll automatically get coach access.`);
-      setShowModal(null);
-      setEditingStaff(null);
-      loadCloudData(true);
-    } catch (err: any) {
-      console.error('Staff Save Exception:', err);
-      alert('Unexpected error saving staff: ' + err.message);
-    }
-  };
-
-    const removeStaff = async (id: string) => {
-    if (!user) return; if (!window.confirm("Remove staff member?")) return;
-    const { error } = await supabase.from('staff').delete().eq('id', id).eq('owner_id', user.id);
-    if (error) alert("Delete failed: " + error.message);
-    loadCloudData(true);
   };
 
   const handleUpdateOrgCoaches = async (orgId: string, coachIds: string[], coachRates: Record<string, number>) => {
@@ -1729,35 +1603,29 @@ const App: React.FC = () => {
     if (profile.bizBranchCode !== undefined) localStorage.setItem(`jflips_biz_branchCode_${user.id}`, profile.bizBranchCode);
     if (profile.bizAccountType !== undefined) localStorage.setItem(`jflips_biz_accountType_${user.id}`, profile.bizAccountType);
 
-    // Update profile table
-    const { error: pErr } = await supabase.from('profiles').upsert({ 
-      id: user.id, 
-      business_name: profile.businessName, 
-      bank_name: profile.bankName, 
-      account_number: profile.accountNumber, 
-      branch_code: profile.branchCode, 
-      account_type: profile.accountType, 
-      biz_bank_name: profile.bizBankName,
-      biz_account_number: profile.bizAccountNumber,
-      biz_branch_code: profile.bizBranchCode,
-      biz_account_type: profile.bizAccountType,
-      logo: profile.logo,
-      role: state.profile.role,
-      owner_id: state.profile.owner_id,
-      pay_rate: state.profile.pay_rate
-    });
-    
-    if (pErr) { alert("Profile Save Error: " + pErr.message); return; }
-
-    // If coach, also update their record in the staff table so the owner sees the new banking details
-    if (!isOwner) {
-      const { error: sErr } = await supabase.from('staff').update({
+    if (isOwner) {
+      const { error: pErr } = await supabase.from('owner_profiles').upsert({ 
+        id: user.id, 
+        business_name: profile.businessName, 
+        bank_name: profile.bankName, 
+        account_number: profile.accountNumber, 
+        branch_code: profile.branchCode, 
+        account_type: profile.accountType, 
+        biz_bank_name: profile.bizBankName,
+        biz_account_number: profile.bizAccountNumber,
+        biz_branch_code: profile.bizBranchCode,
+        biz_account_type: profile.bizAccountType,
+        logo: profile.logo
+      });
+      if (pErr) { alert("Owner Profile Save Error: " + pErr.message); return; }
+    } else {
+      const { error: sErr } = await supabase.from('staff_profiles').update({
         bank_name: profile.bankName,
         account_number: profile.accountNumber,
         branch_code: profile.branchCode,
         account_type: profile.accountType
-      }).eq('email', user.email);
-      if (sErr) console.error("Staff record update error", sErr);
+      }).eq('id', user.id);
+      if (sErr) { alert("Coach Profile Save Error: " + sErr.message); return; }
     }
 
     loadCloudData(true);
@@ -2682,6 +2550,8 @@ const App: React.FC = () => {
 
   if (isAuthLoading) return <SplashScreen message="Verifying Identity" />;
   if (!user) return <LandingGate />;
+  if (coachStatus === 'pending') return <PendingCoachScreen email={user.email} onLogout={handleLogout} onRefresh={() => loadCloudData(false)} />;
+  if (coachStatus === 'rejected') return <RejectedCoachScreen email={user.email} onLogout={handleLogout} />;
   if (dbError) return <DatabaseSetupView message={dbError} onReload={() => loadCloudData(false)} />;
   if (isLoading) return <SplashScreen message="Syncing Elite Data" />;
 
@@ -2689,16 +2559,14 @@ const App: React.FC = () => {
   const viewContent = (
     <div className="w-full">
       {activeView === View.DASHBOARD && (
-        <React.Suspense fallback={<div className="p-12 text-center text-xs font-black text-slate-400 uppercase">Loading Dashboard...</div>}>
-          <DashboardView
-            state={state}
-            onEditSession={startEditSession}
-            onRemoveSession={removeSession}
-            onQuickLog={handleQuickLog}
-            showAllLogs={showAllLogs}
-            onShowAllLogs={setShowAllLogs}
-          />
-        </React.Suspense>
+        <DashboardView
+          state={state}
+          onEditSession={startEditSession}
+          onRemoveSession={removeSession}
+          onQuickLog={handleQuickLog}
+          showAllLogs={showAllLogs}
+          onShowAllLogs={setShowAllLogs}
+        />
       )}
       {activeView === View.LOG_SESSION && <LogSessionView state={state} onNavigate={handleViewChange} />}
       {activeView === View.REGISTER && <RegisterView state={state} onSave={handleLogSession} onCancel={() => handleViewChange(View.LOG_SESSION)} initialSession={editingSession} />}
@@ -2766,33 +2634,29 @@ const App: React.FC = () => {
       )}
       {activeView === View.INVOICES && <InvoicesView state={state} user={user} onUpdatePayment={handleUpdatePayment} onResetInvoice={resetSingleInvoice} onShowRecovery={() => setShowRecoveryModal(true)} />}
       {activeView === View.ROSTER && (
-        <React.Suspense fallback={<div className="p-12 text-center text-xs font-black text-slate-400 uppercase">Loading Setup...</div>}>
-          <RosterView
-            state={state}
-            activeTab={rosterTab}
-            onTabChange={setRosterTab}
-            entityType={rosterEntityType}
-            onEntityTypeChange={setRosterEntityType}
-            onUpdateProfile={handleUpdateProfile}
-            onAddStudent={() => { setEditingStudent(null); setShowModal('student'); }}
-            onEditStudent={(s) => { setEditingStudent(s); setShowModal('student'); }}
-            onRemoveStudent={removeStudent}
-            onAddGym={(type?: 'tumbling' | 'cheer', parentId?: string) => { setEditingGym(type ? { gym_type: type, parent_gym_id: parentId } as Gym : null); setShowModal('gym'); }}
-            onEditGym={(g) => { setEditingGym(g); setShowModal('gym'); }}
-            onRemoveGym={removeGym}
-            onAddClass={() => { setEditingClassType(null); setShowModal('class'); }}
-            onEditClass={(c) => { setEditingClassType(c); setShowModal('class'); }}
-            onRemoveClass={removeClassType}
-            isStudentLinked={isStudentLinked}
-            onAddSchedule={() => { setEditingSchedule(null); setShowModal('schedule'); }}
-            onEditSchedule={(s) => { setEditingSchedule(s); setShowModal('schedule'); }}
-            onRemoveSchedule={removeSchedule}
-            onLogout={handleLogout}
-            onAddStaff={() => { setEditingStaff(null); setShowModal('staff'); }}
-            onEditStaff={(s) => { setEditingStaff(s); setShowModal('staff'); }}
-            onRemoveStaff={removeStaff}
-          />
-        </React.Suspense>
+        <RosterView
+          state={state}
+          activeTab={rosterTab}
+          onTabChange={setRosterTab}
+          entityType={rosterEntityType}
+          onEntityTypeChange={setRosterEntityType}
+          onUpdateProfile={handleUpdateProfile}
+          onAddStudent={() => { setEditingStudent(null); setShowModal('student'); }}
+          onEditStudent={(s) => { setEditingStudent(s); setShowModal('student'); }}
+          onRemoveStudent={removeStudent}
+          onAddGym={(type?: 'tumbling' | 'cheer', parentId?: string) => { setEditingGym(type ? { gym_type: type, parent_gym_id: parentId } as Gym : null); setShowModal('gym'); }}
+          onEditGym={(g) => { setEditingGym(g); setShowModal('gym'); }}
+          onRemoveGym={removeGym}
+          onAddClass={() => { setEditingClassType(null); setShowModal('class'); }}
+          onEditClass={(c) => { setEditingClassType(c); setShowModal('class'); }}
+          onRemoveClass={removeClassType}
+          isStudentLinked={isStudentLinked}
+          onAddSchedule={() => { setEditingSchedule(null); setShowModal('schedule'); }}
+          onEditSchedule={(s) => { setEditingSchedule(s); setShowModal('schedule'); }}
+          onRemoveSchedule={removeSchedule}
+          onLogout={handleLogout}
+          onRefreshStaff={() => loadCloudData(true)}
+        />
       )}
     </div>
   );
@@ -2890,8 +2754,7 @@ const App: React.FC = () => {
               showModal === 'student_gym' ? "New Gym Athlete" :
                 showModal === 'gym' ? (editingGym?.id ? (editingGym.gym_type === 'cheer' ? "Team Info" : "Gym Info") : (editingGym?.gym_type === 'cheer' ? "New Cheer Team" : "New Gym")) :
                   showModal === 'class' ? "Class Details" :
-                    showModal === 'schedule' ? (editingSchedule ? "Edit Schedule" : "New Schedule") :
-                      showModal === 'staff' ? "New Coach" : ""
+                    showModal === 'schedule' ? (editingSchedule ? "Edit Schedule" : "New Schedule") : ""
           }
           onClose={() => { setShowModal(null); setEditingStudent(null); setEditingGym(null); setEditingClassType(null); setEditingSchedule(null); }}>
           {showModal === 'student' || showModal === 'student_gym' ? (
@@ -2918,14 +2781,6 @@ const App: React.FC = () => {
               onSubmit={handleSaveSchedule}
               onCancel={() => setShowModal(null)}
               onDelete={editingSchedule ? (id) => { removeSchedule(id); setShowModal(null); } : undefined}
-            />
-          ) : showModal === 'staff' ? (
-            <StaffForm 
-              initialData={editingStaff || undefined} 
-              gyms={state.gyms || []}
-              classTypes={state.classTypes || []}
-              onSubmit={handleSaveStaff} 
-              onCancel={() => { setShowModal(null); setEditingStaff(null); }} 
             />
           ) : null}
         </Modal>
@@ -3212,7 +3067,7 @@ const App: React.FC = () => {
 // --- LANDING GATE (wraps landing page + auth view) ---
 
 const LandingGate: React.FC = () => {
-  return <AuthView initialMode="signin" />;
+  return <AuthView />;
 };
 
 // --- DEMO REQUEST MODAL ---
@@ -3751,15 +3606,66 @@ const LandingPage3D: React.FC<{ onSignIn: () => void }> = ({ onSignIn }) => {
 
 // --- AUTH VIEW ---
 
-const AuthView: React.FC<{ initialMode?: 'signin' | 'register_coach'; onBack?: () => void }> = ({ initialMode = 'signin', onBack }) => {
-  const [mode, setMode] = useState<'signin' | 'register_coach' | 'success_request'>(initialMode === 'register_coach' ? 'register_coach' : 'signin');
+const PendingCoachScreen: React.FC<{ email?: string; onLogout: () => void; onRefresh: () => void }> = ({ email, onLogout, onRefresh }) => {
+  return (
+    <div className="flex flex-col min-h-screen items-center justify-center p-6 bg-[#07090f] text-white">
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-md bg-[#0d1117] border border-amber-500/30 p-8 rounded-[2.5rem] shadow-2xl text-center space-y-6">
+        <div className="w-16 h-16 bg-amber-500/10 text-amber-400 rounded-full flex items-center justify-center mx-auto border border-amber-500/30">
+          <Clock size={32} />
+        </div>
+        <div>
+          <h2 className="text-2xl font-black italic text-amber-400 uppercase tracking-tight">Pending Approval</h2>
+          <p className="text-[10px] font-black uppercase text-white/40 tracking-widest mt-1">Waiting for Gym Owner Review</p>
+        </div>
+        <p className="text-xs text-white/70 leading-relaxed font-medium">
+          Your coach registration for <span className="text-white font-bold">{email}</span> has been submitted successfully.
+          Your gym owner must approve your account and assign your permissions before you can access the dashboard.
+        </p>
+        <div className="space-y-3 pt-2">
+          <button onClick={onRefresh} className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3.5 rounded-2xl text-xs uppercase transition-all shadow-lg shadow-amber-500/10 flex items-center justify-center gap-2 cursor-pointer">
+            <RotateCcw size={16} /> Check Status
+          </button>
+          <button onClick={onLogout} className="w-full bg-white/5 hover:bg-white/10 text-white/60 hover:text-white font-black py-3.5 rounded-2xl text-xs uppercase transition-all flex items-center justify-center gap-2 cursor-pointer">
+            <LogOut size={16} /> Log Out
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+const RejectedCoachScreen: React.FC<{ email?: string; onLogout: () => void }> = ({ email, onLogout }) => {
+  return (
+    <div className="flex flex-col min-h-screen items-center justify-center p-6 bg-[#07090f] text-white">
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-md bg-[#0d1117] border border-rose-500/30 p-8 rounded-[2.5rem] shadow-2xl text-center space-y-6">
+        <div className="w-16 h-16 bg-rose-500/10 text-rose-400 rounded-full flex items-center justify-center mx-auto border border-rose-500/30">
+          <ShieldAlert size={32} />
+        </div>
+        <div>
+          <h2 className="text-2xl font-black italic text-rose-400 uppercase tracking-tight">Access Declined</h2>
+          <p className="text-[10px] font-black uppercase text-white/40 tracking-widest mt-1">Application Status</p>
+        </div>
+        <p className="text-xs text-white/70 leading-relaxed font-medium">
+          Your coach registration request for <span className="text-white font-bold">{email}</span> was declined by the gym owner.
+          If you believe this is a mistake, please reach out to your owner directly.
+        </p>
+        <button onClick={onLogout} className="w-full bg-white/5 hover:bg-white/10 text-white font-black py-3.5 rounded-2xl text-xs uppercase transition-all flex items-center justify-center gap-2 cursor-pointer">
+          <LogOut size={16} /> Log Out
+        </button>
+      </motion.div>
+    </div>
+  );
+};
+
+const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
+  const [authMode, setAuthMode] = useState<'signin' | 'coach_signup' | 'owner_signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [name, setName] = useState('');
+  const [businessName, setBusinessName] = useState('');
+  const [accessCode, setAccessCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const OWNER_EMAIL = 'jeandreblacq@gmail.com';
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3775,22 +3681,34 @@ const AuthView: React.FC<{ initialMode?: 'signin' | 'register_coach'; onBack?: (
     }
   };
 
-  const handleRegisterCoach = async (e: React.FormEvent) => {
+  const handleCoachSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
-
-    const coachEmail = email.trim().toLowerCase();
-    const coachName = fullName.trim() || coachEmail.split('@')[0];
-
     try {
-      // 1. Save credentials in Supabase Auth (same standard auth method as owner)
+      if (!accessCode.trim()) {
+        setError('Gym owner access code is required.');
+        setLoading(false);
+        return;
+      }
+
+      // 1. Validate Access Code against owner_profiles
+      const { data: owner, error: codeErr } = await supabase
+        .from('owner_profiles')
+        .select('id, email, business_name')
+        .eq('access_code', accessCode.trim().toUpperCase())
+        .maybeSingle();
+
+      if (codeErr || !owner) {
+        setError('Invalid gym owner access code. Please verify the code with your owner.');
+        setLoading(false);
+        return;
+      }
+
+      // 2. Sign up with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: coachEmail,
-        password,
-        options: {
-          data: { full_name: coachName, role: 'coach' }
-        }
+        email: email.trim(),
+        password
       });
 
       if (authError) {
@@ -3799,131 +3717,106 @@ const AuthView: React.FC<{ initialMode?: 'signin' | 'register_coach'; onBack?: (
         return;
       }
 
-      const coachUserId = authData.user?.id;
+      if (!authData.user) {
+        setError('Registration failed to return user session.');
+        setLoading(false);
+        return;
+      }
 
-      // 2. Fetch Owner ID if available in profiles
-      let ownerId = null;
+      // 3. Create staff_profiles row with status: 'pending'
+      const { error: staffErr } = await supabase.from('staff_profiles').insert({
+        id: authData.user.id,
+        owner_id: owner.id,
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        status: 'pending',
+        can_view_tumbling: false,
+        assigned_cheer_org_ids: []
+      });
+
+      if (staffErr) {
+        setError(`Staff registration error: ${staffErr.message}`);
+        setLoading(false);
+        return;
+      }
+
+      // 4. Send email notification to owner via edge function
       try {
-        const { data: ownerProfiles } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('role', 'owner')
-          .limit(1);
-        if (ownerProfiles && ownerProfiles.length > 0) {
-          ownerId = ownerProfiles[0].id;
-        }
-      } catch (_) {}
-
-      // 3. Create or update profile record in Supabase profiles
-      if (coachUserId) {
-        try {
-          const { error: upsertErr } = await supabase.from('profiles').upsert({
-            id: coachUserId,
-            email: coachEmail,
-            role: 'coach',
-            owner_id: ownerId,
-            status: 'pending',
-            is_approved: false
-          });
-          if (upsertErr) {
-            await supabase.from('profiles').upsert({
-              id: coachUserId,
-              role: 'coach',
-              owner_id: ownerId,
-              status: 'pending',
-              is_approved: false
-            });
+        const funcRes = await supabase.functions.invoke('send-staff-email', {
+          body: {
+            type: 'coach_registered',
+            ownerEmail: owner.email,
+            coachName: name.trim(),
+            coachEmail: email.trim().toLowerCase(),
+            businessName: owner.business_name
           }
-        } catch (e) {
-          console.warn('Profiles upsert exception:', e);
-        }
-      }
-
-      // 4. Create pending entry in staff table
-      try {
-        await supabase.from('staff').upsert({
-          id: coachUserId || `pending-${Date.now()}`,
-          email: coachEmail,
-          name: coachName,
-          role: 'coach',
-          status: 'pending',
-          is_approved: false,
-          pay_rate: 0,
-          owner_id: ownerId || 'pending-owner'
         });
-      } catch (e) {
-        console.warn('Staff upsert exception:', e);
+        if (funcRes.error || funcRes.data?.error) {
+          console.warn('Owner email notification notice:', funcRes.error || funcRes.data?.error);
+        }
+      } catch (emailEx: any) {
+        console.warn('Email trigger warning:', emailEx);
       }
 
-      // 5. Send Notification record to owner
-      if (ownerId) {
-        try {
-          await supabase.from('notifications').insert({
-            user_id: ownerId,
-            message: `Coach access request from ${coachName} (${coachEmail}). Approve access in Setup -> Staff.`,
-            type: 'coach_request',
-            is_read: false,
-            metadata: { coach_email: coachEmail, coach_name: coachName, coach_id: coachUserId }
-          });
-        } catch (_) {}
-      }
-
-      // 6. Generate mailto request email to owner
-      const approvalUrl = `${window.location.origin}?approve_coach_email=${encodeURIComponent(coachEmail)}`;
-      const mailSubject = encodeURIComponent(`JFLIPS Coach Access Request - ${coachName}`);
-      const mailBody = encodeURIComponent(
-        `Hi Jeandre,\n\nCoach ${coachName} (${coachEmail}) has registered on JFLIPS and is requesting access to your gym workspace.\n\nClick the link below to approve access:\n${approvalUrl}\n\nOr open JFLIPS and grant access under Setup -> Staff.`
-      );
-      
-      try {
-        window.open(`mailto:${OWNER_EMAIL}?subject=${mailSubject}&body=${mailBody}`, '_blank');
-      } catch (_) {}
-
-      setMode('success_request');
+      // Automatically sign in
+      await supabase.auth.signInWithPassword({ email: email.trim(), password });
     } catch (err: any) {
-      setError(err.message || 'Coach registration failed. Please try again.');
+      setError(err.message || 'An unexpected error occurred during registration.');
     } finally {
       setLoading(false);
     }
   };
 
-  if (mode === 'success_request') {
-    return (
-      <div className="flex flex-col min-h-screen items-center justify-center p-6 bg-[#07090f]">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-sm text-center space-y-6 bg-[#0d1117] border border-white/8 p-8 rounded-[2.5rem] shadow-2xl"
-        >
-          <div className="w-16 h-16 bg-blue-900/30 border border-blue-500/30 rounded-full flex items-center justify-center mx-auto text-blue-400">
-            <Mail size={32} />
-          </div>
-          <div>
-            <h2 className="text-xl font-black italic uppercase text-white mb-2">Access Request Sent!</h2>
-            <p className="text-xs text-white/50 leading-relaxed font-medium">
-              Your coach account (<strong className="text-white">{email}</strong>) has been registered. An email request was sent to the owner (<strong className="text-blue-400">{OWNER_EMAIL}</strong>) for access approval.
-            </p>
-            <p className="text-[10px] text-emerald-400/80 font-bold uppercase mt-3 p-2 bg-emerald-950/40 border border-emerald-800/40 rounded-xl">
-              Once the owner approves your request, you can log in below.
-            </p>
-          </div>
-          <button
-            onClick={() => { setMode('signin'); setPassword(''); }}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl transition-colors"
-          >
-            Back to Sign In
-          </button>
-        </motion.div>
-      </div>
-    );
-  }
+  const handleOwnerSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password
+      });
+
+      if (authError) {
+        setError(authError.message);
+        setLoading(false);
+        return;
+      }
+
+      if (!authData.user) {
+        setError('Registration failed.');
+        setLoading(false);
+        return;
+      }
+
+      const defaultKey = `JFLIPS-${Math.floor(1000 + Math.random() * 9000)}`;
+      const { error: ownerErr } = await supabase.from('owner_profiles').insert({
+        id: authData.user.id,
+        email: email.trim().toLowerCase(),
+        business_name: businessName.trim() || 'My Gym',
+        access_code: defaultKey
+      });
+
+      if (ownerErr) {
+        setError(`Owner profile creation error: ${ownerErr.message}`);
+        setLoading(false);
+        return;
+      }
+
+      await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    } catch (err: any) {
+      setError(err.message || 'An unexpected error occurred during owner registration.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="flex flex-col min-h-screen items-center justify-center p-6 bg-[#07090f]">
       {onBack && (
         <button
           onClick={onBack}
-          className="absolute top-6 left-6 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-white transition-colors"
+          className="absolute top-6 left-6 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-white transition-colors cursor-pointer"
         >
           <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           Back
@@ -3933,79 +3826,85 @@ const AuthView: React.FC<{ initialMode?: 'signin' | 'register_coach'; onBack?: (
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-sm space-y-8 bg-[#0d1117] border border-white/8 p-8 rounded-[2.5rem] shadow-2xl"
+        className="w-full max-w-md space-y-6 bg-[#0d1117] border border-white/8 p-8 rounded-[2.5rem] shadow-2xl"
       >
         <div className="text-center">
           <h1 className="text-4xl font-[1000] italic text-blue-400 tracking-tighter mb-2">JFLIPS</h1>
           <p className="text-[10px] font-black uppercase text-white/40 tracking-[0.2em]">
-            {mode === 'register_coach' ? 'Coach Registration' : 'Gym Portal Login'}
+            Gym Portal Access
           </p>
         </div>
 
-        {mode === 'register_coach' && (
-          <div className="p-3 bg-blue-600/10 border border-blue-500/20 rounded-2xl text-center">
-            <p className="text-[10px] font-bold text-blue-300 leading-relaxed">
-              Register with your email and password. An email will be sent to the owner for access approval.
-            </p>
+        {/* Auth Mode Tabs */}
+        <div className="flex bg-white/5 p-1 rounded-2xl border border-white/5">
+          <button
+            type="button"
+            onClick={() => { setAuthMode('signin'); setError(null); }}
+            className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-wider transition-all cursor-pointer ${
+              authMode === 'signin' ? 'bg-blue-600 text-white shadow-md' : 'text-white/40 hover:text-white'
+            }`}
+          >
+            Sign In
+          </button>
+          <button
+            type="button"
+            onClick={() => { setAuthMode('coach_signup'); setError(null); }}
+            className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-wider transition-all cursor-pointer ${
+              authMode === 'coach_signup' ? 'bg-blue-600 text-white shadow-md' : 'text-white/40 hover:text-white'
+            }`}
+          >
+            Coach Join
+          </button>
+          <button
+            type="button"
+            onClick={() => { setAuthMode('owner_signup'); setError(null); }}
+            className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-wider transition-all cursor-pointer ${
+              authMode === 'owner_signup' ? 'bg-blue-600 text-white shadow-md' : 'text-white/40 hover:text-white'
+            }`}
+          >
+            Owner Register
+          </button>
+        </div>
+
+        {error && (
+          <div className="p-3 bg-red-900/20 border border-red-500/30 rounded-xl text-red-400 text-[10px] font-bold uppercase text-center leading-relaxed">
+            {error}
           </div>
         )}
 
-        <form onSubmit={mode === 'register_coach' ? handleRegisterCoach : handleSignIn} className="space-y-4">
-          {error && (
-            <div className="p-3 bg-red-900/20 border border-red-500/30 rounded-xl text-red-400 text-[10px] font-bold uppercase text-center">
-              {error}
-            </div>
-          )}
-
-          {mode === 'register_coach' && (
+        {authMode === 'signin' && (
+          <form onSubmit={handleSignIn} className="space-y-4">
             <div className="space-y-1">
-              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Coach Full Name</label>
+              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Email Address</label>
               <div className="relative">
-                <User className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
                 <input
-                  type="text"
-                  value={fullName}
-                  onChange={e => setFullName(e.target.value)}
-                  placeholder="e.g. Coach Sarah"
-                  className="w-full bg-white/5 border border-white/8 rounded-2xl py-4 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="w-full bg-white/5 border border-white/8 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
                   required
                 />
               </div>
             </div>
-          )}
 
-          <div className="space-y-1">
-            <label className="text-[8px] font-black text-white/30 uppercase ml-4">Email Address</label>
-            <div className="relative">
-              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
-              <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                className="w-full bg-white/5 border border-white/8 rounded-2xl py-4 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
-                required
-              />
+            <div className="space-y-1">
+              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-white/5 border border-white/8 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
+                  required
+                />
+              </div>
             </div>
-          </div>
 
-          <div className="space-y-1">
-            <label className="text-[8px] font-black text-white/30 uppercase ml-4">Password</label>
-            <div className="relative">
-              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full bg-white/5 border border-white/8 rounded-2xl py-4 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
-                required
-              />
-            </div>
-          </div>
-
-          {mode === 'signin' ? (
-            <div className="space-y-3 pt-2">
+            <div className="pt-2">
               <motion.button
                 whileTap={{ scale: 0.95 }}
                 disabled={loading}
@@ -4015,39 +3914,146 @@ const AuthView: React.FC<{ initialMode?: 'signin' | 'register_coach'; onBack?: (
                 {loading ? <Loader2 className="animate-spin" size={18} /> : 'Sign In'}
                 {!loading && <ArrowRight size={18} />}
               </motion.button>
-
-              <motion.button
-                whileTap={{ scale: 0.95 }}
-                type="button"
-                onClick={() => { setMode('register_coach'); setError(null); }}
-                className="w-full bg-white/5 hover:bg-white/10 text-blue-300 border border-blue-500/30 py-4 rounded-2xl font-black text-xs uppercase flex items-center justify-center gap-2 transition-colors cursor-pointer"
-              >
-                <UserCheck size={16} className="text-blue-400" />
-                Register Coach
-              </motion.button>
             </div>
-          ) : (
-            <div className="space-y-3 pt-2">
+          </form>
+        )}
+
+        {authMode === 'coach_signup' && (
+          <form onSubmit={handleCoachSignUp} className="space-y-3.5">
+            <div className="space-y-1">
+              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Full Name</label>
+              <div className="relative">
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
+                <input
+                  type="text"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="Coach Name"
+                  className="w-full bg-white/5 border border-white/8 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Email Address</label>
+              <div className="relative">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="coach@gym.com"
+                  className="w-full bg-white/5 border border-white/8 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-white/5 border border-white/8 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[8px] font-black text-blue-400 uppercase ml-4">Gym Owner Access Code</label>
+              <div className="relative">
+                <Key className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-400/50" size={16} />
+                <input
+                  type="text"
+                  value={accessCode}
+                  onChange={e => setAccessCode(e.target.value.toUpperCase())}
+                  placeholder="JFLIPS-1234"
+                  className="w-full bg-blue-950/30 border border-blue-500/30 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-mono font-bold tracking-wider outline-none text-blue-300 placeholder-white/20 focus:border-blue-400 transition-colors uppercase"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="pt-2">
               <motion.button
                 whileTap={{ scale: 0.95 }}
                 disabled={loading}
                 type="submit"
                 className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl shadow-blue-600/20 flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
-                {loading ? <Loader2 className="animate-spin" size={18} /> : 'Register Coach & Request Access'}
+                {loading ? <Loader2 className="animate-spin" size={18} /> : 'Register as Coach'}
                 {!loading && <ArrowRight size={18} />}
               </motion.button>
-
-              <button
-                type="button"
-                onClick={() => { setMode('signin'); setError(null); }}
-                className="w-full text-center py-2 text-[9px] font-black uppercase text-white/30 hover:text-white transition-colors"
-              >
-                ← Back to Sign In
-              </button>
             </div>
-          )}
-        </form>
+          </form>
+        )}
+
+        {authMode === 'owner_signup' && (
+          <form onSubmit={handleOwnerSignUp} className="space-y-3.5">
+            <div className="space-y-1">
+              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Gym / Business Name</label>
+              <div className="relative">
+                <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
+                <input
+                  type="text"
+                  value={businessName}
+                  onChange={e => setBusinessName(e.target.value)}
+                  placeholder="Apex Athletics Gym"
+                  className="w-full bg-white/5 border border-white/8 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Email Address</label>
+              <div className="relative">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="owner@gym.com"
+                  className="w-full bg-white/5 border border-white/8 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-white/5 border border-white/8 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                disabled={loading}
+                type="submit"
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl shadow-blue-600/20 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              >
+                {loading ? <Loader2 className="animate-spin" size={18} /> : 'Register Gym Account'}
+                {!loading && <ArrowRight size={18} />}
+              </motion.button>
+            </div>
+          </form>
+        )}
       </motion.div>
     </div>
   );
@@ -8948,7 +8954,7 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
               <div className="space-y-1">
                 <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Assigned Coaches</label>
                 <div className="flex flex-wrap gap-2 p-2 bg-slate-50 dark:bg-slate-800/50 rounded-xl min-h-[50px]">
-                  {state.staff.map((coach: Staff, idx: number) => (
+                  {state.staff.map((coach: any, idx: number) => (
                     <button
                       key={coach.id || `coach-gym-assign-${idx}`}
                       onClick={() => toggleCoach(coach.id)}
@@ -8971,7 +8977,7 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
                     className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none"
                   >
                     <option value="">- NONE -</option>
-                    {state.staff.filter((s: Staff) => selectedCoachIds.includes(s.id)).map((s: Staff, idx: number) => (
+                    {state.staff.filter((s: any) => selectedCoachIds.includes(s.id)).map((s: any, idx: number) => (
                       <option key={s.id || `coach-opt-${idx}`} value={s.id}>{s.name}</option>
                     ))}
                   </select>
@@ -9175,301 +9181,11 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
   );
 };
 
-const StaffForm: React.FC<{
-  initialData?: Staff,
-  gyms: Gym[],
-  classTypes: ClassType[],
-  onSubmit: (name: string, email: string, payRate: number, id?: string, bankName?: string, accountNumber?: string, branchCode?: string, accountType?: string, password?: string, isOwner?: boolean, assignedGymIds?: string[], assignedClassIds?: string[]) => void,
-  onCancel: () => void
-}> = ({ initialData, gyms, classTypes, onSubmit, onCancel }) => {
-  const [name, setName] = useState(initialData?.name || '');
-  const [email, setEmail] = useState(initialData?.email || '');
-  const [payRate, setPayRate] = useState(initialData?.pay_rate?.toString() || '150');
-  const [bankName, setBankName] = useState(initialData?.bank_name || '');
-  const [accountNumber, setAccountNumber] = useState(initialData?.account_number || '');
-  const [branchCode, setBranchCode] = useState(initialData?.branch_code || '');
-  const [accountType, setAccountType] = useState(initialData?.account_type || 'Current');
-  const [password, setPassword] = useState(initialData?.password || '');
-  const [isOwner, setIsOwner] = useState(initialData?.is_owner || false);
-  const tumblingClasses = classTypes;
-  const gymOrgClasses = gyms.filter(g => g.gym_type !== 'cheer');
-  const cheerParents = gyms.filter(g => g.gym_type === 'cheer' && !g.parent_gym_id);
-  const cheerSubs = gyms.filter(g => g.gym_type === 'cheer' && !!g.parent_gym_id);
-  const allTeams = [...cheerParents, ...cheerSubs];
-
-  const [assignedGymIds, setAssignedGymIds] = useState<string[]>(
-    initialData ? (initialData.assigned_gym_ids || []) : gyms.map(g => g.id)
-  );
-  const [assignedClassIds, setAssignedClassIds] = useState<string[]>(
-    initialData ? (initialData.assigned_class_ids || []) : classTypes.map(c => c.id)
-  );
-
-  const toggleGym = (id: string) => setAssignedGymIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  const toggleClass = (id: string) => setAssignedClassIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-
-  const isAllTumblingSelected = tumblingClasses.length > 0 && tumblingClasses.every(c => assignedClassIds.includes(c.id));
-  const isAllGymOrgsSelected = gymOrgClasses.length > 0 && gymOrgClasses.every(g => assignedGymIds.includes(g.id));
-  const isAllTeamsSelected = allTeams.length > 0 && allTeams.every(g => assignedGymIds.includes(g.id));
-
-  const totalAccessCount = tumblingClasses.length + gymOrgClasses.length + allTeams.length;
-  const isMasterAllSelected = totalAccessCount > 0 && 
-    (tumblingClasses.length === 0 || isAllTumblingSelected) && 
-    (gymOrgClasses.length === 0 || isAllGymOrgsSelected) && 
-    (allTeams.length === 0 || isAllTeamsSelected);
-
-  const toggleAllTumbling = () => {
-    if (isAllTumblingSelected) {
-      const idsToRemove = new Set(tumblingClasses.map(c => c.id));
-      setAssignedClassIds(prev => prev.filter(id => !idsToRemove.has(id)));
-    } else {
-      const allIds = tumblingClasses.map(c => c.id);
-      setAssignedClassIds(prev => Array.from(new Set([...prev, ...allIds])));
-    }
-  };
-
-  const toggleAllGymOrgs = () => {
-    if (isAllGymOrgsSelected) {
-      const idsToRemove = new Set(gymOrgClasses.map(g => g.id));
-      setAssignedGymIds(prev => prev.filter(id => !idsToRemove.has(id)));
-    } else {
-      const allIds = gymOrgClasses.map(g => g.id);
-      setAssignedGymIds(prev => Array.from(new Set([...prev, ...allIds])));
-    }
-  };
-
-  const toggleAllTeams = () => {
-    if (isAllTeamsSelected) {
-      const idsToRemove = new Set(allTeams.map(g => g.id));
-      setAssignedGymIds(prev => prev.filter(id => !idsToRemove.has(id)));
-    } else {
-      const allIds = allTeams.map(g => g.id);
-      setAssignedGymIds(prev => Array.from(new Set([...prev, ...allIds])));
-    }
-  };
-
-  const toggleMasterAll = () => {
-    if (isMasterAllSelected) {
-      setAssignedClassIds([]);
-      setAssignedGymIds([]);
-    } else {
-      setAssignedClassIds(tumblingClasses.map(c => c.id));
-      setAssignedGymIds([...gymOrgClasses.map(g => g.id), ...allTeams.map(g => g.id)]);
-    }
-  };
-
-  const handleSubmit = () => {
-    if (!name || !email) return alert('Name and Email are required');
-    onSubmit(name, email, parseFloat(payRate), initialData?.id, bankName, accountNumber, branchCode, accountType, password, isOwner, assignedGymIds, assignedClassIds);
-  };
-
-  const ToggleSwitch = ({ checked, onChange, label }: { checked: boolean, onChange: () => void, label?: string }) => (
-    <button 
-      type="button" 
-      onClick={onChange}
-      className="flex items-center gap-2 cursor-pointer group shrink-0"
-    >
-      {label && <span className="text-[9px] font-black uppercase text-slate-400 group-hover:text-[#1e4da1] dark:group-hover:text-blue-400 transition-colors">{label}</span>}
-      <div className={`w-8 h-4 rounded-full transition-colors relative ${checked ? 'bg-[#1e4da1] dark:bg-blue-600' : 'bg-slate-200 dark:bg-slate-700'}`}>
-        <motion.div animate={{ x: checked ? 16 : 2 }} className="absolute top-0.5 w-3 h-3 bg-white rounded-full shadow-sm" />
-      </div>
-    </button>
-  );
-
-  const AssignBtn = ({ id, label, icon }: { id: string, label: string, icon: React.ReactNode }) => {
-    const active = assignedGymIds.includes(id);
-    return (
-      <button type="button" onClick={() => toggleGym(id)}
-        className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[9px] font-black uppercase transition-all border ${active ? 'bg-[#1e4da1] text-white border-[#1e4da1]' : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-100 dark:border-slate-700'}`}>
-        {icon}
-        <span className="">{label}</span>
-        {active && <CheckCircle2 size={10} className="shrink-0" />}
-      </button>
-    );
-  };
-
-  const ClassBtn = ({ id, label }: { id: string, label: string }) => {
-    const active = assignedClassIds.includes(id);
-    return (
-      <button type="button" onClick={() => toggleClass(id)}
-        className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[9px] font-black uppercase transition-all border ${active ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-100 dark:border-slate-700'}`}>
-        <BookOpen size={10} />
-        <span className="">{label}</span>
-        {active && <CheckCircle2 size={10} className="shrink-0" />}
-      </button>
-    );
-  };
-
-  return (
-    <div className="space-y-5 max-h-[80vh] overflow-y-auto no-scrollbar pb-4">
-      {/* Login info */}
-      <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl">
-        <p className="text-[9px] font-black uppercase text-blue-700 dark:text-blue-300 mb-1">How Coach Login Works</p>
-        <p className="text-[9px] font-medium text-blue-600 dark:text-blue-400 leading-relaxed">
-          Enter their email and save. They sign up at the app login page with that email and choose their own password.
-        </p>
-      </div>
-
-      {/* Basic info */}
-      <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Coach Name</label><input placeholder="NAME" value={name} onChange={e => setName(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
-      <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Coach Email</label><input placeholder="coach@email.com" type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
-      <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Pay Rate (R/hr)</label><input placeholder="150" type="number" value={payRate} onChange={e => setPayRate(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
-      <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Coach Password / Passcode</label><input placeholder="SET OR VIEW PASSWORD" type="text" value={password} onChange={e => setPassword(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
-
-      {/* ── ACCESS ASSIGNMENT ─────────────────────────────────────────────── */}
-      <div className="space-y-4 border-t border-slate-100 dark:border-slate-800 pt-4">
-        {/* Top Header & Master Select All */}
-        <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-100 dark:border-slate-800">
-          <div>
-            <p className="text-[10px] font-black uppercase text-slate-800 dark:text-slate-200 italic">Class & Team Access</p>
-            <p className="text-[8px] font-bold text-slate-400 uppercase">Manage permissions for this staff member</p>
-          </div>
-          {totalAccessCount > 0 && (
-            <ToggleSwitch 
-              checked={isMasterAllSelected} 
-              onChange={toggleMasterAll} 
-              label={isMasterAllSelected ? "Deselect All" : "Select All"} 
-            />
-          )}
-        </div>
-
-        {/* 1. Tumbling Classes */}
-        <div className="p-3 bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[9px] font-black text-[#1e4da1] dark:text-blue-400 uppercase tracking-widest flex items-center gap-1.5">
-                <BookOpen size={12} />
-                Tumbling Classes
-              </p>
-              <p className="text-[8px] font-bold text-slate-400 uppercase">Individual class types & sessions</p>
-            </div>
-            {tumblingClasses.length > 0 && (
-              <ToggleSwitch 
-                checked={isAllTumblingSelected} 
-                onChange={toggleAllTumbling} 
-                label={isAllTumblingSelected ? "All Selected" : "Select All"} 
-              />
-            )}
-          </div>
-          {tumblingClasses.length === 0 ? (
-            <p className="text-[8px] text-slate-400 italic">No tumbling classes created yet</p>
-          ) : (
-            <div className="flex flex-wrap gap-2 pt-1">
-              {tumblingClasses.map((ct, idx) => <ClassBtn key={ct.id || `class-assign-${idx}`} id={ct.id} label={ct.name} />)}
-            </div>
-          )}
-        </div>
-
-        {/* 2. Gym Organisation Classes */}
-        <div className="p-3 bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[9px] font-black text-[#1e4da1] dark:text-blue-400 uppercase tracking-widest flex items-center gap-1.5">
-                <Building2 size={12} />
-                Gym Organisation Classes
-              </p>
-              <p className="text-[8px] font-bold text-slate-400 uppercase">Tumbling & gym organisation sessions</p>
-            </div>
-            {gymOrgClasses.length > 0 && (
-              <ToggleSwitch 
-                checked={isAllGymOrgsSelected} 
-                onChange={toggleAllGymOrgs} 
-                label={isAllGymOrgsSelected ? "All Selected" : "Select All"} 
-              />
-            )}
-          </div>
-          {gymOrgClasses.length === 0 ? (
-            <p className="text-[8px] text-slate-400 italic">No gym organisations created yet</p>
-          ) : (
-            <div className="flex flex-wrap gap-2 pt-1">
-              {gymOrgClasses.map((g, idx) => <AssignBtn key={g.id || `gym-assign-${idx}`} id={g.id} label={g.name} icon={<Building2 size={10} />} />)}
-            </div>
-          )}
-        </div>
-
-        {/* 3. Teams & Sub-Teams */}
-        <div className="p-3 bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[9px] font-black text-[#1e4da1] dark:text-blue-400 uppercase tracking-widest flex items-center gap-1.5">
-                <Trophy size={12} />
-                Teams & Sub-Teams
-              </p>
-              <p className="text-[8px] font-bold text-slate-400 uppercase">Cheer teams, sub-teams & competition sessions</p>
-            </div>
-            {allTeams.length > 0 && (
-              <ToggleSwitch 
-                checked={isAllTeamsSelected} 
-                onChange={toggleAllTeams} 
-                label={isAllTeamsSelected ? "All Selected" : "Select All"} 
-              />
-            )}
-          </div>
-          {allTeams.length === 0 ? (
-            <p className="text-[8px] text-slate-400 italic">No cheer teams created yet</p>
-          ) : (
-            <div className="space-y-2 pt-1">
-              {cheerParents.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {cheerParents.map((g, idx) => (
-                    <AssignBtn key={g.id || `cheer-parent-${idx}`} id={g.id} label={g.name} icon={<Trophy size={10} />} />
-                  ))}
-                </div>
-              )}
-              {cheerSubs.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {cheerSubs.map((g, idx) => {
-                    const parent = gyms.find(p => p.id === g.parent_gym_id);
-                    return <AssignBtn key={g.id || `cheer-sub-${idx}`} id={g.id} label={`${parent ? parent.name + ' › ' : ''}${g.name}`} icon={<Users size={10} />} />;
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {assignedGymIds.length === 0 && assignedClassIds.length === 0 && (
-          <p className="text-[8px] text-amber-500 font-bold uppercase">⚠ No access assigned — coach will see nothing</p>
-        )}
-      </div>
-
-      {/* Is Owner toggle */}
-      <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700">
-        <div className="flex-1">
-          <p className="text-[10px] font-black uppercase italic text-slate-800 dark:text-slate-200">Is Owner Profile</p>
-          <p className="text-[8px] font-bold text-slate-400 uppercase mt-0.5">Mark this if this is your own coaching record</p>
-        </div>
-        <button onClick={() => setIsOwner(!isOwner)}
-          className={`w-12 h-6 rounded-full transition-colors relative ${isOwner ? 'bg-[#1e4da1]' : 'bg-slate-200 dark:bg-slate-700'}`}>
-          <motion.div animate={{ x: isOwner ? 24 : 4 }} className="absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm" />
-        </button>
-      </div>
-
-      {/* Banking */}
-      <div className="pt-2 border-t border-slate-50 dark:border-slate-800">
-        <p className="text-[8px] font-black text-[#1e4da1] uppercase mb-3 tracking-widest">Banking Details (Optional)</p>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Bank Name</label><input placeholder="E.G. FNB" value={bankName} onChange={e => setBankName(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
-          <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Account Type</label><select value={accountType} onChange={e => setAccountType(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none"><option value="Current">Current</option><option value="Savings">Savings</option><option value="Transact">Transact</option></select></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3 mt-3">
-          <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Account Number</label><input placeholder="ACC NUM" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
-          <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Branch Code</label><input placeholder="BRANCH" value={branchCode} onChange={e => setBranchCode(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
-        </div>
-      </div>
-
-      <div className="flex gap-2 mt-4">
-        <motion.button whileTap={{ scale: 0.95 }} onClick={handleSubmit} className="flex-[4] bg-[#1e4da1] dark:bg-blue-600 text-white py-4 rounded-xl font-black text-[10px] uppercase shadow-lg">{initialData ? 'Save Changes' : 'Add Coach'}</motion.button>
-        <motion.button whileTap={{ scale: 0.9 }} onClick={onCancel} className="flex-1 bg-slate-100 dark:bg-slate-800 text-[#94a3b8] rounded-xl flex items-center justify-center"><X size={16} /></motion.button>
-      </div>
-    </div>
-  );
-};
-
 const ScheduleForm: React.FC<{
   students?: Student[],
   classTypes: ClassType[],
   gyms: Gym[],
-  staff: Staff[],
+  staff: any[],
   isOwner: boolean,
   initialData?: ClassSchedule,
   onSubmit: (classIds: string[], dayOfWeek: number, time: string, label?: string, color?: string) => void,

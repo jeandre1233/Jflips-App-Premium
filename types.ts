@@ -103,10 +103,44 @@ export interface HistoryMonth {
   snapshot_data?: {
     students: Student[];
     gyms: Gym[];
-    staff: Staff[];
+    staff?: any[];
     classTypes: ClassType[];
     payments: Payment[];
   };
+}
+
+export interface OwnerProfile {
+  id: string; // id uuid primary key
+  email?: string; // email text
+  businessName?: string; // business_name text
+  accessCode?: string; // access_code text
+  bankName?: string; // bank_name text
+  accountNumber?: string; // account_number text
+  branchCode?: string; // branch_code text
+  accountType?: string; // account_type text
+  bizBankName?: string; // biz_bank_name text
+  bizAccountNumber?: string; // biz_account_number text
+  bizBranchCode?: string; // biz_branch_code text
+  bizAccountType?: string; // biz_account_type text
+  logo?: string; // logo text
+  createdAt?: string; // created_at timestamptz
+}
+
+export interface StaffProfile {
+  id: string; // id uuid primary key
+  ownerId?: string; // owner_id uuid
+  name?: string; // name text
+  email?: string; // email text
+  payRate?: number; // pay_rate numeric
+  bankName?: string; // bank_name text
+  accountNumber?: string; // account_number text
+  branchCode?: string; // branch_code text
+  accountType?: string; // account_type text
+  status: 'pending' | 'approved' | 'rejected'; // status text
+  canViewTumbling: boolean; // can_view_tumbling boolean
+  assignedCheerOrgIds: string[]; // assigned_cheer_org_ids text[]
+  createdAt?: string; // created_at timestamptz
+  approvedAt?: string; // approved_at timestamptz
 }
 
 export interface Profile {
@@ -121,34 +155,15 @@ export interface Profile {
   bizBranchCode?: string;
   bizAccountType?: string;
   logo?: string;
-  role?: 'owner' | 'coach';
-  owner_id?: string; // If coach, this links to their owner
-  pay_rate?: number; // Default pay rate for coach
+  role?: string;
+  owner_id?: string;
+  pay_rate?: number;
   email?: string;
   access_code?: string;
-  status?: 'pending' | 'approved' | 'rejected';
+  status?: string;
   is_approved?: boolean;
-}
-
-export interface Staff {
-  id: string;
-  email: string;
-  name: string;
-  role: 'coach';
-  pay_rate: number;
-  owner_id: string;
-  created_at?: string;
-  bank_name?: string;
-  account_number?: string;
-  branch_code?: string;
-  account_type?: string;
-  password?: string;
-  is_owner?: boolean;
-  access_code?: string;
-  assigned_gym_ids?: string[];    // gyms/teams this coach can access
-  assigned_class_ids?: string[];  // class types this coach can access
-  status?: 'pending' | 'approved' | 'rejected';
-  is_approved?: boolean;
+  can_view_tumbling?: boolean;
+  assigned_cheer_org_ids?: string[];
 }
 
 export interface AppNotification {
@@ -230,7 +245,7 @@ export interface AppState {
   history: HistoryMonth[];
   payments: Payment[];
   schedules: ClassSchedule[];
-  staff: Staff[];
+  staff?: any[];
   competitions: Competition[];
   profile: Profile;
   theme: 'light' | 'dark';

@@ -348,21 +348,11 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
   const [isCalendarExpanded, setIsCalendarExpanded] = useState(false);
   const isOwner = state.profile.role === 'owner';
 
-  const myStaff = useMemo(() => {
-    return (state.staff || []).find(s => 
-      (s.id && s.id === state.profile?.id) ||
-      (s.email && state.profile?.email && s.email.toLowerCase() === state.profile.email.toLowerCase())
-    );
-  }, [state.staff, state.profile]);
-
   const coachSessions = useMemo(() => {
     if (isOwner) return state.sessions || [];
-    const myIds = new Set<string>();
-    if (state.profile?.id) myIds.add(state.profile.id);
-    if (myStaff?.id) myIds.add(myStaff.id);
-    if (myStaff?.email) myIds.add(myStaff.email);
-    return (state.sessions || []).filter(s => myIds.has(s.coach_id));
-  }, [state.sessions, isOwner, state.profile, myStaff]);
+    const myId = state.profile?.id;
+    return (state.sessions || []).filter(s => s.coach_id === myId);
+  }, [state.sessions, isOwner, state.profile]);
 
   const revenue = useMemo(() => (state.sessions || []).reduce((acc, sess) => {
     const ct = (state.classTypes || []).find(c => c.id === sess.classTypeId);
@@ -397,17 +387,17 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
     return acc + sessionSum;
   }, 0), [state.sessions, state.classTypes, state.gyms]);
 
-  const staffPay = useMemo(() => {
-    return (coachSessions || []).reduce((acc, sess) => {
-      const coach = state.staff.find(s => s.id === sess.coach_id);
-      const coachPayRate = isOwner ? (coach?.pay_rate || 0) : (state.profile.pay_rate || 0);
-      return acc + (coachPayRate * (sess.hours_coached || 1));
-    }, 0);
-  }, [coachSessions, state.staff, isOwner, state.profile.pay_rate]);
-
   const matTime = useMemo(() => {
     return (coachSessions || []).reduce((acc, sess) => acc + (sess.hours_coached || 1), 0);
   }, [coachSessions]);
+
+  const staffPay = useMemo(() => {
+    return (coachSessions || []).reduce((acc, sess) => {
+      const coach = (state.staff || []).find(s => s.id === sess.coach_id);
+      const coachPayRate = isOwner ? (coach?.payRate || 0) : (state.profile.pay_rate || 0);
+      return acc + (coachPayRate * (sess.hours_coached || 1));
+    }, 0);
+  }, [coachSessions, state.staff, isOwner, state.profile.pay_rate]);
 
   const recentLogs = useMemo(() => {
     const logs = [...(coachSessions || [])].sort((a, b) => {

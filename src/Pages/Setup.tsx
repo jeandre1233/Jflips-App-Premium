@@ -31,8 +31,8 @@ import {
   Student, 
   Gym, 
   ClassType, 
-  ClassSchedule, 
-  Staff 
+  ClassSchedule,
+  StaffProfile 
 } from '../../types';
 import { supabase } from '../../supabase';
 import { 
@@ -62,10 +62,349 @@ const staggerContainer = {
   }
 };
 
-export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onEntityTypeChange, onUpdateProfile, onAddStudent, onEditStudent, onRemoveStudent, onAddGym, onEditGym, onRemoveGym, onAddClass, onEditClass, onRemoveClass, isStudentLinked, onAddSchedule, onEditSchedule, onRemoveSchedule, onLogout, onAddStaff, onEditStaff, onRemoveStaff }: {
+const CoachApprovalCard: React.FC<{
+  coach: StaffProfile;
+  cheerGyms: Gym[];
+  ownerBusinessName?: string;
+  onRefreshStaff?: () => void;
+  showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
+}> = ({ coach, cheerGyms, ownerBusinessName, onRefreshStaff, showToast }) => {
+  const [canViewTumbling, setCanViewTumbling] = useState<boolean>(coach.canViewTumbling);
+  const [assignedCheerOrgIds, setAssignedCheerOrgIds] = useState<string[]>(coach.assignedCheerOrgIds || []);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setCanViewTumbling(coach.canViewTumbling);
+    setAssignedCheerOrgIds(coach.assignedCheerOrgIds || []);
+  }, [coach.canViewTumbling, coach.assignedCheerOrgIds]);
+
+  const toggleCheerGym = (gymId: string) => {
+    if (assignedCheerOrgIds.includes(gymId)) {
+      setAssignedCheerOrgIds(assignedCheerOrgIds.filter(id => id !== gymId));
+    } else {
+      setAssignedCheerOrgIds([...assignedCheerOrgIds, gymId]);
+    }
+  };
+
+  const handleApproveOrUpdate = async (status: 'approved' | 'rejected') => {
+    setIsSubmitting(true);
+    try {
+      const updateData: any = {
+        status,
+        can_view_tumbling: canViewTumbling,
+        assigned_cheer_org_ids: assignedCheerOrgIds
+      };
+      if (status === 'approved') {
+        updateData.approved_at = new Date().toISOString();
+      }
+
+      const { data: updated, error: dbErr } = await supabase
+        .from('staff_profiles')
+        .update(updateData)
+        .eq('id', coach.id)
+        .select('*')
+        .single();
+
+      if (dbErr) {
+        showToast(`Failed to update coach status: ${dbErr.message}`, 'error');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Trigger email notification to coach
+      if (coach.email) {
+        try {
+          const emailRes = await supabase.functions.invoke('send-staff-email', {
+            body: {
+              type: 'coach_approval',
+              coachEmail: coach.email,
+              coachName: coach.name || 'Coach',
+              businessName: ownerBusinessName || 'JFLIPS Gym',
+              outcome: status
+            }
+          });
+          if (emailRes.error || (emailRes.data && emailRes.data.error)) {
+            console.warn('Staff notification email warning:', emailRes.error || emailRes.data.error);
+          }
+        } catch (emailErr: any) {
+          console.warn('Staff notification exception:', emailErr);
+        }
+      }
+
+      showToast(
+        status === 'approved' 
+          ? `Coach ${coach.name || coach.email} approved and permissions updated!` 
+          : `Coach request for ${coach.name || coach.email} marked as rejected.`,
+        status === 'approved' ? 'success' : 'info'
+      );
+
+      if (onRefreshStaff) onRefreshStaff();
+    } catch (err: any) {
+      showToast(`Error: ${err.message || 'An error occurred'}`, 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="p-6 bg-white dark:bg-slate-800/80 border border-slate-100 dark:border-slate-800 rounded-3xl shadow-sm space-y-4">
+      {/* Header: Name, Email & Status */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/40 text-[#1e4da1] dark:text-blue-400 font-black rounded-2xl flex items-center justify-center uppercase">
+            {(coach.name || coach.email || 'C').charAt(0)}
+          </div>
+          <div>
+            <p className="text-sm font-black text-slate-900 dark:text-white italic uppercase">
+              {coach.name || 'Unnamed Coach'}
+            </p>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+              {coach.email}
+            </p>
+          </div>
+        </div>
+
+        <span className={`px-2.5 py-1 rounded-full text-[8px] font-black uppercase tracking-wider ${
+          coach.status === 'approved'
+            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+            : coach.status === 'rejected'
+            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'
+            : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 animate-pulse'
+        }`}>
+          {coach.status}
+        </span>
+      </div>
+
+      {/* Permissions Configuration */}
+      <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl space-y-3 border border-slate-100 dark:border-slate-800/80">
+        <p className="text-[9px] font-black uppercase tracking-widest text-[#1e4da1] dark:text-blue-400">
+          Coach Access Permissions
+        </p>
+
+        {/* Tumbling Toggle */}
+        <label className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-xl cursor-pointer hover:border-blue-200 transition-colors border border-transparent">
+          <div>
+            <span className="text-[10px] font-black uppercase text-slate-800 dark:text-slate-200 block">
+              Can View Gym / Tumbling Athletes
+            </span>
+            <span className="text-[8px] text-slate-400 font-bold">
+              Grants access to tumbling roster and non-cheer student records
+            </span>
+          </div>
+          <input
+            type="checkbox"
+            checked={canViewTumbling}
+            onChange={e => setCanViewTumbling(e.target.checked)}
+            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+          />
+        </label>
+
+        {/* Cheer Gyms Multi-Select */}
+        <div className="space-y-2 pt-1">
+          <span className="text-[9px] font-black uppercase text-slate-700 dark:text-slate-300 block">
+            Assigned Cheer Teams / Organizations ({assignedCheerOrgIds.length} Selected)
+          </span>
+
+          {cheerGyms.length === 0 ? (
+            <p className="text-[8px] text-slate-400 italic">No cheer team organizations created yet.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {cheerGyms.map(gym => {
+                const isChecked = assignedCheerOrgIds.includes(gym.id);
+                return (
+                  <label
+                    key={gym.id}
+                    className={`flex items-center gap-2 p-2.5 rounded-xl border text-[9px] font-black uppercase cursor-pointer transition-colors ${
+                      isChecked
+                        ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-500/40 text-blue-700 dark:text-blue-300'
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700/60 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleCheerGym(gym.id)}
+                      className="w-3.5 h-3.5 rounded text-blue-600"
+                    />
+                    <span className="truncate">{gym.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex gap-2 pt-1">
+        {coach.status === 'pending' ? (
+          <>
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => handleApproveOrUpdate('approved')}
+              className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-black text-[9px] uppercase tracking-wider shadow-md flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <CheckCircle2 size={14} /> Approve & Grant Permissions
+            </button>
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => handleApproveOrUpdate('rejected')}
+              className="px-4 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/40 hover:bg-rose-100 py-3 rounded-xl font-black text-[9px] uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <X size={14} /> Reject
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            disabled={isSubmitting}
+            onClick={() => handleApproveOrUpdate('approved')}
+            className="w-full bg-[#1e4da1] hover:bg-blue-600 text-white py-3 rounded-xl font-black text-[9px] uppercase tracking-wider shadow-md flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+          >
+            <Check size={14} /> Update Coach Permissions
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const StaffManagementSection: React.FC<{
+  state: AppState;
+  onRefreshStaff?: () => void;
+  showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
+}> = ({ state, onRefreshStaff, showToast }) => {
+  const staffList: StaffProfile[] = (state.staff || []).map(s => ({
+    id: s.id,
+    ownerId: s.ownerId || (s as any).owner_id,
+    name: s.name || 'Unnamed Coach',
+    email: s.email || '',
+    payRate: s.payRate || (s as any).pay_rate,
+    status: s.status || 'pending',
+    canViewTumbling: s.canViewTumbling ?? (s as any).can_view_tumbling ?? false,
+    assignedCheerOrgIds: s.assignedCheerOrgIds || (s as any).assigned_cheer_org_ids || []
+  }));
+
+  const cheerGyms = (state.gyms || []).filter(g => g.gym_type === 'cheer');
+
+  const pendingStaff = staffList.filter(s => s.status === 'pending');
+  const managedStaff = staffList.filter(s => s.status === 'approved' || s.status === 'rejected');
+
+  const [accessCodeCopied, setAccessCodeCopied] = useState(false);
+
+  const copyAccessCode = () => {
+    if (state.profile?.access_code) {
+      navigator.clipboard.writeText(state.profile.access_code);
+      setAccessCodeCopied(true);
+      setTimeout(() => setAccessCodeCopied(false), 2000);
+      showToast('Owner Access Code copied to clipboard!', 'success');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Access Code Banner */}
+      <div className="bg-gradient-to-r from-blue-900/20 via-blue-800/10 to-indigo-900/20 p-6 rounded-3xl border border-blue-500/20 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <Key size={18} className="text-blue-400" />
+            <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase italic">Gym Owner Access Code</h3>
+          </div>
+          <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mt-1">
+            Share this unique access code with coaches so they can register under your gym.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 w-full md:w-auto">
+          <div className="px-4 py-2.5 bg-slate-900 text-blue-400 font-mono font-black text-sm tracking-wider rounded-xl border border-blue-500/30">
+            {state.profile?.access_code || 'No Code Set'}
+          </div>
+          <button
+            type="button"
+            onClick={copyAccessCode}
+            className="p-2.5 bg-[#1e4da1] hover:bg-blue-600 text-white rounded-xl transition-all shadow-md flex items-center justify-center cursor-pointer"
+            title="Copy Access Code"
+          >
+            {accessCodeCopied ? <Check size={18} /> : <Copy size={18} />}
+          </button>
+        </div>
+      </div>
+
+      {/* PENDING COACHES SECTION */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic flex items-center gap-2">
+              Pending Coach Requests
+              {pendingStaff.length > 0 && (
+                <span className="px-2 py-0.5 text-[9px] bg-amber-500 text-slate-950 font-black rounded-full">
+                  {pendingStaff.length}
+                </span>
+              )}
+            </h2>
+            <p className="text-[8px] font-black text-[#94a3b8] uppercase">Review, approve, and set access permissions</p>
+          </div>
+        </div>
+
+        {pendingStaff.length === 0 ? (
+          <div className="py-10 bg-white dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-3xl text-center">
+            <CheckCircle2 size={24} className="mx-auto text-emerald-500 mb-2" />
+            <p className="text-slate-400 text-[10px] font-black uppercase">No pending coach requests</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {pendingStaff.map(coach => (
+              <CoachApprovalCard
+                key={coach.id}
+                coach={coach}
+                cheerGyms={cheerGyms}
+                ownerBusinessName={state.profile?.businessName}
+                onRefreshStaff={onRefreshStaff}
+                showToast={showToast}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* MANAGED COACHES SECTION */}
+      <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+        <div>
+          <h2 className="text-xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">
+            Approved & Managed Staff
+          </h2>
+          <p className="text-[8px] font-black text-[#94a3b8] uppercase">Manage active coach permissions and team access</p>
+        </div>
+
+        {managedStaff.length === 0 ? (
+          <div className="py-10 bg-white dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-3xl text-center">
+            <Users size={24} className="mx-auto text-slate-400 mb-2" />
+            <p className="text-slate-400 text-[10px] font-black uppercase">No active staff members yet</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {managedStaff.map(coach => (
+              <CoachApprovalCard
+                key={coach.id}
+                coach={coach}
+                cheerGyms={cheerGyms}
+                ownerBusinessName={state.profile?.businessName}
+                onRefreshStaff={onRefreshStaff}
+                showToast={showToast}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onEntityTypeChange, onUpdateProfile, onAddStudent, onEditStudent, onRemoveStudent, onAddGym, onEditGym, onRemoveGym, onAddClass, onEditClass, onRemoveClass, isStudentLinked, onAddSchedule, onEditSchedule, onRemoveSchedule, onLogout, onRefreshStaff }: {
   state: AppState,
-  activeTab: 'students' | 'classes' | 'schedule' | 'profile' | 'staff',
-  onTabChange: (tab: 'students' | 'classes' | 'schedule' | 'profile' | 'staff') => void,
+  activeTab: 'students' | 'classes' | 'schedule' | 'staff' | 'profile',
+  onTabChange: (tab: 'students' | 'classes' | 'schedule' | 'staff' | 'profile') => void,
   entityType: 'athletes' | 'gyms' | 'teams',
   onEntityTypeChange: (type: 'athletes' | 'gyms' | 'teams') => void,
   onUpdateProfile: (p: Profile) => void,
@@ -83,9 +422,7 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
   onEditSchedule: (s: ClassSchedule) => void,
   onRemoveSchedule: (id: string) => void,
   onLogout: () => void,
-  onAddStaff?: () => void,
-  onEditStaff?: (s: Staff) => void,
-  onRemoveStaff?: (id: string) => void
+  onRefreshStaff?: () => void
 }) => {
   const [search, setSearch] = useState('');
   const [profileForm, setProfileForm] = useState<Profile>(state.profile);
@@ -817,11 +1154,19 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
               </div>
             </div>
 
+            {isOwner && (
+              <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
+                <StaffManagementSection state={state} onRefreshStaff={onRefreshStaff} showToast={showToast} />
+              </div>
+            )}
+
             <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 text-center text-slate-400 dark:text-slate-500">
               <span className="text-[20px] font-black italic text-[#1e4da1] dark:text-blue-400">JFLIPS</span>
               <p className="text-[8px] font-black uppercase tracking-[0.2em] mt-0.5">Professional Edition • v1.4.2</p>
             </div>
           </div>
+        ) : activeTab === 'staff' ? (
+          <StaffManagementSection state={state} onRefreshStaff={onRefreshStaff} showToast={showToast} />
         ) : activeTab === 'schedule' ? (
           <div className="space-y-4">
             <div className="flex items-center justify-between mb-4">
@@ -887,105 +1232,6 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                   </motion.div>
                 );
               })}
-            </motion.div>
-          </div>
-        ) : activeTab === 'staff' ? (
-          <div className="space-y-4">
-            <div className="flex justify-between items-center mb-2">
-              <div>
-                <h2 className="text-2xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">Coaches</h2>
-                <p className="text-[8px] font-black text-[#94a3b8] uppercase">Staff Access & Permissions</p>
-              </div>
-              {isOwner && onAddStaff && (
-                <motion.button whileTap={{ scale: 0.8 }} onClick={onAddStaff} className="w-10 h-10 bg-[#1e4da1] text-white rounded-xl flex items-center justify-center shadow-lg">
-                  <Plus size={20} strokeWidth={3} />
-                </motion.button>
-              )}
-            </div>
-
-            {/* Pending Coach Access Requests Banner for Owners */}
-            {isOwner && (state.staff || []).some(s => s.status === 'pending' || s.is_approved === false) && (
-              <div className="p-4 bg-gradient-to-r from-amber-900/30 via-amber-950/20 to-amber-900/30 border border-amber-500/30 rounded-2xl space-y-3">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="text-amber-400 shrink-0" size={18} />
-                  <div>
-                    <h3 className="text-xs font-black uppercase tracking-wider text-amber-300">Pending Coach Access Requests</h3>
-                    <p className="text-[8.5px] text-amber-200/60 font-bold uppercase">Coaches requesting website access to your gym</p>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  {(state.staff || []).filter(s => s.status === 'pending' || s.is_approved === false).map((coach, idx) => (
-                    <div key={`pending-coach-${coach.id}-${idx}`} className="p-3 bg-white/5 border border-amber-500/20 rounded-xl flex items-center justify-between gap-3 flex-wrap">
-                      <div>
-                        <p className="text-xs font-black text-white uppercase italic">{coach.name || coach.email}</p>
-                        <p className="text-[9px] font-bold text-slate-400 uppercase">{coach.email}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              await supabase.from('staff').update({ is_approved: true, status: 'approved' }).eq('id', coach.id);
-                              try {
-                                await supabase.from('profiles').update({ is_approved: true, status: 'approved' }).eq('id', coach.id);
-                              } catch (_) {}
-                              alert(`Access granted for Coach ${coach.name || coach.email}! They can now log in and access the gym.`);
-                              window.location.reload();
-                            } catch (e) {
-                              console.error('Coach approval failed:', e);
-                            }
-                          }}
-                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md transition-colors"
-                        >
-                          <Check size={12} /> Grant Access
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              await supabase.from('staff').delete().eq('id', coach.id);
-                              alert(`Registration request for ${coach.email} declined.`);
-                              window.location.reload();
-                            } catch (e) {
-                              console.error('Coach rejection failed:', e);
-                            }
-                          }}
-                          className="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl text-[9px] font-black uppercase tracking-wider transition-colors"
-                        >
-                          Decline
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-3 pb-20">
-              {(!state.staff || state.staff.length === 0) ? (
-                <div className="py-12 bg-white dark:bg-slate-850 border border-slate-100 dark:border-slate-800 rounded-3xl text-center"><p className="text-slate-400 text-[10px] font-black uppercase">No Staff Registered</p></div>
-              ) : state.staff.map((item, idx) => (
-                <motion.div key={`staff-${item.id}-${idx}`} variants={athleteItemVariants} onClick={isOwner && onEditStaff ? () => onEditStaff(item) : undefined} className={`p-4 bg-white dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 rounded-2xl flex items-center justify-between shadow-sm ${isOwner && onEditStaff ? 'cursor-pointer hover:border-blue-100/50' : ''}`}>
-                  <div className="flex items-center gap-3 overflow-hidden">
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm italic shrink-0 bg-[#eff6ff] dark:bg-blue-900/30 text-[#1e4da1] dark:text-blue-400">
-                      {item.name.charAt(0)}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <p className="text-sm font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">{item.name}</p>
-                        {item.is_owner && <span className="bg-[#eff6ff] dark:bg-blue-950 text-[#1e4da1] text-[6px] font-black px-1 py-0.5 rounded uppercase tracking-wider shrink-0">Owner</span>}
-                        {item.is_approved === false || item.status === 'pending' ? (
-                          <span className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[6.5px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0">Pending Approval</span>
-                        ) : (
-                          <span className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[6.5px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0">Approved Coach</span>
-                        )}
-                      </div>
-                      <p className="text-[8px] text-slate-400 font-bold uppercase">{item.email} • R{item.pay_rate || 0}/hr{item.password ? ` • Passcode: ${item.password}` : ''}</p>
-                    </div>
-                  </div>
-                  {isOwner && onEditStaff && <ChevronRight size={18} className="text-slate-300" />}
-                </motion.div>
-              ))}
             </motion.div>
           </div>
         ) : activeTab === 'classes' ? (
