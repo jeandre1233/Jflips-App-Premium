@@ -138,6 +138,7 @@ export interface StaffProfile {
   accountType?: string; // account_type text
   status: 'pending' | 'approved' | 'rejected'; // status text
   canViewTumbling: boolean; // can_view_tumbling boolean
+  canViewSchoolGyms?: boolean; // can_view_school_gyms boolean
   assignedCheerOrgIds: string[]; // assigned_cheer_org_ids text[]
   createdAt?: string; // created_at timestamptz
   approvedAt?: string; // approved_at timestamptz
@@ -163,6 +164,7 @@ export interface Profile {
   status?: string;
   is_approved?: boolean;
   can_view_tumbling?: boolean;
+  can_view_school_gyms?: boolean;
   assigned_cheer_org_ids?: string[];
 }
 

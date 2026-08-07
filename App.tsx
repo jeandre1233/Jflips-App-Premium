@@ -988,6 +988,7 @@ const App: React.FC = () => {
             pay_rate: staffP.pay_rate,
             email: staffP.email || user.email,
             can_view_tumbling: canViewTumbling,
+            can_view_school_gyms: staffP.can_view_school_gyms ?? false,
             assigned_cheer_org_ids: assignedCheerOrgIds,
             id: user.id
           };
@@ -1710,24 +1711,59 @@ const App: React.FC = () => {
       const fallbackRes = await supabase.from('sessions').upsert(fallbackSessions);
       error = fallbackRes.error;
     }
-    if (error) { alert("Session Save Error: " + error.message); return; }
+
+    if (error && (error.message.includes('row-level security') || error.message.includes('policy') || error.code === '42501')) {
+      // Attempt fallback via RPC save_session_as_coach
+      let rpcSuccess = true;
+      for (const sess of sessionsToUpsert) {
+        const { error: rpcErr } = await supabase.rpc('save_session_as_coach', {
+          p_id: sess.id,
+          p_date: sess.date,
+          p_class_type_id: sess.class_type_id,
+          p_student_ids: sess.student_ids,
+          p_hours_coached: sess.hours_coached,
+          p_user_id: sess.user_id,
+          p_coach_id: sess.coach_id,
+          p_is_competition: sess.is_competition || false,
+          p_custom_event_name: sess.custom_event_name || null,
+          p_covering_coach_name: sess.covering_coach_name || null
+        });
+        if (rpcErr) {
+          rpcSuccess = false;
+          console.error("RPC save_session_as_coach error:", rpcErr);
+          break;
+        }
+      }
+      if (rpcSuccess) {
+        error = null;
+      }
+    }
+
+    if (error) { 
+      alert("Session Save Error: " + error.message + "\n\nNote: If you are a coach, ask your gym owner to execute the fix_sessions_rls.sql script in Supabase SQL Editor to allow coaches to log sessions."); 
+      return; 
+    }
 
     // Owner Notification
     if (!isOwner && targetUserId) {
-      const coachName = state.staff.find(s => s.id === user.id)?.name || state.profile.businessName || user.email;
-      const sessionCount = sessionsToUpsert.length;
-      const hoursCount = sessionsToUpsert.reduce((acc, s) => acc + (s.hours_coached || 1), 0);
-      const msg = `${coachName} logged ${sessionCount} session${sessionCount > 1 ? 's' : ''} totaling ${hoursCount} hours.`;
-      
-      await supabase.from('notifications').insert({
-        user_id: targetUserId,
-        message: msg,
-        type: 'session_logged',
-        metadata: { session_ids: sessionsToUpsert.map(s => s.id) }
-      });
+      try {
+        const coachName = state.staff.find(s => s.id === user.id)?.name || state.profile.businessName || user.email;
+        const sessionCount = sessionsToUpsert.length;
+        const hoursCount = sessionsToUpsert.reduce((acc, s) => acc + (s.hours_coached || 1), 0);
+        const msg = `${coachName} logged ${sessionCount} session${sessionCount > 1 ? 's' : ''} totaling ${hoursCount} hours.`;
+        
+        await supabase.from('notifications').insert({
+          user_id: targetUserId,
+          message: msg,
+          type: 'session_logged',
+          metadata: { session_ids: sessionsToUpsert.map(s => s.id) }
+        });
 
-      // Send push notification
-      sendLocalNotification('New Session Logged', msg);
+        // Send push notification
+        sendLocalNotification('New Session Logged', msg);
+      } catch (nErr) {
+        console.warn("Could not insert owner notification:", nErr);
+      }
     }
 
     handleViewChange(View.DASHBOARD); loadCloudData(true);
@@ -6815,8 +6851,8 @@ const LogSessionView = memo(({ state, onNavigate }: { state: AppState, onNavigat
             <Users size={32} />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Log Classes</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Log a private or group tumbling class</p>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Tumbling Classes</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Log private or group classes for JFlips tumbling students</p>
           </div>
         </button>
 
@@ -6828,8 +6864,8 @@ const LogSessionView = memo(({ state, onNavigate }: { state: AppState, onNavigat
             <ClipboardCheck size={32} />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Log Team Practice</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Take attendance and log team practice</p>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Cheer Team Practice</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Take attendance and log cheer team practice</p>
           </div>
         </button>
 
@@ -6838,11 +6874,11 @@ const LogSessionView = memo(({ state, onNavigate }: { state: AppState, onNavigat
           className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center gap-4 hover:scale-[1.02] transition-transform"
         >
           <div className="w-16 h-16 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center text-purple-600 dark:text-purple-400">
-            <Settings size={32} />
+            <Building2 size={32} />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Log Gym Session</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">See all gyms and their classes to log</p>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">External Gym Sessions</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Log coaching hours at external partner gyms & school organizations</p>
           </div>
         </button>
       </div>
@@ -8168,8 +8204,8 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                                   ['Account', accountNumber],
                                   ['Branch', branchCode],
                                   ['Type', accountType],
-                                ].map(([label, value]) => value ? (
-                                  <div key={label} className="flex gap-4">
+                                ].map(([label, value], idx) => value ? (
+                                  <div key={`inv-bank-${label}-${idx}`} className="flex gap-4">
                                     <span className="text-[12px] font-black uppercase text-slate-400 w-16">{label}</span>
                                     <span className="text-[12px] font-black uppercase text-slate-700 dark:text-slate-300">{value}</span>
                                   </div>
@@ -8240,9 +8276,9 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       </div>
 
       <div className="flex overflow-x-auto gap-2 pb-2 hide-scrollbar">
-        {['all', 'athletes', 'teams', 'gyms', 'staff'].map(type => (
+        {['all', 'athletes', 'teams', 'gyms', 'staff'].map((type, idx) => (
           <button
-            key={type}
+            key={`invoice-filter-${type}-${idx}`}
             onClick={() => setInvoiceFilter(type as any)}
             className={`px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest whitespace-nowrap transition-colors ${
               invoiceFilter === type
@@ -8558,9 +8594,9 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
 
                   {/* Price Gauges */}
                   <div className="flex flex-wrap gap-1.5">
-                    {[100, 150, 200, 250, 300, 350, 400].map(amount => (
+                    {[100, 150, 200, 250, 300, 350, 400].map((amount, idx) => (
                       <button
-                        key={`group-gauge-${amount}`}
+                        key={`group-gauge-${amount}-${idx}`}
                         type="button"
                         onClick={() => setCustomGroupRate(customGroupRate === amount.toString() ? '' : amount.toString())}
                         className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${
@@ -8607,9 +8643,9 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
 
                   {/* Price Gauges */}
                   <div className="flex flex-wrap gap-1.5">
-                    {[100, 150, 200, 250, 300, 350, 400].map(amount => (
+                    {[100, 150, 200, 250, 300, 350, 400].map((amount, idx) => (
                       <button
-                        key={`private-gauge-${amount}`}
+                        key={`private-gauge-${amount}-${idx}`}
                         type="button"
                         onClick={() => setCustomPrivateRate(customPrivateRate === amount.toString() ? '' : amount.toString())}
                         className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${
@@ -9316,9 +9352,9 @@ const ScheduleForm: React.FC<{
       <div className="space-y-1">
         <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Color Display</label>
         <div className="flex gap-2">
-          {COLOR_OPTIONS.map((c) => (
+          {COLOR_OPTIONS.map((c, idx) => (
             <button
-              key={c.value}
+              key={`color-opt-${c.value}-${idx}`}
               onClick={() => setColor(c.value)}
               className={`w-8 h-8 rounded-full ${c.value} ${color === c.value ? 'ring-2 ring-offset-2 ring-slate-800 dark:ring-white dark:ring-offset-slate-900' : 'opacity-70'}`}
               title={c.name}

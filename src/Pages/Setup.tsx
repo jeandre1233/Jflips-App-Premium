@@ -70,13 +70,15 @@ const CoachApprovalCard: React.FC<{
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
 }> = ({ coach, cheerGyms, ownerBusinessName, onRefreshStaff, showToast }) => {
   const [canViewTumbling, setCanViewTumbling] = useState<boolean>(coach.canViewTumbling);
+  const [canViewSchoolGyms, setCanViewSchoolGyms] = useState<boolean>(coach.canViewSchoolGyms ?? false);
   const [assignedCheerOrgIds, setAssignedCheerOrgIds] = useState<string[]>(coach.assignedCheerOrgIds || []);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     setCanViewTumbling(coach.canViewTumbling);
+    setCanViewSchoolGyms(coach.canViewSchoolGyms ?? false);
     setAssignedCheerOrgIds(coach.assignedCheerOrgIds || []);
-  }, [coach.canViewTumbling, coach.assignedCheerOrgIds]);
+  }, [coach.canViewTumbling, coach.canViewSchoolGyms, coach.assignedCheerOrgIds]);
 
   const toggleCheerGym = (gymId: string) => {
     if (assignedCheerOrgIds.includes(gymId)) {
@@ -92,18 +94,30 @@ const CoachApprovalCard: React.FC<{
       const updateData: any = {
         status,
         can_view_tumbling: canViewTumbling,
+        can_view_school_gyms: canViewSchoolGyms,
         assigned_cheer_org_ids: assignedCheerOrgIds
       };
       if (status === 'approved') {
         updateData.approved_at = new Date().toISOString();
       }
 
-      const { data: updated, error: dbErr } = await supabase
+      let { data: updated, error: dbErr } = await supabase
         .from('staff_profiles')
         .update(updateData)
         .eq('id', coach.id)
         .select('*')
         .single();
+
+      if (dbErr && (dbErr.message.includes('can_view_school_gyms') || dbErr.message.includes('column'))) {
+        delete updateData.can_view_school_gyms;
+        const retry = await supabase
+          .from('staff_profiles')
+          .update(updateData)
+          .eq('id', coach.id)
+          .select('*')
+          .single();
+        dbErr = retry.error;
+      }
 
       if (dbErr) {
         showToast(`Failed to update coach status: ${dbErr.message}`, 'error');
@@ -185,16 +199,34 @@ const CoachApprovalCard: React.FC<{
         <label className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-xl cursor-pointer hover:border-blue-200 transition-colors border border-transparent">
           <div>
             <span className="text-[10px] font-black uppercase text-slate-800 dark:text-slate-200 block">
-              Can View Gym / Tumbling Athletes
+              Tumbling
             </span>
             <span className="text-[8px] text-slate-400 font-bold">
-              Grants access to tumbling roster and non-cheer student records
+              Grants access to tumbling roster & student records
             </span>
           </div>
           <input
             type="checkbox"
             checked={canViewTumbling}
             onChange={e => setCanViewTumbling(e.target.checked)}
+            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+          />
+        </label>
+
+        {/* School Gym Toggle */}
+        <label className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-xl cursor-pointer hover:border-blue-200 transition-colors border border-transparent">
+          <div>
+            <span className="text-[10px] font-black uppercase text-slate-800 dark:text-slate-200 block">
+              School Gym
+            </span>
+            <span className="text-[8px] text-slate-400 font-bold">
+              Grants access to school gym classes & schedules
+            </span>
+          </div>
+          <input
+            type="checkbox"
+            checked={canViewSchoolGyms}
+            onChange={e => setCanViewSchoolGyms(e.target.checked)}
             className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
           />
         </label>
@@ -209,11 +241,11 @@ const CoachApprovalCard: React.FC<{
             <p className="text-[8px] text-slate-400 italic">No cheer team organizations created yet.</p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {cheerGyms.map(gym => {
+              {cheerGyms.map((gym, gIdx) => {
                 const isChecked = assignedCheerOrgIds.includes(gym.id);
                 return (
                   <label
-                    key={gym.id}
+                    key={`cheer-gym-${coach.id || 'c'}-${gym.id || 'g'}-${gIdx}`}
                     className={`flex items-center gap-2 p-2.5 rounded-xl border text-[9px] font-black uppercase cursor-pointer transition-colors ${
                       isChecked
                         ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-500/40 text-blue-700 dark:text-blue-300'
@@ -354,9 +386,9 @@ const StaffManagementSection: React.FC<{
           </div>
         ) : (
           <div className="space-y-4">
-            {pendingStaff.map(coach => (
+            {pendingStaff.map((coach, pIdx) => (
               <CoachApprovalCard
-                key={coach.id}
+                key={`pending-coach-${coach.id || 'p'}-${pIdx}`}
                 coach={coach}
                 cheerGyms={cheerGyms}
                 ownerBusinessName={state.profile?.businessName}
@@ -384,9 +416,9 @@ const StaffManagementSection: React.FC<{
           </div>
         ) : (
           <div className="space-y-4">
-            {managedStaff.map(coach => (
+            {managedStaff.map((coach, mIdx) => (
               <CoachApprovalCard
-                key={coach.id}
+                key={`managed-coach-${coach.id || 'm'}-${mIdx}`}
                 coach={coach}
                 cheerGyms={cheerGyms}
                 ownerBusinessName={state.profile?.businessName}
@@ -829,10 +861,52 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
       <div className="w-full">
         {activeTab === 'profile' ? (
           <div className="space-y-4">
-            <div className="flex items-center gap-3 mb-4">{profileForm.logo ? <img src={profileForm.logo} alt="Logo" className="w-16 h-16 rounded-2xl object-cover border-2 shadow-sm" /> : <div className="w-16 h-16 bg-[#1e4da1] rounded-2xl flex items-center justify-center text-white italic font-black text-xl">JF</div>}<div><h2 className="text-xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">Coach Profile</h2><p className="text-[8px] font-black text-[#94a3b8] uppercase">Details & Logo</p></div></div>
+            <div className="flex items-center gap-3 mb-4">
+              {isOwner && profileForm.logo ? (
+                <img src={profileForm.logo} alt="Logo" className="w-16 h-16 rounded-2xl object-cover border-2 shadow-sm" />
+              ) : (
+                <div className="w-16 h-16 bg-[#1e4da1] rounded-2xl flex items-center justify-center text-white italic font-black text-xl">
+                  {isOwner ? 'JF' : (profileForm.businessName?.substring(0, 2).toUpperCase() || 'C')}
+                </div>
+              )}
+              <div>
+                <h2 className="text-xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">
+                  {isOwner ? 'Coach Profile' : 'My Profile'}
+                </h2>
+                <p className="text-[8px] font-black text-[#94a3b8] uppercase">
+                  {isOwner ? 'Details & Logo' : 'Personal & Bank Details'}
+                </p>
+              </div>
+            </div>
+
             <form onSubmit={handleProfileSubmit} className="space-y-4 bg-white dark:bg-slate-800/60 p-6 rounded-3xl border border-slate-50 dark:border-slate-800 shadow-sm">
-              <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center gap-2 cursor-pointer" onClick={() => fileInputRef.current?.click()}>{profileForm.logo ? <div className="relative"><img src={profileForm.logo} alt="Logo" className="h-24 w-auto object-contain rounded-lg" /><button type="button" onClick={(e) => { e.stopPropagation(); setProfileForm({ ...profileForm, logo: '' }); }} className="absolute -top-2 -right-2 bg-white dark:bg-slate-800 text-red-500 rounded-full p-1 shadow-md"><X size={12} /></button></div> : <div className="flex flex-col items-center py-2"><Upload size={20} className="text-slate-300 mb-1" /><span className="text-[9px] font-black text-slate-400 uppercase">Logo Upload</span></div>}<input ref={fileInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" /></div>
-              <input placeholder="BUSINESS NAME" value={profileForm.businessName} onChange={e => setProfileForm({ ...profileForm, businessName: e.target.value })} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
+              {isOwner ? (
+                <>
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center gap-2 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                    {profileForm.logo ? (
+                      <div className="relative">
+                        <img src={profileForm.logo} alt="Logo" className="h-24 w-auto object-contain rounded-lg" />
+                        <button type="button" onClick={(e) => { e.stopPropagation(); setProfileForm({ ...profileForm, logo: '' }); }} className="absolute -top-2 -right-2 bg-white dark:bg-slate-800 text-red-500 rounded-full p-1 shadow-md"><X size={12} /></button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center py-2"><Upload size={20} className="text-slate-300 mb-1" /><span className="text-[9px] font-black text-slate-400 uppercase">Logo Upload</span></div>
+                    )}
+                    <input ref={fileInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                  </div>
+                  <input placeholder="BUSINESS NAME" value={profileForm.businessName} onChange={e => setProfileForm({ ...profileForm, businessName: e.target.value })} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
+                </>
+              ) : (
+                <>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Coach Name</label>
+                    <input placeholder="NAME" value={profileForm.businessName} onChange={e => setProfileForm({ ...profileForm, businessName: e.target.value })} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Email Address</label>
+                    <input placeholder="EMAIL" value={profileForm.email || ''} readOnly className="w-full p-4 bg-slate-100 dark:bg-slate-900/50 rounded-xl font-black text-[10px] text-slate-500 outline-none cursor-not-allowed" />
+                  </div>
+                </>
+              )}
               
               <div className="space-y-3">
                 <p className="text-[9px] font-black uppercase tracking-widest text-[#1e4da1] dark:text-blue-400 mt-2">Personal Bank Account</p>
@@ -848,25 +922,29 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                 </div>
               </div>
 
-              <div className="space-y-3 pt-2">
-                <p className="text-[9px] font-black uppercase tracking-widest text-[#1e4da1] dark:text-blue-400">Business Bank Account</p>
-                <input placeholder="BUSINESS BANK" value={profileForm.bizBankName || ''} onChange={e => setProfileForm({ ...profileForm, bizBankName: e.target.value })} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
-                <input placeholder="BUSINESS ACC NUMBER" value={profileForm.bizAccountNumber || ''} onChange={e => setProfileForm({ ...profileForm, bizAccountNumber: e.target.value })} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
-                <div className="grid grid-cols-2 gap-3">
-                  <input placeholder="BRANCH" value={profileForm.bizBranchCode || ''} onChange={e => setProfileForm({ ...profileForm, bizBranchCode: e.target.value })} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
-                  <select value={profileForm.bizAccountType || 'Current'} onChange={e => setProfileForm({ ...profileForm, bizAccountType: e.target.value })} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none">
-                    <option value="Current" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Current</option>
-                    <option value="Savings" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Savings</option>
-                    <option value="Transact" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Transact</option>
-                  </select>
+              {isOwner && (
+                <div className="space-y-3 pt-2">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-[#1e4da1] dark:text-blue-400">Business Bank Account</p>
+                  <input placeholder="BUSINESS BANK" value={profileForm.bizBankName || ''} onChange={e => setProfileForm({ ...profileForm, bizBankName: e.target.value })} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
+                  <input placeholder="BUSINESS ACC NUMBER" value={profileForm.bizAccountNumber || ''} onChange={e => setProfileForm({ ...profileForm, bizAccountNumber: e.target.value })} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
+                  <div className="grid grid-cols-2 gap-3">
+                    <input placeholder="BRANCH" value={profileForm.bizBranchCode || ''} onChange={e => setProfileForm({ ...profileForm, bizBranchCode: e.target.value })} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
+                    <select value={profileForm.bizAccountType || 'Current'} onChange={e => setProfileForm({ ...profileForm, bizAccountType: e.target.value })} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none">
+                      <option value="Current" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Current</option>
+                      <option value="Savings" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Savings</option>
+                      <option value="Transact" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Transact</option>
+                    </select>
+                  </div>
                 </div>
-              </div>
+              )}
               <motion.button whileTap={{ scale: 0.95 }} type="submit" className="w-full bg-[#1e4da1] dark:bg-blue-600 text-white py-4 mt-4 rounded-xl font-black text-[10px] uppercase shadow-xl flex items-center justify-center gap-2">Save <CheckCircle2 size={16} /></motion.button>
               <div className="h-px bg-slate-100 dark:bg-slate-800 my-4"></div>
               <motion.button whileTap={{ scale: 0.95 }} type="button" onClick={onLogout} className="w-full bg-slate-50 dark:bg-slate-800/50 text-[#94a3b8] py-4 rounded-xl font-black text-[10px] uppercase flex items-center justify-center gap-2">Log Out <LogOut size={16} /></motion.button>
             </form>
 
-            <div className="bg-white dark:bg-slate-800/60 p-6 rounded-3xl border border-slate-50 dark:border-slate-800 shadow-sm space-y-4">
+            {isOwner && (
+              <>
+              <div className="bg-white dark:bg-slate-800/60 p-6 rounded-3xl border border-slate-50 dark:border-slate-800 shadow-sm space-y-4">
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <div className="flex items-center gap-2">
@@ -1153,6 +1231,8 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                 </div>
               </div>
             </div>
+            </>
+            )}
 
             {isOwner && (
               <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
@@ -1276,34 +1356,50 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="flex justify-between items-center mb-1">
-              <div className="flex items-center gap-3">
-                <h2
-                  onClick={() => onEntityTypeChange('athletes')}
-                  className={`text-2xl font-black uppercase italic cursor-pointer transition-colors ${entityType === 'athletes' ? 'text-[#1a1a1a] dark:text-slate-100' : 'text-slate-300 dark:text-slate-700'}`}
-                >
-                  Athletes
-                </h2>
-                <h2
-                  onClick={() => onEntityTypeChange('gyms')}
-                  className={`text-2xl font-black uppercase italic cursor-pointer transition-colors ${entityType === 'gyms' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-300 dark:text-slate-700'}`}
-                >
-                  Gyms
-                </h2>
-                <h2
-                  onClick={() => onEntityTypeChange('teams')}
-                  className={`text-2xl font-black uppercase italic cursor-pointer transition-colors ${entityType === 'teams' ? 'text-blue-600 dark:text-blue-500' : 'text-slate-300 dark:text-slate-700'}`}
-                >
-                  Teams
-                </h2>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-1">
+              <div>
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                  <button
+                    type="button"
+                    onClick={() => onEntityTypeChange('athletes')}
+                    className={`text-xl sm:text-2xl font-black uppercase italic transition-colors ${entityType === 'athletes' ? 'text-[#1a1a1a] dark:text-slate-100 underline decoration-[#1e4da1] underline-offset-4' : 'text-slate-300 dark:text-slate-700 hover:text-slate-500'}`}
+                  >
+                    Tumbling Students
+                  </button>
+                  <span className="text-slate-300 dark:text-slate-700 font-bold">•</span>
+                  <button
+                    type="button"
+                    onClick={() => onEntityTypeChange('gyms')}
+                    className={`text-xl sm:text-2xl font-black uppercase italic transition-colors ${entityType === 'gyms' ? 'text-[#1e4da1] dark:text-blue-400 underline decoration-[#1e4da1] underline-offset-4' : 'text-slate-300 dark:text-slate-700 hover:text-slate-500'}`}
+                  >
+                    External Gym Orgs
+                  </button>
+                  <span className="text-slate-300 dark:text-slate-700 font-bold">•</span>
+                  <button
+                    type="button"
+                    onClick={() => onEntityTypeChange('teams')}
+                    className={`text-xl sm:text-2xl font-black uppercase italic transition-colors ${entityType === 'teams' ? 'text-blue-600 dark:text-blue-500 underline decoration-blue-600 underline-offset-4' : 'text-slate-300 dark:text-slate-700 hover:text-slate-500'}`}
+                  >
+                    Cheer Teams
+                  </button>
+                </div>
+                <p className="text-[9px] font-black uppercase text-[#94a3b8] mt-1">
+                  {entityType === 'athletes' 
+                    ? 'JFlips internal student records & tumbling roster'
+                    : entityType === 'gyms'
+                    ? 'Partner gyms, clubs & schools coached outside JFlips'
+                    : 'All-Star cheerleading squads & team rosters'}
+                </p>
               </div>
-              <motion.button
-                whileTap={{ scale: 0.8 }}
-                onClick={entityType === 'athletes' ? onAddStudent : () => onAddGym(entityType === 'teams' ? 'cheer' : 'tumbling')}
-                className={`w-10 h-10 ${(entityType === 'gyms' || entityType === 'teams') ? 'bg-blue-600' : 'bg-[#1e4da1]'} text-white rounded-xl flex items-center justify-center shadow-lg`}
-              >
-                <Plus size={20} strokeWidth={3} />
-              </motion.button>
+              {isOwner && (
+                <motion.button
+                  whileTap={{ scale: 0.8 }}
+                  onClick={entityType === 'athletes' ? onAddStudent : () => onAddGym(entityType === 'teams' ? 'cheer' : 'tumbling')}
+                  className={`w-10 h-10 ${(entityType === 'gyms' || entityType === 'teams') ? 'bg-blue-600' : 'bg-[#1e4da1]'} text-white rounded-xl flex items-center justify-center shadow-lg shrink-0 self-end sm:self-auto`}
+                >
+                  <Plus size={20} strokeWidth={3} />
+                </motion.button>
+              )}
             </div>
 
             {activeTab === 'students' && (
