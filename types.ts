@@ -146,6 +146,8 @@ export interface StaffProfile {
 
 export interface Profile {
   id?: string;
+  /** The signed-in person's own name (coaches: their staff_profiles.name). */
+  name?: string;
   businessName: string;
   bankName: string;
   accountNumber: string;
@@ -168,11 +170,20 @@ export interface Profile {
   assigned_cheer_org_ids?: string[];
 }
 
+export type NotificationType =
+  | 'student_signup'
+  | 'cheer_signup'
+  | 'coach_signup'
+  | 'session_logged'
+  | 'class_added'
+  | 'system';
+
 export interface AppNotification {
   id: string;
   user_id: string;
+  title?: string;
   message: string;
-  type: 'session_logged' | 'system';
+  type: NotificationType;
   is_read: boolean;
   created_at: string;
   metadata?: any;

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../../supabase';
+import { notifyUser } from '../utils/notifications';
 
 type FormData = {
   parentName: string;
@@ -196,19 +197,17 @@ export default function SignupCheer() {
 
       if (dbError) throw new Error(dbError.message);
 
-      // Try inserting into notifications as well to alert owner
-      try {
-        await supabase.from('notifications').insert({
-          id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          user_id: ownerUserId,
-          title: 'New Cheerleading Registration',
-          message: `${form.athleteName} ${form.athleteSurname} has registered for Cheerleading & Tumbling.`,
-          is_read: false,
-          created_at: new Date().toISOString()
-        });
-      } catch (notifErr) {
-        console.error('Failed to create notification', notifErr);
-      }
+      // Alert the owner: in-app bell + device push (Firebase).
+      await notifyUser({
+        userId: ownerUserId,
+        type: 'cheer_signup',
+        message: `${form.athleteName} ${form.athleteSurname} has registered for Cheerleading & Tumbling.`,
+        metadata: {
+          athlete_name: `${form.athleteName} ${form.athleteSurname}`.trim(),
+          parent_name: form.parentName.trim(),
+          parent_phone: form.parentPhone.trim()
+        }
+      });
 
       setSubmitted(true);
     } catch (e: any) {

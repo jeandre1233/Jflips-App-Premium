@@ -103,6 +103,7 @@ import { OfflineBanner } from './src/components/OfflineBanner';
 import { SyncStatusBadge } from './src/components/SyncStatusBadge';
 import { sendWhatsAppAttendanceQuery, sendWhatsAppInvoiceReminder } from './src/utils/whatsapp';
 import { sendCycleMonthReminderNotification, getDiscordWebhookUrl, setDiscordWebhookUrl } from './src/utils/discordNotifications';
+import { notifyUser, describeSessionLog, NOTIFICATION_TITLES } from './src/utils/notifications';
 import { 
   initAuth as initGoogleAuth, 
   googleSignIn, 
@@ -630,8 +631,12 @@ const App: React.FC = () => {
         console.error('Push registration error: ' + error.error);
       });
 
+      // Foreground pushes are deliberately NOT re-displayed here: when the app
+      // is open the realtime `notifications` listener already raises a local
+      // notification, and showing both would double up. Background and killed
+      // states are handled by Android from the FCM notification payload itself.
       PushNotifications.addListener('pushNotificationReceived', notification => {
-        console.log('Push notification received: ', notification);
+        console.log('Push notification received in foreground: ', notification);
       });
 
       PushNotifications.addListener('pushNotificationActionPerformed', notification => {
@@ -981,6 +986,7 @@ const App: React.FC = () => {
 
           mappedProfile = {
             ...INITIAL_PROFILE,
+            name: staffP.name || undefined,
             businessName: coachOwnerP?.business_name || INITIAL_PROFILE.businessName,
             logo: coachOwnerP?.logo || INITIAL_PROFILE.logo,
             role: 'coach',
@@ -1231,6 +1237,51 @@ const App: React.FC = () => {
     const interval = setInterval(runBackgroundChecks, 10 * 60 * 1000);
     return () => clearInterval(interval);
   }, [user, state.schedules, state.sessions, state.classTypes, state.gyms, state.staff, state.profile]);
+
+  // ── LIVE NOTIFICATION FEED ──────────────────────────────────────────────────
+  // Notification rows are written from *other people's* devices — a parent's
+  // signup form, a coach's phone. Realtime turns each insert into a local
+  // device notification here, so alerts land instantly while the app is open.
+  // The send-push-notification Edge Function (FCM) covers the app-closed case.
+  const localNotifyRef = useRef(sendLocalNotification);
+  localNotifyRef.current = sendLocalNotification;
+
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel(`notifications_${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`
+        },
+        (payload) => {
+          const row = payload.new as AppNotification;
+          if (!row || !row.message) return;
+
+          // Never alert someone about their own action.
+          if (row.metadata?.actor_id && row.metadata.actor_id === user.id) return;
+
+          setState(prev => (
+            prev.notifications.some(n => n.id === row.id)
+              ? prev
+              : { ...prev, notifications: [row, ...prev.notifications].slice(0, 20) }
+          ));
+
+          localNotifyRef.current(
+            row.title || NOTIFICATION_TITLES[row.type] || 'JFLIPS',
+            row.message
+          );
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user]);
 
   const handleSaveStudent = async (name: string, phone?: string, linkedSiblingId?: string, extraData?: Partial<Student>) => {
     if (!user) return;
@@ -1556,10 +1607,12 @@ const App: React.FC = () => {
     }
     // Notify owner when adding a new class
     if (!isOwnerRole && isNewClass && targetUserId) {
-      await supabase.from('notifications').insert({
-        user_id: targetUserId,
-        message: `New class added: "${name}"`,
+      const coachName = state.profile.name || user.email || 'A coach';
+      await notifyUser({
+        userId: targetUserId,
         type: 'class_added',
+        message: `${coachName} added a new class: "${name}".`,
+        actorId: user.id,
         metadata: { class_id: classId, class_name: name, coach_id: user.id },
       });
     }
@@ -1744,59 +1797,114 @@ const App: React.FC = () => {
       return; 
     }
 
-    // Owner Notification
+    // Owner Notification — in-app bell + FCM push to the owner's device.
     if (!isOwner && targetUserId) {
       try {
-        const coachName = state.staff.find(s => s.id === user.id)?.name || state.profile.businessName || user.email;
-        const sessionCount = sessionsToUpsert.length;
-        const hoursCount = sessionsToUpsert.reduce((acc, s) => acc + (s.hours_coached || 1), 0);
-        const msg = `${coachName} logged ${sessionCount} session${sessionCount > 1 ? 's' : ''} totaling ${hoursCount} hours.`;
-        
-        await supabase.from('notifications').insert({
-          user_id: targetUserId,
-          message: msg,
-          type: 'session_logged',
-          metadata: { session_ids: sessionsToUpsert.map(s => s.id) }
+        const coachName =
+          state.profile.name ||
+          (state.staff || []).find(s => s.id === user.id)?.name ||
+          user.email ||
+          'A coach';
+
+        // Class and cheer sessions report attendance; school organisation
+        // sessions report only that a school session was logged, plus hours.
+        const { title, message } = describeSessionLog({
+          coachName,
+          sessions: sessionsToUpsert,
+          gyms: state.gyms,
+          classTypes: state.classTypes
         });
 
-        // Send push notification
-        sendLocalNotification('New Session Logged', msg);
+        await notifyUser({
+          userId: targetUserId,
+          type: 'session_logged',
+          title,
+          message,
+          actorId: user.id,
+          metadata: {
+            session_ids: sessionsToUpsert.map(s => s.id),
+            coach_id: user.id,
+            coach_name: coachName,
+            dates: Array.from(new Set(sessionsToUpsert.map(s => s.date))),
+            total_hours: sessionsToUpsert.reduce((acc, s) => acc + (s.hours_coached || 0), 0)
+          }
+        });
+
+        // Confirm to the coach on their own device that the alert went out.
+        setToast({ title, body: message });
+        setTimeout(() => setToast(null), 5000);
       } catch (nErr) {
-        console.warn("Could not insert owner notification:", nErr);
+        console.warn("Could not send session notification:", nErr);
       }
     }
 
     handleViewChange(View.DASHBOARD); loadCloudData(true);
   };
 
+  const offlineSyncInFlight = useRef(false);
+
   useEffect(() => {
     const syncOfflineData = async () => {
-      if (isOnline && user) {
-        const pending = await getPendingItems();
-        if (pending.length === 0) return;
+      if (isOnline && user && !offlineSyncInFlight.current) {
+        offlineSyncInFlight.current = true;
+        try {
+          const pending = await getPendingItems();
+          if (pending.length === 0) return;
 
-        let hasFailures = false;
-        for (const item of pending) {
-          const { error } = await supabase.from('sessions').upsert(item.payload);
-          if (error) {
-            await updateItemStatus(item.id, 'failed', error.message);
-            hasFailures = true;
-          } else {
-            await updateItemStatus(item.id, 'synced');
+          let hasFailures = false;
+          const syncedPayloads: any[] = [];
+
+          for (const item of pending) {
+            const { error } = await supabase.from('sessions').upsert(item.payload);
+            if (error) {
+              await updateItemStatus(item.id, 'failed', error.message);
+              hasFailures = true;
+            } else {
+              await updateItemStatus(item.id, 'synced');
+              syncedPayloads.push(item.payload);
+            }
           }
-        }
 
-        if (hasFailures) {
-          alert("Some offline sessions failed to sync. Please check the sync status on your dashboard.");
+          if (hasFailures) {
+            alert("Some offline sessions failed to sync. Please check the sync status on your dashboard.");
+          }
+
+          // Sessions logged offline still owe the owner a notification — send it
+          // now that we're back online, otherwise the alert is lost forever.
+          if (syncedPayloads.length > 0 && state.profile.role !== 'owner' && state.profile.owner_id) {
+            const coachName = state.profile.name || user.email || 'A coach';
+            const { title, message } = describeSessionLog({
+              coachName,
+              sessions: syncedPayloads,
+              gyms: state.gyms,
+              classTypes: state.classTypes
+            });
+
+            await notifyUser({
+              userId: state.profile.owner_id,
+              type: 'session_logged',
+              title,
+              message: `${message} (logged offline, synced just now)`,
+              actorId: user.id,
+              metadata: {
+                session_ids: syncedPayloads.map(s => s.id),
+                coach_id: user.id,
+                coach_name: coachName,
+                synced_from_offline: true
+              }
+            });
+          }
+
+          await loadCloudData(true);
+          await deleteSyncedItems();
+        } finally {
+          offlineSyncInFlight.current = false;
         }
-        
-        await loadCloudData(true);
-        await deleteSyncedItems();
       }
     };
 
     syncOfflineData();
-  }, [isOnline, user, loadCloudData]);
+  }, [isOnline, user, loadCloudData, state.profile.role, state.profile.owner_id, state.gyms, state.classTypes]);
 
   const removeSession = async (idOrIds: string | string[]) => {
     if (!user) return;
@@ -2930,11 +3038,13 @@ const App: React.FC = () => {
       </AnimatePresence>
 
       {showNotifications && (
-        <NotificationsModal 
-          notifications={state.notifications} 
-          onClose={() => setShowNotifications(false)} 
+        <NotificationsModal
+          notifications={state.notifications}
+          onClose={() => setShowNotifications(false)}
           onMarkRead={markNotificationRead}
           onClear={clearNotifications}
+          permission={Capacitor.isNativePlatform() ? 'granted' : notificationPermission}
+          onEnableAlerts={requestNotificationPermission}
         />
       )}
     </AnimatePresence>
@@ -3776,7 +3886,19 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         return;
       }
 
-      // 4. Send email notification to owner via edge function
+      // 4. Alert the owner: in-app bell + device push (Firebase), plus email.
+      await notifyUser({
+        userId: owner.id,
+        type: 'coach_signup',
+        message: `${name.trim()} (${email.trim().toLowerCase()}) has requested to join as a coach. Approve them in Setup → Staff.`,
+        actorId: authData.user.id,
+        metadata: {
+          coach_id: authData.user.id,
+          coach_name: name.trim(),
+          coach_email: email.trim().toLowerCase()
+        }
+      });
+
       try {
         const funcRes = await supabase.functions.invoke('send-staff-email', {
           body: {
@@ -9483,12 +9605,14 @@ const AppSettingsModal: React.FC<any> = ({ state, toggleTheme, onLogout, onLinkG
   </Modal>
 );
 
-const NotificationsModal: React.FC<{ 
-  notifications: AppNotification[], 
-  onClose: () => void, 
-  onMarkRead: (id: string) => void, 
-  onClear: () => void 
-}> = ({ notifications, onClose, onMarkRead, onClear }) => {
+const NotificationsModal: React.FC<{
+  notifications: AppNotification[],
+  onClose: () => void,
+  onMarkRead: (id: string) => void,
+  onClear: () => void,
+  permission?: NotificationPermission,
+  onEnableAlerts?: () => void
+}> = ({ notifications, onClose, onMarkRead, onClear, permission, onEnableAlerts }) => {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
       <motion.div 
@@ -9509,6 +9633,24 @@ const NotificationsModal: React.FC<{
           <button onClick={onClose} className="p-2 bg-white dark:bg-slate-700 text-slate-400 rounded-xl shadow-sm border border-slate-100 dark:border-slate-600"><X size={18} /></button>
         </div>
 
+        {permission !== 'granted' && onEnableAlerts && (
+          <div className="mx-4 mt-4 p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-900/40">
+            <p className="text-[9px] font-black text-amber-800 dark:text-amber-300 uppercase tracking-wider leading-relaxed">
+              {permission === 'denied'
+                ? 'Alerts are blocked in your browser settings. Reset the notification permission for this site to receive signup and session alerts.'
+                : 'Turn on device alerts to be notified when parents sign up, coaches request to join, and sessions get logged.'}
+            </p>
+            {permission !== 'denied' && (
+              <button
+                onClick={onEnableAlerts}
+                className="mt-3 w-full py-3 bg-[#1e4da1] dark:bg-blue-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
+              >
+                Enable Alerts <Bell size={12} />
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="max-h-[60vh] overflow-y-auto p-4 space-y-3 no-scrollbar">
           {notifications.length === 0 ? (
             <div className="py-12 flex flex-col items-center justify-center text-center">
@@ -9527,6 +9669,11 @@ const NotificationsModal: React.FC<{
               >
                 <div className="flex justify-between items-start gap-3">
                   <div className="flex-1">
+                    {(n.title || NOTIFICATION_TITLES[n.type]) && (
+                      <p className="text-[8px] font-black text-[#1e4da1] dark:text-blue-400 uppercase tracking-widest mb-1">
+                        {n.title || NOTIFICATION_TITLES[n.type]}
+                      </p>
+                    )}
                     <p className={`text-[11px] font-bold leading-relaxed ${n.is_read ? 'text-slate-500 dark:text-slate-400' : 'text-slate-800 dark:text-slate-100'}`}>
                       {n.message}
                     </p>

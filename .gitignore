@@ -39,5 +39,11 @@ android/captmp/
 # Firebase Configuration
 firebase-applet-config.json
 
+# Secrets — never commit these. .env.example stays tracked as the template.
+.env
+.env.*
+!.env.example
+service-account*.json
+
 # Dev scripts
 scripts/check.ts

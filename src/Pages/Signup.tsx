@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from '../../supabase';
 import { ClassType } from '../../types';
 import { sendNewSignupNotification } from '../utils/discordNotifications';
+import { notifyUser } from '../utils/notifications';
 import jsPDF from 'jspdf';
 
 declare const window: any;
@@ -431,12 +432,19 @@ export default function Signup() {
         signature_data: signatureDataUrl
       });
 
-      // Send notification to owner
-      await supabase.from('notifications').insert({
-        user_id: ownerUserId,
-        message: `${studentName} signed up`,
-        type: 'system',
-        is_read: false
+      // Alert the owner: in-app bell + device push (Firebase).
+      await notifyUser({
+        userId: ownerUserId,
+        type: 'student_signup',
+        message: `${studentName} signed up for ${selectedClass?.name || 'general registration'}.`,
+        metadata: {
+          student_id: studentId,
+          student_name: studentName,
+          class_id: form.classId || null,
+          class_name: selectedClass?.name || null,
+          parent_name: form.parent1Name.trim(),
+          parent_phone: form.parent1Phone.trim()
+        }
       });
 
       // Try sending Discord notification asynchronously without blocking UX
