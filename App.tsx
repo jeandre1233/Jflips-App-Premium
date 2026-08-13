@@ -468,7 +468,6 @@ const DesktopSidebar: React.FC<{
     { view: View.LOG_SESSION,     icon: <ClipboardCheck size={20} />,  label: 'Log Session' },
     { view: View.TEAM_MANAGEMENT, icon: <Settings size={20} />,          label: 'Management' },
     { view: View.INVOICES,        icon: <FileText size={20} />,        label: 'Invoices' },
-    { view: View.HISTORY,         icon: <History size={20} />,         label: 'History' },
     { view: View.ROSTER,          icon: <Settings2 size={20} />,       label: 'Setup' },
   ];
 
@@ -2239,7 +2238,7 @@ const App: React.FC = () => {
 
       loadCloudData(true);
       setIsResetConfirming(false);
-      handleViewChange(View.HISTORY);
+      handleViewChange(View.INVOICES);
     } catch (err: any) {
       alert("Unexpected archive error: " + err?.message);
     } finally {
@@ -2697,7 +2696,7 @@ const App: React.FC = () => {
   if (coachStatus === 'pending') return <PendingCoachScreen email={user.email} onLogout={handleLogout} onRefresh={() => loadCloudData(false)} />;
   if (coachStatus === 'rejected') return <RejectedCoachScreen email={user.email} onLogout={handleLogout} />;
   if (dbError) return <DatabaseSetupView message={dbError} onReload={() => loadCloudData(false)} />;
-  if (isLoading) return <SplashScreen message="Syncing Elite Data" />;
+  if (isLoading) return <SplashScreen message="Syncing Database" />;
 
   // ── Shared view content ─────────────────────────────────────────────────────
   const viewContent = (
@@ -2739,41 +2738,6 @@ const App: React.FC = () => {
           }}
           onUpdateOrgCoaches={handleUpdateOrgCoaches}
           onRefresh={() => loadCloudData(true)}
-        />
-      )}
-      {activeView === View.HISTORY && (
-        !selectedHistoryMonth ? (
-          <HistoryView state={state} onSelectMonth={(month) => setSelectedHistoryMonth(month)} onRemove={removeHistoryEntry} onOpenStats={() => handleViewChange(View.STATISTICS)} />
-        ) : (
-          <div className="pb-16">
-            <button onClick={() => setSelectedHistoryMonth(null)} className="mb-4 text-slate-500 text-[10px] font-black uppercase tracking-widest py-2 hover:text-[#1e4da1] transition-colors">&larr; Back to History</button>
-            <h2 className="text-xl font-black mb-5 uppercase tracking-tight text-[#1a1a1a] dark:text-white px-2 italic">{selectedHistoryMonth.monthName} {selectedHistoryMonth.year}</h2>
-            <InvoicesView
-              state={{
-                ...state,
-                sessions: selectedHistoryMonth.sessions || [],
-                students: selectedHistoryMonth.snapshot_data?.students || state.students,
-                gyms: selectedHistoryMonth.snapshot_data?.gyms || state.gyms,
-                staff: selectedHistoryMonth.snapshot_data?.staff || state.staff,
-                classTypes: selectedHistoryMonth.snapshot_data?.classTypes || state.classTypes,
-                payments: selectedHistoryMonth.snapshot_data?.payments || state.payments
-              }}
-              user={user}
-              monthLabel={`${selectedHistoryMonth.monthName} ${selectedHistoryMonth.year}`}
-              onUpdatePayment={handleUpdatePayment}
-              onResetInvoice={resetSingleInvoice}
-              onShowRecovery={() => setShowRecoveryModal(true)}
-            />
-          </div>
-        )
-      )}
-      {activeView === View.STATISTICS && (
-        <StatisticsView 
-          history={state.history} 
-          classTypes={state.classTypes || []} 
-          gyms={state.gyms || []} 
-          students={state.students || []} 
-          onBack={() => handleViewChange(View.HISTORY)} 
         />
       )}
       {activeView === View.INVOICES && <InvoicesView state={state} user={user} onUpdatePayment={handleUpdatePayment} onResetInvoice={resetSingleInvoice} onShowRecovery={() => setShowRecoveryModal(true)} />}
@@ -3197,11 +3161,8 @@ const App: React.FC = () => {
         <NavButton active={activeView === View.DASHBOARD} icon={<LayoutDashboard size={18} />} label="Home" onClick={() => handleViewChange(View.DASHBOARD)} />
         <NavButton active={activeView === View.LOG_SESSION} icon={<ClipboardCheck size={18} />} label="Log" onClick={() => { setEditingSession(null); handleViewChange(View.LOG_SESSION); }} />
         <NavButton active={activeView === View.TEAM_MANAGEMENT} icon={<Settings size={18} />} label="Mgmt" onClick={() => handleViewChange(View.TEAM_MANAGEMENT)} />
-        {/* Coaches see their own invoice tab; owners see invoices + history */}
+        {/* Coaches see their own invoice tab; owners see invoices */}
         <NavButton active={activeView === View.INVOICES} icon={<FileText size={18} />} label={isOwner ? "Invs" : "My Pay"} onClick={() => handleViewChange(View.INVOICES)} />
-        {isOwner && (
-          <NavButton active={activeView === View.HISTORY} icon={<History size={18} />} label="Hist" onClick={() => handleViewChange(View.HISTORY)} />
-        )}
         <NavButton active={activeView === View.ROSTER} icon={<Settings2 size={18} />} label="Setup" onClick={() => handleViewChange(View.ROSTER)} />
       </nav>
 
@@ -4013,15 +3974,6 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
           >
             Coach Join
           </button>
-          <button
-            type="button"
-            onClick={() => { setAuthMode('owner_signup'); setError(null); }}
-            className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-wider transition-all cursor-pointer ${
-              authMode === 'owner_signup' ? 'bg-blue-600 text-white shadow-md' : 'text-white/40 hover:text-white'
-            }`}
-          >
-            Owner Register
-          </button>
         </div>
 
         {error && (
@@ -4151,67 +4103,6 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
             </div>
           </form>
         )}
-
-        {authMode === 'owner_signup' && (
-          <form onSubmit={handleOwnerSignUp} className="space-y-3.5">
-            <div className="space-y-1">
-              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Gym / Business Name</label>
-              <div className="relative">
-                <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
-                <input
-                  type="text"
-                  value={businessName}
-                  onChange={e => setBusinessName(e.target.value)}
-                  placeholder="Apex Athletics Gym"
-                  className="w-full bg-white/5 border border-white/8 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Email Address</label>
-              <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
-                <input
-                  type="email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="owner@gym.com"
-                  className="w-full bg-white/5 border border-white/8 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Password</label>
-              <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
-                <input
-                  type="password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full bg-white/5 border border-white/8 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="pt-2">
-              <motion.button
-                whileTap={{ scale: 0.95 }}
-                disabled={loading}
-                type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl shadow-blue-600/20 flex items-center justify-center gap-2 transition-colors cursor-pointer"
-              >
-                {loading ? <Loader2 className="animate-spin" size={18} /> : 'Register Gym Account'}
-                {!loading && <ArrowRight size={18} />}
-              </motion.button>
-            </div>
-          </form>
-        )}
       </motion.div>
     </div>
   );
@@ -4306,6 +4197,7 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
   const [hours, setHours] = useState<number | string>(1);
   const [date, setDate] = useState(initialDate || new Date().toISOString().split('T')[0]);
   const [teamCoachIds, setTeamCoachIds] = useState<Record<string, string>>({});
+  const [multiCoachIdsMap, setMultiCoachIdsMap] = useState<Record<string, string[]>>({});
   const [coveringCoachNames, setCoveringCoachNames] = useState<Record<string, string>>({});
   const [customCoveringInputs, setCustomCoveringInputs] = useState<Record<string, string>>({});
   const [compCoachHours, setCompCoachHours] = useState<Record<string, number | string>>({});
@@ -4512,15 +4404,21 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
   }, [selectedTeamIds, state.gyms]);
 
   const coachOptions = useMemo(() => {
-    if (!isOwner && state.profile.id) {
-      const self = { id: state.profile.id, name: state.profile.businessName || 'Me', role: 'coach' };
-      const others = state.staff.filter(s => s.id !== state.profile.id);
-      return [self, ...others];
+    const list: { id: string; name: string; role?: string }[] = [];
+    if (state.profile.id) {
+      list.push({
+        id: state.profile.id,
+        name: isOwner ? (state.profile.name || 'Myself (Owner)') : (state.profile.businessName || state.profile.name || 'Myself'),
+        role: state.profile.role || 'coach'
+      });
     }
-    const assigned = state.staff.filter(s => assignedCoachIds.includes(s.id));
-    const others = state.staff.filter(s => !assignedCoachIds.includes(s.id));
-    return [...assigned, ...others];
-  }, [state.staff, assignedCoachIds, isOwner, state.profile]);
+    (state.staff || []).forEach(s => {
+      if (!list.some(item => item.id === s.id)) {
+        list.push({ id: s.id, name: s.name, role: 'coach' });
+      }
+    });
+    return list;
+  }, [state.staff, state.profile, isOwner]);
 
   const handleContinue = () => {
     if (selectedTeamIds.length === 0) return alert("Select at least one team.");
@@ -4548,6 +4446,7 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
       }
     }
 
+    const initialMultiCoachMap: Record<string, string[]> = {};
     selectedTeamIds.forEach(tid => {
       const t = state.gyms.find(g => g.id === tid);
       
@@ -4560,13 +4459,11 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
         const p = state.gyms.find(g => g.id === t.parent_gym_id);
         if (p?.coach_ids && p.coach_ids.length > 0) coachIdFallback = p.coach_ids[0];
       }
-      // For multi-team non-competition: use per-team coach assignment for owners;
-      // for coaches always use themselves
-      if (!isCompetition && selectedTeamIds.length > 1) {
-        initialMap[tid] = isOwner ? coachIdFallback : (state.profile.id || '');
-      } else {
-        initialMap[tid] = isOwner ? coachIdFallback : (state.profile.id || '');
-      }
+      
+      // Default to logged-in user profile (owner or coach)
+      const selectedId = state.profile.id || coachIdFallback || (state.staff[0]?.id || '');
+      initialMap[tid] = selectedId;
+      initialMultiCoachMap[tid] = selectedId ? [selectedId] : [];
       
       // Also add assigned coaches for competition (owner only)
       if (isOwner && firstTeam && !firstTeam.parent_gym_id) {
@@ -4578,6 +4475,7 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
     });
     
     setTeamCoachIds(initialMap);
+    setMultiCoachIdsMap(initialMultiCoachMap);
     setTeamHours(initialHoursMap);
     setCompCoachHours(compCoachHoursMap);
 
@@ -4635,32 +4533,39 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
         });
       });
     } else {
-      sessions = selectedTeamIds.map(teamId => {
+      sessions = [];
+      selectedTeamIds.forEach(teamId => {
         const team = state.gyms.find(g => g.id === teamId);
         const finalEventName = gymType === 'tumbling' ? (selectedPreset === 'Custom' ? customEventName : selectedPreset) : undefined;
         const covCoach = coveringCoachNames[teamId];
         const customInput = customCoveringInputs[teamId];
         const finalCoveringCoachName = covCoach === '__custom__' ? (customInput ? customInput.trim() : undefined) : (covCoach ? covCoach.trim() : undefined);
-        return {
-          id: (initialSession && initialSession.classTypeId === teamId) ? initialSession.id : undefined,
-          classTypeId: teamId,
-          studentIds: finalAthletes.filter(aid => {
-            if (gymType === 'tumbling') return true;
-            const student = state.students.find(s => s.id === aid);
-            // If it's a parent team, we check if the student belongs to any of its sub-teams
-            if (team && !team.parent_gym_id) {
-              const subTeams = state.gyms.filter(g => g.parent_gym_id === team.id);
-              return subTeams.some(st => st.id === student?.associated_gym_id);
-            }
-            return student?.associated_gym_id === teamId;
-          }),
-          date,
-          hours: Number(selectedTeamIds.length > 1 ? (teamHours[teamId] !== "" && teamHours[teamId] !== undefined ? teamHours[teamId] : hours) : hours) || 1,
-          coachId: teamCoachIds[teamId] || undefined,
-          isCompetition,
-          customEventName: finalEventName,
-          covering_coach_name: finalCoveringCoachName
-        };
+        
+        const selectedForTeam = (multiCoachIdsMap[teamId] && multiCoachIdsMap[teamId].length > 0)
+          ? multiCoachIdsMap[teamId]
+          : [teamCoachIds[teamId] || state.profile.id || ''];
+
+        selectedForTeam.forEach(cId => {
+          sessions.push({
+            id: (initialSession && initialSession.classTypeId === teamId && selectedForTeam.length === 1) ? initialSession.id : undefined,
+            classTypeId: teamId,
+            studentIds: finalAthletes.filter(aid => {
+              if (gymType === 'tumbling') return true;
+              const student = state.students.find(s => s.id === aid);
+              if (team && !team.parent_gym_id) {
+                const subTeams = state.gyms.filter(g => g.parent_gym_id === team.id);
+                return subTeams.some(st => st.id === student?.associated_gym_id);
+              }
+              return student?.associated_gym_id === teamId;
+            }),
+            date,
+            hours: Number(selectedTeamIds.length > 1 ? (teamHours[teamId] !== "" && teamHours[teamId] !== undefined ? teamHours[teamId] : hours) : hours) || 1,
+            coachId: cId,
+            isCompetition,
+            customEventName: finalEventName,
+            covering_coach_name: finalCoveringCoachName
+          });
+        });
       });
     }
 
@@ -4861,53 +4766,76 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
                 </div>
               </div>
             ) : (
-              activeTeams.map((team, idx) => (
-                <div key={`team-log-${team.id}-${idx}`} className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-2xl flex flex-col gap-1.5 border border-blue-100 dark:border-blue-900/30">
-                  <div className="flex items-center justify-between mb-1 px-1">
+              activeTeams.map((team, idx) => {
+                const selectedCoachesForThisTeam = multiCoachIdsMap[team.id] || (teamCoachIds[team.id] ? [teamCoachIds[team.id]] : [state.profile.id || '']);
+                return (
+                <div key={`team-log-${team.id}-${idx}`} className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-2xl flex flex-col gap-2 border border-blue-100 dark:border-blue-900/30">
+                  <div className="flex items-center justify-between px-1">
                     <p className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400">{team.name}</p>
-                    {!isCompetition && activeTeams.length > 1 && (
-                      <div className="flex items-center gap-1 opacity-70">
-                        <Clock size={10} className="text-blue-500" />
-                        <span className="text-[8px] font-black uppercase text-blue-600 dark:text-blue-400 tracking-wider">Hours</span>
-                      </div>
-                    )}
+                    <span className="text-[8px] font-black uppercase text-blue-600 dark:text-blue-400">
+                      {selectedCoachesForThisTeam.length} Coach{selectedCoachesForThisTeam.length !== 1 ? 'es' : ''} Coaching
+                    </span>
                   </div>
                   
-                  <div className="flex bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
-                    <select
-                      value={teamCoachIds[team.id] || ''}
-                      onChange={e => setTeamCoachIds(prev => ({ ...prev, [team.id]: e.target.value }))}
-                      className="flex-1 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border-none p-2.5 text-xs font-black outline-none appearance-none cursor-pointer"
-                    >
-                      <option value="" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">- MYSELF -</option>
-                      {coachOptions.map((s, sIdx) => (
-                        <option key={`coach-opt-${s.id}-${sIdx}`} value={s.id} className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">
-                          {s.name} {(team.coach_ids || []).includes(s.id) ? '★' : ''}
-                        </option>
-                      ))}
-                    </select>
-                    
-                    {!isCompetition && activeTeams.length > 1 && (
-                      <div className="flex border-l border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 w-16">
-                        <input
-                          type="number"
-                          step="0.5"
-                          min="0.5"
-                          max="24"
-                          value={teamHours[team.id] !== undefined ? teamHours[team.id] : ''}
-                          onFocus={e => e.target.select()}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setTeamHours(prev => ({
-                              ...prev,
-                              [team.id]: val === '' ? '' : (parseFloat(val) || '')
-                            }));
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {coachOptions.map((cOption) => {
+                      const isSelected = selectedCoachesForThisTeam.includes(cOption.id);
+                      return (
+                        <button
+                          type="button"
+                          key={`c-opt-${team.id}-${cOption.id}`}
+                          onClick={() => {
+                            let updated: string[];
+                            if (isSelected) {
+                              updated = selectedCoachesForThisTeam.filter(id => id !== cOption.id);
+                              if (updated.length === 0) updated = [cOption.id];
+                            } else {
+                              updated = [...selectedCoachesForThisTeam, cOption.id];
+                            }
+                            setMultiCoachIdsMap(prev => ({ ...prev, [team.id]: updated }));
+                            setTeamCoachIds(prev => ({ ...prev, [team.id]: updated[0] }));
                           }}
-                          className="w-full bg-transparent border-none p-2.5 text-xs font-black text-center outline-none dark:text-white"
-                        />
-                      </div>
-                    )}
+                          className={`p-2.5 rounded-xl border text-left flex items-center justify-between gap-2 transition-all ${
+                            isSelected
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-md'
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-blue-300'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[10px] font-black uppercase truncate">{cOption.name}</p>
+                            <p className={`text-[7px] font-bold uppercase ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
+                              {cOption.id === state.profile.id ? 'Myself' : 'Coach'}
+                            </p>
+                          </div>
+                          <div className={`w-4 h-4 rounded-md flex items-center justify-center shrink-0 ${isSelected ? 'bg-white text-blue-600' : 'border border-slate-300 dark:border-slate-600'}`}>
+                            {isSelected && <Check size={10} strokeWidth={3} />}
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
+
+                  {!isCompetition && activeTeams.length > 1 && (
+                    <div className="flex items-center justify-between bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700 mt-1">
+                      <span className="text-[9px] font-black uppercase text-slate-500">Hours Coached for {team.name}</span>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0.5"
+                        max="24"
+                        value={teamHours[team.id] !== undefined ? teamHours[team.id] : ''}
+                        onFocus={e => e.target.select()}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setTeamHours(prev => ({
+                            ...prev,
+                            [team.id]: val === '' ? '' : (parseFloat(val) || '')
+                          }));
+                        }}
+                        className="w-16 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-1.5 text-xs font-black text-center outline-none dark:text-white"
+                      />
+                    </div>
+                  )}
 
                   {(() => {
                     const customNames = team.coach_names || [];
@@ -4951,8 +4879,9 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
                     );
                   })()}
                 </div>
-              ))
-            )}
+              );
+            })
+          )}
           </div>
         )}
 
@@ -7008,15 +6937,20 @@ const LogSessionView = memo(({ state, onNavigate }: { state: AppState, onNavigat
   );
 });
 
-const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state: AppState, onSave: (ct: string, sids: string[], date: string, hrs?: number, coachId?: string, isComp?: boolean) => void, onCancel: () => void, initialSession?: AttendanceSession | null }) => {
+const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state: AppState, onSave: (ct: any, sids: string[], date: string, hrs?: number, coachId?: string, isComp?: boolean) => void, onCancel: () => void, initialSession?: AttendanceSession | null }) => {
   const [selectedClassId, setSelectedClassId] = useState(initialSession?.classTypeId || '');
   const [selectedStudents, setSelectedStudents] = useState<string[]>(initialSession?.studentIds || []);
   const [date, setDate] = useState(initialSession?.date || new Date().toISOString().split('T')[0]);
   const [hours, setHours] = useState<number | string>(initialSession?.hours_coached || '');
-  const [coachId, setCoachId] = useState(
-    initialSession?.coach_id || (state.profile.role === 'coach' ? (state.profile.id || '') : '')
-  );
+  
   const isOwner = state.profile.role === 'owner';
+
+  const [selectedCoachIds, setSelectedCoachIds] = useState<string[]>(() => {
+    if (initialSession?.coach_id) return [initialSession.coach_id];
+    if (state.profile.id) return [state.profile.id];
+    if (state.staff && state.staff.length > 0) return [state.staff[0].id];
+    return [];
+  });
 
   interface ClassOption {
     id: string;
@@ -7072,42 +7006,95 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
     setSelectedStudents(prev => prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id]),
     []);
 
-  const assignedCoachIds = useMemo(() => {
-    const ids = new Set<string>();
-    return Array.from(ids);
-  }, []);
-
   const coachOptions = useMemo(() => {
-    return state.staff;
-  }, [state.staff]);
+    const list: { id: string; name: string; role?: string }[] = [];
+    if (state.profile.id) {
+      list.push({
+        id: state.profile.id,
+        name: isOwner ? 'Myself (Owner)' : (state.profile.name || 'Myself'),
+        role: state.profile.role
+      });
+    }
+    (state.staff || []).forEach(s => {
+      if (!list.some(item => item.id === s.id)) {
+        list.push({ id: s.id, name: s.name, role: 'coach' });
+      }
+    });
+    return list;
+  }, [state.staff, state.profile, isOwner]);
 
   const handleSave = () => {
     if (!selectedClassId) return alert("Select class");
     if (selectedStudents.length === 0) return alert("Select at least one athlete");
-    onSave(selectedClassId, selectedStudents, date, typeof hours === 'number' ? hours : parseFloat(hours as string), coachId || undefined, false);
+    if (selectedCoachIds.length === 0) return alert("Select at least one coach");
+
+    const parsedHours = typeof hours === 'number' ? hours : (parseFloat(hours as string) || 1);
+
+    const sessionsToSave = selectedCoachIds.map(cId => ({
+      id: (initialSession && selectedCoachIds.length === 1) ? initialSession.id : undefined,
+      classTypeId: selectedClassId,
+      studentIds: selectedStudents,
+      date: date,
+      hours: parsedHours,
+      coachId: cId,
+      isCompetition: false
+    }));
+
+    onSave(sessionsToSave, [], date, 0, undefined, false);
   };
 
   return (
     <div className="space-y-6 mt-6 pb-10 px-1">
       <h2 className="text-2xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">Register</h2>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">
           <label className="text-[10px] font-black text-[#94a3b8] uppercase px-1">Training Date</label>
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-white dark:bg-slate-800 border-none rounded-2xl p-4 text-sm font-black dark:text-slate-200 shadow-sm outline-none" />
         </div>
-        {isOwner && (
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-[#94a3b8] uppercase px-1">Assign Coach</label>
-            <select value={coachId} onChange={e => setCoachId(e.target.value)} className="w-full bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border-none rounded-2xl p-4 text-sm font-black shadow-sm outline-none appearance-none cursor-pointer">
-              <option value="" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">- MYSELF -</option>
-              {coachOptions.map((s, idx) => (
-                <option key={s.id || `coach-reg-${idx}`} value={s.id} className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">
-                  {s.name} {assignedCoachIds.includes(s.id) ? '★' : ''}
-                </option>
-              ))}
-            </select>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between px-1">
+            <label className="text-[10px] font-black text-[#94a3b8] uppercase">Coaches Coaching This Class</label>
+            <span className="text-[8px] font-black uppercase text-blue-600 dark:text-blue-400">
+              {selectedCoachIds.length} Selected
+            </span>
           </div>
-        )}
+          <div className="grid grid-cols-2 gap-2">
+            {coachOptions.map((cOption) => {
+              const isSelected = selectedCoachIds.includes(cOption.id);
+              return (
+                <button
+                  type="button"
+                  key={`reg-c-opt-${cOption.id}`}
+                  onClick={() => {
+                    if (isSelected) {
+                      if (selectedCoachIds.length > 1) {
+                        setSelectedCoachIds(prev => prev.filter(id => id !== cOption.id));
+                      }
+                    } else {
+                      setSelectedCoachIds(prev => [...prev, cOption.id]);
+                    }
+                  }}
+                  className={`p-3 rounded-xl border text-left flex items-center justify-between gap-2 transition-all ${
+                    isSelected
+                      ? 'bg-[#1e4da1] dark:bg-blue-600 text-white border-[#1e4da1] shadow-md'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-100 dark:border-slate-700 hover:border-blue-300'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-black uppercase truncate">{cOption.name}</p>
+                    <p className={`text-[8px] font-bold uppercase ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
+                      {cOption.id === state.profile.id ? 'Myself' : 'Coach'}
+                    </p>
+                  </div>
+                  <div className={`w-4 h-4 rounded-md flex items-center justify-center shrink-0 ${isSelected ? 'bg-white text-[#1e4da1]' : 'border border-slate-300 dark:border-slate-600'}`}>
+                    {isSelected && <Check size={10} strokeWidth={3} />}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       <div className="space-y-3">
@@ -7613,6 +7600,15 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
   const athleteSessions = useMemo(() => {
     if (!selectedGroup) return [];
 
+    const activeTargetMonth = calendarProps ? calendarProps.month : new Date().getMonth();
+    const activeTargetYear = calendarProps ? calendarProps.year : new Date().getFullYear();
+
+    const monthSessions = (state.sessions || []).filter(s => {
+      if (!s.date) return false;
+      const d = new Date(s.date);
+      return d.getMonth() === activeTargetMonth && d.getFullYear() === activeTargetYear;
+    });
+
     if (selectedGroup.isStaff) {
       const g = selectedGroup as any;
       const coachId = g.coachId || selectedGroup.family_id.replace(/^(turnin_|org_[^_]+_)/, '');
@@ -7626,7 +7622,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
         const orgGym = state.gyms.find(gym => gym.id === orgId);
         const orgPayRate = orgGym?.coach_rates?.[coachId] !== undefined ? orgGym.coach_rates[coachId] : defaultPayRate;
 
-        return (state.sessions || []).filter(s => {
+        return monthSessions.filter(s => {
           if (s.coach_id !== coachId) return false;
           const gym = state.gyms.find(gm => gm.id === s.classTypeId);
           return gym && (gym.id === orgId || gym.parent_gym_id === orgId);
@@ -7644,7 +7640,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
           };
         }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       } else {
-        return (state.sessions || []).filter(s => {
+        return monthSessions.filter(s => {
           if (s.coach_id !== coachId) return false;
           const gym = state.gyms.find(gm => gm.id === s.classTypeId);
           return !gym || gym.gym_type !== 'cheer';
@@ -7667,7 +7663,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
 
     let billableIds: string[] = [];
     if (monthLabel) {
-      const familySessions = (state.sessions || []).filter(s => {
+      const familySessions = monthSessions.filter(s => {
         const gym = state.gyms.find(g => g.id === s.classTypeId);
         if (gym && (gym.id === selectedGroup.family_id || gym.parent_gym_id === selectedGroup.family_id)) return true;
         
@@ -7684,7 +7680,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       billableIds = selectedGroup.studentIds || [];
     }
 
-    return (state.sessions || []).filter(s => {
+    return monthSessions.filter(s => {
       const gym = state.gyms.find(g => g.id === s.classTypeId);
       if (gym && (gym.id === selectedGroup.family_id || gym.parent_gym_id === selectedGroup.family_id)) {
         return true;
@@ -7778,6 +7774,15 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
   const dbInvoiceId = useMemo(() => monthLabel || 'Active', [monthLabel]);
 
   const calculateTotal = useCallback((group: { family_id: string, studentIds?: string[], isGym?: boolean, isStaff?: boolean }) => {
+    const activeTargetMonth = calendarProps ? calendarProps.month : new Date().getMonth();
+    const activeTargetYear = calendarProps ? calendarProps.year : new Date().getFullYear();
+
+    const monthSessions = (state.sessions || []).filter(s => {
+      if (!s.date) return false;
+      const d = new Date(s.date);
+      return d.getMonth() === activeTargetMonth && d.getFullYear() === activeTargetYear;
+    });
+
     if (group.isStaff) {
       const g = group as any;
       const coachId = g.coachId || group.family_id.replace(/^(turnin_|org_[^_]+_)/, '');
@@ -7790,20 +7795,20 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       if (invoiceType === 'organization' && orgId) {
         const orgGym = state.gyms.find(gym => gym.id === orgId);
         const orgPayRate = orgGym?.coach_rates?.[coachId] !== undefined ? orgGym.coach_rates[coachId] : defaultPayRate;
-        return (state.sessions || []).filter(s => {
+        return monthSessions.filter(s => {
           if (s.coach_id !== coachId) return false;
           const gym = state.gyms.find(gm => gm.id === s.classTypeId);
           return gym && (gym.id === orgId || gym.parent_gym_id === orgId);
         }).reduce((acc: number, s) => acc + (orgPayRate * (s.hours_coached || 1)), 0);
       } else {
-        return (state.sessions || []).filter(s => {
+        return monthSessions.filter(s => {
           if (s.coach_id !== coachId) return false;
           const gym = state.gyms.find(gm => gm.id === s.classTypeId);
           return !gym || gym.gym_type !== 'cheer';
         }).reduce((acc: number, s) => acc + (defaultPayRate * (s.hours_coached || 1)), 0);
       }
     }
-    const billableSessions = (state.sessions || []).filter(s => {
+    const billableSessions = monthSessions.filter(s => {
       const gym = state.gyms.find(g => g.id === s.classTypeId);
       if (gym && (gym.id === group.family_id || gym.parent_gym_id === group.family_id)) {
         return true;

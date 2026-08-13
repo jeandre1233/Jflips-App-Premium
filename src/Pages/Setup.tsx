@@ -72,13 +72,15 @@ const CoachApprovalCard: React.FC<{
   const [canViewTumbling, setCanViewTumbling] = useState<boolean>(coach.canViewTumbling);
   const [canViewSchoolGyms, setCanViewSchoolGyms] = useState<boolean>(coach.canViewSchoolGyms ?? false);
   const [assignedCheerOrgIds, setAssignedCheerOrgIds] = useState<string[]>(coach.assignedCheerOrgIds || []);
+  const [payRate, setPayRate] = useState<number>(coach.payRate || 0);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     setCanViewTumbling(coach.canViewTumbling);
     setCanViewSchoolGyms(coach.canViewSchoolGyms ?? false);
     setAssignedCheerOrgIds(coach.assignedCheerOrgIds || []);
-  }, [coach.canViewTumbling, coach.canViewSchoolGyms, coach.assignedCheerOrgIds]);
+    setPayRate(coach.payRate || 0);
+  }, [coach.canViewTumbling, coach.canViewSchoolGyms, coach.assignedCheerOrgIds, coach.payRate]);
 
   const toggleCheerGym = (gymId: string) => {
     if (assignedCheerOrgIds.includes(gymId)) {
@@ -95,7 +97,8 @@ const CoachApprovalCard: React.FC<{
         status,
         can_view_tumbling: canViewTumbling,
         can_view_school_gyms: canViewSchoolGyms,
-        assigned_cheer_org_ids: assignedCheerOrgIds
+        assigned_cheer_org_ids: assignedCheerOrgIds,
+        pay_rate: payRate
       };
       if (status === 'approved') {
         updateData.approved_at = new Date().toISOString();
@@ -199,7 +202,7 @@ const CoachApprovalCard: React.FC<{
         <label className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-xl cursor-pointer hover:border-blue-200 transition-colors border border-transparent">
           <div>
             <span className="text-[10px] font-black uppercase text-slate-800 dark:text-slate-200 block">
-              Tumbling
+              Tumbling Access
             </span>
             <span className="text-[8px] text-slate-400 font-bold">
               Grants access to tumbling roster & student records
@@ -212,6 +215,28 @@ const CoachApprovalCard: React.FC<{
             className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
           />
         </label>
+
+        {/* Tumbling Hourly Rate */}
+        <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-transparent flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-black uppercase text-slate-800 dark:text-slate-200 block">
+              Tumbling Hourly Rate (R/hr)
+            </span>
+            <span className="text-[8px] text-slate-400 font-bold">
+              Coach base rate for coaching tumbling sessions
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-xs font-black text-slate-400">R</span>
+            <input
+              type="number"
+              value={payRate}
+              onChange={e => setPayRate(parseFloat(e.target.value) || 0)}
+              className="w-20 p-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-xs font-black outline-none text-right dark:text-slate-200 border border-slate-100 dark:border-slate-800"
+              placeholder="150"
+            />
+          </div>
+        </div>
 
         {/* School Gym Toggle */}
         <label className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-xl cursor-pointer hover:border-blue-200 transition-colors border border-transparent">
@@ -941,304 +966,6 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
               <div className="h-px bg-slate-100 dark:bg-slate-800 my-4"></div>
               <motion.button whileTap={{ scale: 0.95 }} type="button" onClick={onLogout} className="w-full bg-slate-50 dark:bg-slate-800/50 text-[#94a3b8] py-4 rounded-xl font-black text-[10px] uppercase flex items-center justify-center gap-2">Log Out <LogOut size={16} /></motion.button>
             </form>
-
-            {isOwner && (
-              <>
-              <div className="bg-white dark:bg-slate-800/60 p-6 rounded-3xl border border-slate-50 dark:border-slate-800 shadow-sm space-y-4">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase italic">Discord Webhook Integration</h3>
-                    <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider ${discordEnabled ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'}`}>
-                      {discordEnabled ? 'Enabled' : 'Disabled'}
-                    </span>
-                  </div>
-                  <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider mt-0.5 leading-relaxed">Configure automated Discord messaging alerts for student signups, schedulers, and monthly billings.</p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => handleToggleDiscord(!discordEnabled)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${discordEnabled ? 'bg-[#1e4da1] dark:bg-blue-600' : 'bg-slate-200 dark:bg-slate-700'}`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${discordEnabled ? 'translate-x-5' : 'translate-x-0'}`}
-                  />
-                </button>
-              </div>
-
-              {!discordEnabled && (
-                <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-900/40 p-3 rounded-xl text-[9px] font-bold text-amber-800 dark:text-amber-300">
-                  🚫 Discord notifications are currently <strong>disabled</strong>. No webhook alerts will be sent for signups or billing cycles.
-                </div>
-              )}
-              
-              <form onSubmit={handleSaveDiscordWebhook} className="space-y-3">
-                <input 
-                  type="text" 
-                  placeholder="DISCORD WEBHOOK URL" 
-                  value={discordWebhookInput} 
-                  onChange={e => setDiscordWebhookInput(e.target.value)} 
-                  className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black text-[10px] outline-none dark:text-slate-200" 
-                />
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <motion.button 
-                    whileTap={{ scale: 0.95 }} 
-                    type="submit" 
-                    className="w-full bg-[#1e4da1] dark:bg-blue-600 text-white py-3.5 px-2 rounded-xl font-black text-[8px] uppercase flex items-center justify-center gap-2"
-                  >
-                    Save Settings <Check size={14} />
-                  </motion.button>
-                  
-                  <motion.button 
-                    whileTap={{ scale: 0.95 }} 
-                    type="button" 
-                    onClick={handleTestDiscordWebhook}
-                    disabled={!discordWebhookInput || testStatus === 'sending'}
-                    className="w-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 py-3.5 px-2 rounded-xl font-black text-[8px] uppercase flex items-center justify-center gap-2 border border-emerald-100/50 dark:border-emerald-900/20 disabled:opacity-50"
-                  >
-                    {testStatus === 'sending' ? 'Sending...' : testStatus === 'success' ? 'Success!' : testStatus === 'error' ? 'Failed' : 'Send Test Msg'} 
-                    <Bell size={14} />
-                  </motion.button>
-                </div>
-              </form>
-            </div>
-
-            {/* Google Workspace Integration */}
-            <div className="bg-white dark:bg-slate-800/60 p-6 rounded-3xl border border-slate-50 dark:border-slate-800 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase italic flex items-center gap-2">
-                    <span className={`w-2.5 h-2.5 rounded-full inline-block ${googleUser ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
-                    Google Workspace
-                  </h3>
-                  <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider mt-0.5 leading-relaxed">
-                    Automate Finances on Sheets and sync lesson schedules to Calendar.
-                  </p>
-                </div>
-                {googleUser && (
-                  <span className="text-[7px] font-black uppercase text-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-1 rounded">
-                    Connected
-                  </span>
-                )}
-              </div>
-
-              {!googleUser ? (
-                <div className="space-y-3">
-                  <p className="text-[9px] text-slate-500 font-bold">Connect your Google account with Sheets and Calendar permissions to enable automation triggers.</p>
-                  <motion.button 
-                    whileTap={{ scale: 0.95 }} 
-                    type="button" 
-                    onClick={handleGoogleSignIn}
-                    className="w-full flex items-center justify-center gap-3 bg-slate-900 dark:bg-slate-700 text-white py-3.5 px-4 rounded-xl font-black text-[9px] uppercase tracking-wider shadow-md hover:bg-slate-800 transition-colors"
-                  >
-                    <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4 shrink-0">
-                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                    </svg>
-                    Sign in with Google
-                  </motion.button>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {/* Account detail */}
-                  <div className="flex items-center justify-between p-3.5 bg-slate-50 dark:bg-slate-800/20 rounded-xl border border-slate-100 dark:border-slate-800/40">
-                    <div className="flex items-center gap-2">
-                      {googleUser.photoURL ? (
-                        <img src={googleUser.photoURL} alt="Avatar" className="w-6 h-6 rounded-full" />
-                      ) : (
-                        <div className="w-6 h-6 rounded-full bg-[#1e4da1] text-white flex items-center justify-center font-bold text-[8px]">
-                          G
-                        </div>
-                      )}
-                      <div>
-                        <p className="text-[9px] font-black text-slate-800 dark:text-slate-200 leading-none">{googleUser.displayName || 'Google Account'}</p>
-                        <p className="text-[7px] text-slate-400 font-bold lowercase truncate mt-0.5 max-w-[130px]">{googleUser.email}</p>
-                      </div>
-                    </div>
-                    <button 
-                      type="button" 
-                      onClick={handleGoogleSignOut}
-                      className="text-[7px] font-black uppercase text-red-500 hover:text-red-600 transition-colors cursor-pointer"
-                    >
-                      Disconnect
-                    </button>
-                  </div>
-
-                  {/* Sheets Config */}
-                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/20 rounded-xl border border-slate-100 dark:border-slate-800/40 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[8px] font-black uppercase text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
-                        <FileSpreadsheet size={12} className="text-emerald-500" />
-                        Google Sheets Sync
-                      </span>
-                      <input 
-                        type="checkbox" 
-                        checked={googleSheetsSyncEnabled} 
-                        onChange={(e) => {
-                          const val = e.target.checked;
-                          setGoogleSheetsSyncEnabled(val);
-                          localStorage.setItem('google_sheets_sync_enabled', val ? 'true' : 'false');
-                        }}
-                        className="rounded accent-emerald-500 focus:ring-0 cursor-pointer" 
-                      />
-                    </div>
-                    <p className="text-[7px] text-slate-400 font-bold leading-normal">
-                      Export end-of-month finances on invoice archive automatically.
-                    </p>
-                    {spreadsheetId && (
-                      <a 
-                        href={`https://docs.google.com/spreadsheets/d/${spreadsheetId}`} 
-                        target="_blank" 
-                        rel="noreferrer" 
-                        className="text-[7px] font-black text-emerald-600 dark:text-emerald-400 flex items-center gap-1 mt-1 truncate max-w-full italic transition-all block"
-                      >
-                        Open Linked Google Sheet &rarr;
-                      </a>
-                    )}
-                    <motion.button 
-                      whileTap={{ scale: 0.98 }} 
-                      type="button" 
-                      onClick={syncSheetsFinances}
-                      disabled={isSyncing}
-                      className="w-full mt-2 py-3 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-[8px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-200 flex items-center justify-center gap-2 shadow-sm shrink-0 disabled:opacity-50"
-                    >
-                      {isSyncing ? 'Synchronizing...' : 'Refresh Financials Sheet'}
-                      <FileSpreadsheet size={14} className="text-emerald-500 shrink-0" />
-                    </motion.button>
-                  </div>
-
-                  {/* Calendar Config */}
-                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/20 rounded-xl border border-slate-100 dark:border-slate-800/40 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[8px] font-black uppercase text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
-                        <Calendar size={12} className="text-[#1e4da1]" />
-                        Google Calendar Sync
-                      </span>
-                      <input 
-                        type="checkbox" 
-                        checked={googleCalendarSyncEnabled} 
-                        onChange={(e) => {
-                          const val = e.target.checked;
-                          setGoogleCalendarSyncEnabled(val);
-                          localStorage.setItem('google_calendar_sync_enabled', val ? 'true' : 'false');
-                        }}
-                        className="rounded accent-[#1e4da1] focus:ring-0 cursor-pointer" 
-                      />
-                    </div>
-                    <p className="text-[7px] text-slate-400 font-bold leading-normal">
-                      Automatically synchronize lesson timings with your primary Google Calendar schedules.
-                    </p>
-                    {calendarId && (
-                      <a 
-                        href={`https://calendar.google.com/calendar/r?cid=${calendarId}`} 
-                        target="_blank" 
-                        rel="noreferrer" 
-                        className="text-[7px] font-black text-[#1e4da1] dark:text-blue-400 flex items-center gap-1 mt-1 truncate max-w-full italic transition-all block"
-                      >
-                        Open Connected Google Calendar &rarr;
-                      </a>
-                    )}
-                    <motion.button 
-                      whileTap={{ scale: 0.98 }} 
-                      type="button" 
-                      onClick={syncSchedules}
-                      disabled={isSyncing}
-                      className="w-full mt-2 py-3 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-[8px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-200 flex items-center justify-center gap-2 shadow-sm shrink-0 disabled:opacity-50"
-                    >
-                      {isSyncing ? 'Synchronizing...' : 'Sync schedules with calendar'}
-                      <Calendar size={14} className="text-[#1e4da1] shrink-0" />
-                    </motion.button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-white dark:bg-slate-800/60 p-6 rounded-3xl border border-slate-50 dark:border-slate-800 shadow-sm space-y-4">
-              <div>
-                <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase italic">Athlete Onboarding Link</h3>
-                <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider mt-0.5 leading-relaxed">
-                  Share this custom URL with new families to complete their child profile and indemnity form asynchronously.
-                </p>
-              </div>
-              
-              <div className="flex flex-col gap-3">
-                <div className="p-3.5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800/40 break-all text-[10px] font-bold text-slate-600 dark:text-slate-300 select-all font-mono leading-tight">
-                  {onboardingUrl}
-                </div>
-                <div className="flex gap-2">
-                  <motion.button 
-                    whileTap={{ scale: 0.95 }} 
-                    type="button" 
-                    onClick={handleCopyLink}
-                    className={`flex-1 py-3 px-2 rounded-xl font-black text-[9px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow ${
-                      copiedLink
-                        ? 'bg-emerald-500 text-white'
-                        : 'bg-[#1e4da1] dark:bg-blue-600 text-white hover:bg-blue-700'
-                    }`}
-                  >
-                    {copiedLink ? 'Copied!' : 'Copy Link'}
-                  </motion.button>
-                  <motion.button 
-                    whileTap={{ scale: 0.95 }} 
-                    type="button" 
-                    onClick={() => setShowSimulator(true)}
-                    className="flex-1 py-3 px-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-black text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow border border-slate-200 dark:border-slate-700"
-                  >
-                    Test Link
-                  </motion.button>
-                </div>
-              </div>
-
-              {/* Scan this link preview & diagnostics */}
-              <div className="p-4 bg-slate-50/50 dark:bg-slate-900/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 space-y-4 flex flex-col items-center justify-center">
-                <div className="flex flex-col items-center text-center w-full">
-                  <div className="p-2.5 bg-white rounded-2xl inline-block shadow-sm border border-slate-150">
-                    <img 
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&dpi=300&data=${encodeURIComponent(onboardingUrl)}`} 
-                      alt="Onboarding Link QR" 
-                      width={140}
-                      height={140} 
-                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                      className="rounded-lg object-contain block"
-                      referrerPolicy="no-referrer"
-                    />
-                  </div>
-                  <p className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-300 tracking-wider mt-3">
-                    Scan this link for the preview
-                  </p>
-                  <p className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase mt-1 leading-normal max-w-[200px]">
-                    Point your camera at the QR code to open the signup page
-                  </p>
-                </div>
-
-                <div className="w-full pt-3 border-t border-slate-200/50 dark:border-slate-800/40 space-y-2">
-                  <div className="flex items-center justify-between text-[8px] font-black uppercase text-slate-400 dark:text-slate-500">
-                    <span>Link Status</span>
-                    <span className={state.profile?.id ? "text-emerald-500" : "text-amber-500"}>
-                      ● {state.profile?.id ? "Configured" : "Missing Owner ID"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-[8px] font-black uppercase text-slate-400 dark:text-slate-500">
-                    <span>Active Public Classes</span>
-                    <span className="text-[#1e4da1] dark:text-blue-400">
-                      {state.classTypes?.filter(ct => ct.allow_signup !== false).length || 0} Listed
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            </>
-            )}
-
-            {isOwner && (
-              <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
-                <StaffManagementSection state={state} onRefreshStaff={onRefreshStaff} showToast={showToast} />
-              </div>
-            )}
 
             <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 text-center text-slate-400 dark:text-slate-500">
               <span className="text-[20px] font-black italic text-[#1e4da1] dark:text-blue-400">JFLIPS</span>

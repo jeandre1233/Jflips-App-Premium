@@ -123,14 +123,16 @@ const StatusPips = ({ status, size = "w-1 h-1" }: { status: { logged: Attendance
 };
 
 // --- CALENDAR VIEW ---
-export const CalendarView = memo(({ sessions, classTypes, gyms, month, year, schedules, onQuickLog }: { 
+export const CalendarView = memo(({ sessions, classTypes, gyms, month, year, schedules, onQuickLog, staff, profile }: { 
   sessions: AttendanceSession[], 
   classTypes: ClassType[], 
   gyms: Gym[],
   month?: number,
   year?: number,
   schedules?: ClassSchedule[],
-  onQuickLog?: (classIds: string[], date: string, coachId?: string, athleteIds?: string[]) => void
+  onQuickLog?: (classIds: string[], date: string, coachId?: string, athleteIds?: string[]) => void,
+  staff?: StaffProfile[],
+  profile?: Profile
 }) => {
   const now = new Date();
   const [viewMonth, setViewMonth] = useState(month !== undefined ? month : now.getMonth());
@@ -282,21 +284,40 @@ export const CalendarView = memo(({ sessions, classTypes, gyms, month, year, sch
                   const ct = classTypes.find(c => c.id === session.classTypeId);
                   const gym = gyms.find(g => g.id === session.classTypeId);
                   const sched = schedules?.find(s => s.class_ids.includes(session.classTypeId));
+                  const loggedByCoach = staff?.find(s => s.id === session.coach_id);
+                  const coachName = session.covering_coach_name || loggedByCoach?.name || profile?.name || 'Coach';
+                  const isExternalGym = !!gym && gym.gym_type !== 'cheer';
+                  const sessionTypeLabel = isExternalGym ? 'EXTERNAL GYM SESSION' : (gym?.gym_type === 'cheer' ? 'CHEER TEAM PRACTICE' : 'TUMBLING SESSION');
+                  const entryCount = gym 
+                    ? `${session.hours_coached || gym.default_hours || 1} Hours Coached` 
+                    : `${session.studentIds?.length || 0} Athlete Entries`;
+
                   return (
                     <div key={session.id || `sel-sess-${idx}`} className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 relative overflow-hidden">
                       <div className={`absolute top-0 bottom-0 left-0 w-1.5 ${sched?.color || 'bg-[#1e4da1]'}`}></div>
                       <div className="w-8 h-8 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center text-[#1e4da1] dark:text-blue-400 shrink-0 shadow-sm ml-2">
-                        {gym ? <Building2 size={14} /> : ((session.studentIds?.length || 0) > 1 ? <Users size={14} /> : <User size={14} />)}
+                        {gym ? <Building2 size={14} /> : ((session.studentIds?.length || 0) > 0 ? <Users size={14} /> : <User size={14} />)}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-[11px] font-black text-[#1a1a1a] dark:text-slate-100 italic uppercase">
-                          {(() => {
-                            const baseName = ct?.name || gym?.name || 'Session';
-                            return session.custom_event_name ? `${baseName} (${session.custom_event_name})` : baseName;
-                          })()}
-                        </p>
-                        <p className="text-[9px] font-bold text-[#10b981] uppercase">
-                          LOGGED • {gym ? `${session.hours_coached || gym.default_hours || 1} HRS` : `${session.studentIds?.length || 0} Athletes`}
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[11px] font-black text-[#1a1a1a] dark:text-slate-100 italic uppercase">
+                            {(() => {
+                              const baseName = ct?.name || gym?.name || 'Session';
+                              return session.custom_event_name ? `${baseName} (${session.custom_event_name})` : baseName;
+                            })()}
+                          </p>
+                          <span className={`text-[7px] font-black px-2 py-0.5 rounded-md uppercase shrink-0 ${isExternalGym ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300' : (gym?.gym_type === 'cheer' ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300' : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300')}`}>
+                            {sessionTypeLabel}
+                          </span>
+                        </div>
+                        <p className="text-[8px] font-bold text-slate-500 dark:text-slate-400 uppercase flex flex-wrap items-center gap-1 mt-0.5">
+                          {isExternalGym ? (
+                            <span className="text-[#1e4da1] dark:text-blue-400 font-black">CLASS</span>
+                          ) : (
+                            <span className="text-[#10b981] font-black">LOGGED BY {coachName}</span>
+                          )}
+                          <span>•</span>
+                          <span>{entryCount}</span>
                         </p>
                       </div>
                     </div>
@@ -691,6 +712,8 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                gyms={state.gyms || []} 
                schedules={state.schedules || []}
                onQuickLog={onQuickLog}
+               staff={state.staff || []}
+               profile={state.profile}
             />
           </motion.div>
         )}
@@ -782,16 +805,16 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+            className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-start justify-center p-3 sm:p-6 overflow-y-auto py-8"
           >
             <motion.div
               initial={{ scale: 0.95, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 20 }}
-              className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-2xl max-w-xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto"
+              className="relative my-auto bg-white dark:bg-slate-900 rounded-[2rem] sm:rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-2xl max-w-xl w-full p-5 sm:p-6 space-y-5 max-h-[85vh] overflow-y-auto"
             >
               {/* Modal Header */}
-              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div className="sticky top-0 bg-white dark:bg-slate-900 z-20 flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4 pt-1">
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="p-2 bg-blue-50 dark:bg-blue-900/40 text-[#1e4da1] dark:text-blue-400 rounded-xl">
