@@ -200,17 +200,27 @@ export function sessionGroupKey(s: SessionRow): string {
   ].join('|');
 }
 
-/** Resolve a coach's own hourly rate — used for tumbling & class turn-in only. */
+/**
+ * Resolve a coach's own hourly rate — used for tumbling & class work only.
+ *
+ * The signed-in user's OWN profile rate wins. This matters when a coach is
+ * viewing their own invoice: they load only the id and name of staff records
+ * (never colleagues' pay rates), so their own staff row carries no rate. Looking
+ * at the staff record first would find a rate-less row and return R0, which is
+ * exactly what blanked out a coach's tumbling invoice.
+ */
 export function resolveCoachProfileRate(coachId: string, ctx: PricingContext): number {
+  const isSelf = !!coachId && coachId === ctx.profile?.id;
+  const ownRate = num(ctx.profile?.pay_rate, 0);
+
+  if (isSelf && ownRate > 0) return ownRate;
+
+  // staff_profiles is mapped to camelCase on load; tolerate both shapes.
   const member = (ctx.staff || []).find(st => st.id === coachId);
-  if (member) {
-    // staff_profiles is mapped to camelCase on load; tolerate both shapes.
-    return num(member.payRate ?? member.pay_rate, 0);
-  }
-  if (coachId && coachId === ctx.profile?.id) {
-    return num(ctx.profile.pay_rate, 0);
-  }
-  return 0;
+  const memberRate = num(member?.payRate ?? member?.pay_rate, 0);
+  if (memberRate > 0) return memberRate;
+
+  return isSelf ? ownRate : 0;
 }
 
 /** True when this coach id belongs to someone who actually receives an invoice. */

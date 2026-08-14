@@ -4560,17 +4560,30 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
     if (state.profile.id) {
       list.push({
         id: state.profile.id,
-        name: isOwner ? (state.profile.name || 'Myself (Owner)') : (state.profile.businessName || state.profile.name || 'Myself'),
+        // A coach's own entry showed the OWNER's business name here, which made
+        // the list look like it contained no actual people.
+        name: isOwner
+          ? (state.profile.name || 'Myself (Owner)')
+          : (state.profile.name || 'Myself'),
         role: state.profile.role || 'coach'
       });
     }
+
+    // External gym sessions are the owner's own contracts — they have nothing to
+    // do with external staff, so a coach logging one can only log it for
+    // themselves. Cheer/school practices and tumbling classes DO allow picking
+    // the coaches who worked alongside you.
+    if (!isOwner && gymType === 'tumbling') {
+      return list;
+    }
+
     (state.staff || []).forEach(s => {
       if (!list.some(item => item.id === s.id)) {
         list.push({ id: s.id, name: s.name, role: 'coach' });
       }
     });
     return list;
-  }, [state.staff, state.profile, isOwner]);
+  }, [state.staff, state.profile, isOwner, gymType]);
 
   const handleContinue = () => {
     if (selectedTeamIds.length === 0) return alert("Select at least one team.");

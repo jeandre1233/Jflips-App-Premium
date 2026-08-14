@@ -24,6 +24,8 @@ import {
   Gym, 
   ClassSchedule, 
   HistoryMonth,
+  StaffProfile,
+  Profile,
   getStudentSessionPrice 
 } from '../../types';
 import { SyncStatusBadge } from '../components/SyncStatusBadge';
