@@ -91,6 +91,15 @@ export interface AttendanceSession {
   created_at?: string;
   custom_event_name?: string;
   covering_coach_name?: string;
+  /**
+   * Rows sharing this id are ONE real-world coaching slot logged in one action.
+   * The app writes one row per coach, so this is what lets the pricing engine
+   * tell "one practice covered by two coaches" (split the team rate between
+   * them) apart from "two separate practices" (each coach earns the full rate).
+   * Null on rows logged before add_session_group_id.sql was run — those fall
+   * back to grouping by date + team + event type.
+   */
+  session_group_id?: string | null;
 }
 
 export interface HistoryMonth {

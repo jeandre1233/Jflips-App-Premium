@@ -1,0 +1,507 @@
+/**
+ * ============================================================================
+ *  JFLIPS — SINGLE SOURCE OF TRUTH FOR ALL INVOICE ARITHMETIC
+ * ============================================================================
+ *
+ *  Every rand figure in the app must come from priceSessions(). Before this
+ *  file existed the same pricing rules were re-implemented four times (invoice
+ *  rows, invoice totals, month-end archive, single-invoice reset) and they had
+ *  drifted apart — which is why line items and "Total Due" disagreed.
+ *
+ *  ── THE RULES ──────────────────────────────────────────────────────────────
+ *
+ *  A logical session ("group") is one real-world coaching slot. Because the app
+ *  writes ONE ROW PER COACH, a slot covered by two coaches is two rows. Rows are
+ *  collapsed back into a group by `session_group_id` (exact) or, for legacy rows
+ *  written before that column existed, by date + entity + event + competition.
+ *
+ *  CLASS SESSION (class_types) — private / group classes billed to athletes
+ *      client : class.price × athletes present, ONCE per group
+ *      coach  : each coach earns their own profile hourly rate × hours
+ *
+ *  TUMBLING GYM SESSION (gyms, gym_type='tumbling')
+ *      client : rate × hours, ONCE per group
+ *      coach  : each coach earns their own profile hourly rate × hours
+ *
+ *  CHEER / SCHOOL PRACTICE (gyms, gym_type='cheer')
+ *      coach  : (sub-team rate ÷ number of coaches on that group) × own hours
+ *      client : the sum of that group's coach lines
+ *
+ *  CHEER / SCHOOL COMPETITION (is_competition = true)
+ *      Competitions DO NOT split. Every coach is at the competition working, so
+ *      each bills the full competition rate for their own hours and the school
+ *      pays for all of them.
+ *      coach  : competition rate × own hours
+ *      client : the sum of that group's coach lines
+ *
+ *  The cheer client charge is DERIVED from the coach lines rather than computed
+ *  alongside them. That makes the invariant exact to the cent:
+ *
+ *      Σ (per-coach school invoices)  ===  school master invoice
+ *
+ *  With the usual equal-hours case this reduces to plain `rate × hours`:
+ *      2 coaches, R600/hr, 2 hrs → R600 each → R1200 master → 600 × 2 ✓
+ *
+ *  Covering coaches (free-text names with no staff record) never count toward
+ *  the divisor — they have no invoice to receive the money, so including them
+ *  would make it vanish.
+ *
+ *  ── RATE RESOLUTION (gym / cheer) ──────────────────────────────────────────
+ *      1. `custom_event_presets` entry matching the event, stored "Clinic:450"
+ *         (checked on the entity AND its parent — presets are configured on the
+ *         parent, so a sub-team's own list is always empty)
+ *      2. `competition_rate` when the session is flagged competition
+ *      3. `pay_amount`, falling back to the parent's
+ *
+ *  ── BILLING MONTH ──────────────────────────────────────────────────────────
+ *  Every line carries the invoice month it belongs to, derived from the parent
+ *  gym's `billing_day`. With billing_day = 20, work on/after the 20th lands on
+ *  next month's invoice, so "September" covers 20 Aug → 19 Sep. Callers filter
+ *  on `billingMonthKey` — never on the raw calendar month of the date.
+ * ============================================================================
+ */
+
+import {
+  AttendanceSession,
+  ClassType,
+  Gym,
+  Student,
+  getStudentSessionPrice
+} from '../../types';
+
+/** A session row as it exists in state, plus the grouping column. */
+type SessionRow = AttendanceSession & { session_group_id?: string | null };
+
+export const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+/**
+ * Which invoice month a session falls into, honouring a gym's billing cycle.
+ *
+ * `billingDay` is the day of the month you invoice on. With billingDay = 20,
+ * anything from the 20th onward belongs to NEXT month's invoice, so the
+ * September invoice covers 20 Aug → 19 Sep. billingDay 1 (or unset) means plain
+ * calendar months.
+ *
+ * The billing day lives on the PARENT gym/organization and applies to all of its
+ * sub-teams and classes.
+ */
+export function billingMonthFor(
+  dateStr: string,
+  billingDay: number = 1
+): { monthName: string; year: number; key: string } {
+  const d = new Date(dateStr);
+  let month = d.getMonth();
+  let year = d.getFullYear();
+
+  const day = Number(billingDay);
+  if (Number.isFinite(day) && day > 1 && d.getDate() >= day) {
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+
+  const monthName = MONTH_NAMES[month];
+  return { monthName, year, key: `${monthName} ${year}` };
+}
+
+export interface PricingContext {
+  gyms: Gym[];
+  classTypes: ClassType[];
+  students: Student[];
+  staff: any[];
+  /** The signed-in owner — they can coach too, but are not in `staff`. */
+  profile: { id?: string; pay_rate?: number; name?: string };
+}
+
+/** One charge on a client-facing invoice (family, tumbling gym, or school). */
+export interface PricedClientLine {
+  sessionId: string;
+  groupId: string;
+  date: string;
+  /** family_id this bills to: a groupKey, a student id, a gym id, or an org id. */
+  billToId: string;
+  targetName: string;
+  description: string;
+  amount: number;
+  kind: 'class' | 'gym' | 'cheer';
+  /** Who coached it — shown under the line so a split total can be audited. */
+  coachNames?: string[];
+  /** Invoice month this belongs to, after applying the gym's billing day. */
+  billingMonthKey: string;
+  billingMonthName: string;
+  billingYear: number;
+}
+
+/** One earning on a coach-facing invoice. */
+export interface PricedCoachLine {
+  sessionId: string;
+  groupId: string;
+  date: string;
+  coachId: string;
+  /** Cheer org this was coached for, or null for a tumbling/class turn-in line. */
+  orgId: string | null;
+  targetName: string;
+  description: string;
+  amount: number;
+  /** Effective per-hour rate after any split. */
+  rate: number;
+  hours: number;
+  /** How many coaches shared this group's rate. 1 = no split. */
+  splitCount: number;
+  /** Invoice month this belongs to, after applying the gym's billing day. */
+  billingMonthKey: string;
+  billingMonthName: string;
+  billingYear: number;
+}
+
+export interface PricedResult {
+  clientLines: PricedClientLine[];
+  coachLines: PricedCoachLine[];
+}
+
+// ── small helpers ───────────────────────────────────────────────────────────
+
+const num = (v: any, fallback = 0): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+/** Money is always 2dp. Avoids R83.33333 turning up on a PDF. */
+const money = (n: number): number => Math.round(n * 100) / 100;
+
+const positive = (v: any, fallback: number): number => {
+  const n = num(v, NaN);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+/**
+ * Collapse the per-coach rows the app writes back into one logical session.
+ *
+ * `session_group_id` is exact. Without it we fall back to a heuristic — note
+ * that hours are deliberately NOT part of the key, so a competition where each
+ * coach logs different hours still groups (and therefore still splits).
+ *
+ * The heuristic cannot tell "one practice, two coaches" apart from "a morning
+ * practice by A and an afternoon practice by B" — that ambiguity is exactly
+ * what `session_group_id` exists to remove for all newly logged sessions.
+ */
+export function sessionGroupKey(s: SessionRow): string {
+  if (s.session_group_id) return `sgid:${s.session_group_id}`;
+  return [
+    'grp',
+    s.date || '',
+    s.classTypeId || '',
+    (s.custom_event_name || '').toLowerCase(),
+    s.is_competition ? '1' : '0'
+  ].join('|');
+}
+
+/** Resolve a coach's own hourly rate — used for tumbling & class turn-in only. */
+export function resolveCoachProfileRate(coachId: string, ctx: PricingContext): number {
+  const member = (ctx.staff || []).find(st => st.id === coachId);
+  if (member) {
+    // staff_profiles is mapped to camelCase on load; tolerate both shapes.
+    return num(member.payRate ?? member.pay_rate, 0);
+  }
+  if (coachId && coachId === ctx.profile?.id) {
+    return num(ctx.profile.pay_rate, 0);
+  }
+  return 0;
+}
+
+/** True when this coach id belongs to someone who actually receives an invoice. */
+function isInvoiceableCoach(coachId: string | undefined, ctx: PricingContext): boolean {
+  if (!coachId) return false;
+  if (coachId === ctx.profile?.id) return true;
+  return (ctx.staff || []).some(st => st.id === coachId);
+}
+
+function coachName(coachId: string, ctx: PricingContext): string {
+  const member = (ctx.staff || []).find(st => st.id === coachId);
+  if (member?.name) return member.name;
+  if (coachId === ctx.profile?.id) return ctx.profile.name || 'Owner';
+  return 'Coach';
+}
+
+/** Look up a "Clinic:450" style rate override on the entity, then its parent. */
+function presetRate(gym: Gym | undefined, parent: Gym | undefined, eventName?: string): number | null {
+  if (!eventName) return null;
+  const wanted = eventName.toLowerCase();
+  for (const source of [gym, parent]) {
+    const presets = source?.custom_event_presets;
+    if (!presets || presets.length === 0) continue;
+    const hit = presets.find(p => {
+      const name = p.includes(':') ? p.split(':')[0] : p;
+      return name.trim().toLowerCase() === wanted;
+    });
+    if (hit && hit.includes(':')) {
+      const parsed = parseFloat(hit.split(':')[1]);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+  }
+  return null;
+}
+
+/** The hourly rate a gym/team session is worth, before any coach split. */
+function resolveEntityRate(gym: Gym, parent: Gym | undefined, s: SessionRow): number {
+  const preset = presetRate(gym, parent, s.custom_event_name);
+  if (preset !== null) return preset;
+
+  // A competition uses the sub-team's Competition Rate when one is entered, and
+  // otherwise falls straight through to the sub-team's ordinary hourly rate.
+  // Leaving the competition field blank is therefore safe — it just means
+  // "charge the normal rate for this competition".
+  if (s.is_competition) {
+    const comp = num(gym.competition_rate, 0) || num(parent?.competition_rate, 0);
+    if (comp > 0) return comp;
+  }
+
+  return num(gym.pay_amount, 0) || num(parent?.pay_amount, 0);
+}
+
+/** Hours for one row. Falls back to the entity default on BOTH sides now. */
+function resolveHours(s: SessionRow, gym?: Gym): number {
+  return positive(s.hours_coached, positive(gym?.default_hours, 1));
+}
+
+/**
+ * Build a line description.
+ *
+ * Client invoices pass `hours` so the gym or school can see what they are paying
+ * for. COACH invoices pass nothing — they show the team that was coached and the
+ * amount earned, and that is all.
+ */
+function describe(
+  base: string,
+  s: SessionRow,
+  opts: { hours?: number } = {}
+): string {
+  let out = base;
+  if (s.covering_coach_name) out += ` - ${s.covering_coach_name}`;
+  if (s.custom_event_name && s.custom_event_name.toLowerCase() !== base.toLowerCase()) {
+    out += ` - ${s.custom_event_name}`;
+  }
+  if (opts.hours !== undefined) out += ` (${opts.hours} hrs)`;
+  if (s.is_competition) out += ' - COMPETITION';
+  return out;
+}
+
+/** Which invoice a student's charges land on (mirrors the invoice grouping). */
+function billToForStudent(student: Student, ctx: PricingContext): string {
+  const famId = student.groupKey || student.id;
+  const gymEnt = ctx.gyms.find(g => g.id === famId);
+  return gymEnt?.parent_gym_id || famId;
+}
+
+// ── the engine ──────────────────────────────────────────────────────────────
+
+/**
+ * Price a set of session rows. Returns every client charge and every coach
+ * earning they imply. Callers filter by `billToId` / `coachId` / `orgId`.
+ */
+export function priceSessions(sessions: SessionRow[], ctx: PricingContext): PricedResult {
+  const clientLines: PricedClientLine[] = [];
+  const coachLines: PricedCoachLine[] = [];
+
+  // 1. Collapse per-coach rows into logical sessions.
+  const groups = new Map<string, SessionRow[]>();
+  (sessions || []).forEach(s => {
+    if (!s || !s.date) return;
+    const key = sessionGroupKey(s);
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(s);
+    else groups.set(key, [s]);
+  });
+
+  for (const [groupId, rows] of groups) {
+    const head = rows[0];
+    const gym = ctx.gyms.find(g => g.id === head.classTypeId);
+    const parent = gym?.parent_gym_id ? ctx.gyms.find(g => g.id === gym.parent_gym_id) : undefined;
+    const classType = gym ? undefined : ctx.classTypes.find(c => c.id === head.classTypeId);
+
+    // Distinct coaches on this slot who can actually receive an invoice.
+    const coachIds = Array.from(
+      new Set(rows.map(r => r.coach_id).filter((id): id is string => isInvoiceableCoach(id, ctx)))
+    );
+
+    // The billing day is configured on the parent organization and governs all
+    // of its sub-teams. With billingDay = 20, work from the 20th onward lands on
+    // next month's invoice.
+    const billingDay = positive(parent?.billing_day ?? gym?.billing_day, 1);
+    const bm = billingMonthFor(head.date, billingDay);
+    const monthStamp = {
+      billingMonthKey: bm.key,
+      billingMonthName: bm.monthName,
+      billingYear: bm.year
+    };
+
+    // ── CHEER / SCHOOL ────────────────────────────────────────────────────
+    if (gym && gym.gym_type === 'cheer') {
+      const orgId = gym.parent_gym_id || gym.id;
+      const org = parent || gym;
+      const rate = resolveEntityRate(gym, parent, head);
+
+      // COMPETITIONS DO NOT SPLIT. Every coach is at the competition working, so
+      // each one bills the full competition rate for their own hours and the
+      // school pays for all of them. Ordinary practices DO split: the sub-team's
+      // hourly rate is divided between the coaches who covered that slot.
+      const isComp = !!head.is_competition;
+      const splitCount = isComp ? 1 : coachIds.length;
+      const perCoachRate = (!isComp && coachIds.length > 0) ? rate / coachIds.length : rate;
+
+      const baseName = gym.session_types
+        ? `${gym.name} — ${gym.session_types}`
+        : gym.name;
+
+      let groupTotal = 0;
+
+      // One coach line per row, so each coach bills their own hours.
+      for (const coachId of coachIds) {
+        const row = rows.find(r => r.coach_id === coachId) || head;
+        const hours = resolveHours(row, gym);
+        const amount = money(perCoachRate * hours);
+        groupTotal += amount;
+
+        coachLines.push({
+          sessionId: row.id,
+          groupId,
+          date: row.date,
+          coachId,
+          orgId,
+          targetName: org.name,
+          // Team name and amount only — no hours, no split annotation.
+          description: describe(baseName, row),
+          amount,
+          rate: money(perCoachRate),
+          hours,
+          splitCount,
+          ...monthStamp
+        });
+      }
+
+      // The school is billed the sum of the coach lines — invariant by design.
+      // With no resolvable coach we cannot split, so bill the slot outright
+      // rather than silently charging the school nothing.
+      const clientAmount = coachIds.length > 0 ? money(groupTotal) : money(rate * resolveHours(head, gym));
+      const displayHours = rate > 0 ? money(clientAmount / rate) : resolveHours(head, gym);
+
+      clientLines.push({
+        sessionId: head.id,
+        groupId,
+        date: head.date,
+        billToId: orgId,
+        targetName: gym.name,
+        description: describe(baseName, head, { hours: displayHours }),
+        amount: clientAmount,
+        kind: 'cheer',
+        coachNames: coachIds.map(id => coachName(id, ctx)),
+        ...monthStamp
+      });
+
+      continue;
+    }
+
+    // ── TUMBLING GYM ──────────────────────────────────────────────────────
+    if (gym) {
+      const rate = resolveEntityRate(gym, parent, head);
+      const hours = resolveHours(head, gym);
+
+      clientLines.push({
+        sessionId: head.id,
+        groupId,
+        date: head.date,
+        billToId: gym.parent_gym_id || gym.id,
+        targetName: gym.name,
+        description: describe(gym.name, head, { hours }),
+        amount: money(rate * hours),
+        kind: 'gym',
+        coachNames: coachIds.map(id => coachName(id, ctx)),
+        ...monthStamp
+      });
+
+      // Every coach earns their own full profile rate — no splitting.
+      for (const coachId of coachIds) {
+        const row = rows.find(r => r.coach_id === coachId) || head;
+        const coachRate = resolveCoachProfileRate(coachId, ctx);
+        const coachHours = resolveHours(row, gym);
+        coachLines.push({
+          sessionId: row.id,
+          groupId,
+          date: row.date,
+          coachId,
+          orgId: null,
+          targetName: 'Turn-in Coaching Fee',
+          description: describe(gym.name, row),
+          amount: money(coachRate * coachHours),
+          rate: coachRate,
+          hours: coachHours,
+          splitCount: 1,
+          ...monthStamp
+        });
+      }
+
+      continue;
+    }
+
+    // ── CLASS (class_types) ───────────────────────────────────────────────
+    const className = classType ? classType.name : 'Session';
+    const basePrice = num(classType?.price, 0);
+
+    // Athletes are identical across the group's rows; union defensively so a
+    // multi-coach class is charged once, not once per coach.
+    const athleteIds = Array.from(new Set(rows.flatMap(r => r.studentIds || [])));
+
+    for (const sid of athleteIds) {
+      const student = ctx.students.find(st => st.id === sid);
+      if (!student) continue;
+      clientLines.push({
+        sessionId: head.id,
+        groupId,
+        date: head.date,
+        billToId: billToForStudent(student, ctx),
+        targetName: student.name,
+        description: describe(className, head),
+        amount: money(getStudentSessionPrice(student, head, basePrice, className)),
+        kind: 'class',
+        ...monthStamp
+      });
+    }
+
+    for (const coachId of coachIds) {
+      const row = rows.find(r => r.coach_id === coachId) || head;
+      const coachRate = resolveCoachProfileRate(coachId, ctx);
+      const coachHours = resolveHours(row);
+      coachLines.push({
+        sessionId: row.id,
+        groupId,
+        date: row.date,
+        coachId,
+        orgId: null,
+        targetName: 'Turn-in Coaching Fee',
+        description: describe(className, row),
+        amount: money(coachRate * coachHours),
+        rate: coachRate,
+        hours: coachHours,
+        splitCount: 1
+      });
+    }
+  }
+
+  const byDate = (a: { date: string }, b: { date: string }) =>
+    new Date(a.date).getTime() - new Date(b.date).getTime();
+
+  clientLines.sort(byDate);
+  coachLines.sort(byDate);
+
+  return { clientLines, coachLines };
+}
+
+/** Total of a set of lines, safe against float drift. */
+export function sumLines(lines: { amount: number }[]): number {
+  return money((lines || []).reduce((acc, l) => acc + num(l.amount, 0), 0));
+}

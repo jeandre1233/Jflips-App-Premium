@@ -99,6 +99,8 @@ import { useNetworkStatus } from './src/hooks/useNetworkStatus';
 import ShareSignupLink from './src/components/ShareSignupLink';
 import { QuickLogModal } from './src/components/QuickLogModal';
 import { addToQueue, getPendingItems, updateItemStatus, deleteSyncedItems } from './src/utils/offlineQueue';
+import { priceSessions, sumLines, billingMonthFor } from './src/utils/pricing';
+import type { PricingContext } from './src/utils/pricing';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { SyncStatusBadge } from './src/components/SyncStatusBadge';
 import { sendWhatsAppAttendanceQuery, sendWhatsAppInvoiceReminder } from './src/utils/whatsapp';
@@ -118,11 +120,17 @@ import {
 import { DashboardView } from './src/Pages/Dashboard';
 import { RosterView } from './src/Pages/Setup';
 
+/**
+ * Which invoice month a session belongs to.
+ *
+ * This used to accept `billingDay` and silently ignore it, which made the whole
+ * "Billing Cycle Start Day" setting decorative. It now delegates to the pricing
+ * engine, so billing_day = 20 really does push work from the 20th onward onto
+ * next month's invoice.
+ */
 export function getSessionBillingMonth(dateStr: string, billingDay: number = 1): { monthName: string, year: number } {
-  const d = new Date(dateStr);
-  const month = d.getMonth();
-  const year = d.getFullYear();
-  return { monthName: MONTHS[month], year };
+  const { monthName, year } = billingMonthFor(dateStr, billingDay);
+  return { monthName, year };
 }
 
 async function generateIndemnityPDFFromStudent(student: Student) {
@@ -1141,7 +1149,7 @@ const App: React.FC = () => {
           coach_names: g.coach_names || []
         })),
         classTypes: (classesRes.data || []).map((ct: any) => ({ ...ct, studentIds: ct.enrolled_student_ids || [], coach_ids: ct.coach_ids || [] })),
-        sessions: (sessionsRes.data || []).map(s => ({ ...s, classTypeId: s.class_type_id, studentIds: s.student_ids || [], hours_coached: s.hours_coached, coach_id: s.coach_id, is_competition: s.is_competition, custom_event_name: s.custom_event_name, covering_coach_name: s.covering_coach_name || s.covering_coach || undefined })),
+        sessions: (sessionsRes.data || []).map(s => ({ ...s, classTypeId: s.class_type_id, studentIds: s.student_ids || [], hours_coached: s.hours_coached, coach_id: s.coach_id, is_competition: s.is_competition, custom_event_name: s.custom_event_name, covering_coach_name: s.covering_coach_name || s.covering_coach || undefined, session_group_id: s.session_group_id || undefined })),
         history: (historyRes.data || []).map(h => ({ 
           ...h, 
           monthName: h.month_name, 
@@ -1715,7 +1723,35 @@ const App: React.FC = () => {
     }
 
     let sessionsToUpsert: any[] = [];
-    
+
+    // Every row written by THIS log action belongs to one real-world coaching
+    // slot. The app stores one row per coach, so this id is what lets the
+    // pricing engine tell "one practice, two coaches" (split the team rate)
+    // apart from "two separate practices" (each coach earns full rate).
+    // Editing an existing session keeps whatever group it was already in.
+    const logStamp = `${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const logGroupIds = new Map<string, string>();
+
+    /**
+     * ONE group id per real-world slot — keyed on team/class + date + event, NOT
+     * on the save action. Selecting three sub-teams at once must produce three
+     * groups; a single id for the whole action would collapse them into one and
+     * two of the three would lose their billing entirely.
+     */
+    const groupIdFor = (row: { id?: string, classTypeId?: string, date?: string, customEventName?: string, isCompetition?: boolean }) => {
+      if (row.id && editingSession && row.id === editingSession.id && editingSession.session_group_id) {
+        return editingSession.session_group_id;
+      }
+      const key = [
+        row.date || '',
+        row.classTypeId || '',
+        (row.customEventName || '').toLowerCase(),
+        row.isCompetition ? '1' : '0'
+      ].join('|');
+      if (!logGroupIds.has(key)) logGroupIds.set(key, `sgrp_${logStamp}_${logGroupIds.size}`);
+      return logGroupIds.get(key)!;
+    };
+
     if (Array.isArray(classTypeIdOrData)) {
       sessionsToUpsert = classTypeIdOrData.map((s, idx) => ({
         id: s.id || `sess_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`,
@@ -1727,7 +1763,8 @@ const App: React.FC = () => {
         coach_id: s.coachId || finalCoachId,
         is_competition: s.isCompetition || isCompetition || false,
         custom_event_name: s.customEventName || null,
-        covering_coach_name: s.covering_coach_name || s.coveringCoachName || null
+        covering_coach_name: s.covering_coach_name || s.coveringCoachName || null,
+        session_group_id: groupIdFor(s)
       }));
     } else {
       const sessionId = (editingSession && editingSession.id) ? editingSession.id : `sess_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
@@ -1741,7 +1778,14 @@ const App: React.FC = () => {
         coach_id: finalCoachId,
         is_competition: isCompetition || false,
         custom_event_name: editingSession?.custom_event_name || null,
-        covering_coach_name: editingSession?.covering_coach_name || null
+        covering_coach_name: editingSession?.covering_coach_name || null,
+        session_group_id: groupIdFor({
+          id: editingSession?.id,
+          classTypeId: classTypeIdOrData,
+          date: date || new Date().toISOString().split('T')[0],
+          customEventName: editingSession?.custom_event_name || undefined,
+          isCompetition
+        })
       }];
     }
 
@@ -1754,10 +1798,30 @@ const App: React.FC = () => {
     }
 
     let { error } = await supabase.from('sessions').upsert(sessionsToUpsert);
+
+    // Tolerate a database that has not had add_session_group_id.sql run yet:
+    // drop the column and retry. Coach splitting then falls back to the
+    // date-based heuristic instead of exact grouping.
+    if (error && (error.message.includes('session_group_id') || error.message.includes('column'))) {
+      const noGroup = sessionsToUpsert.map(s => {
+        const copy = { ...s };
+        delete copy.session_group_id;
+        return copy;
+      });
+      const retry = await supabase.from('sessions').upsert(noGroup);
+      if (!retry.error) {
+        sessionsToUpsert = noGroup;
+        error = null;
+      } else {
+        error = retry.error;
+      }
+    }
+
     if (error && (error.message.includes('covering_coach_name') || error.message.includes('column'))) {
       const fallbackSessions = sessionsToUpsert.map(s => {
         const copy = { ...s };
         delete copy.covering_coach_name;
+        delete copy.session_group_id;
         return copy;
       });
       const fallbackRes = await supabase.from('sessions').upsert(fallbackSessions);
@@ -1768,7 +1832,7 @@ const App: React.FC = () => {
       // Attempt fallback via RPC save_session_as_coach
       let rpcSuccess = true;
       for (const sess of sessionsToUpsert) {
-        const { error: rpcErr } = await supabase.rpc('save_session_as_coach', {
+        const baseArgs = {
           p_id: sess.id,
           p_date: sess.date,
           p_class_type_id: sess.class_type_id,
@@ -1779,7 +1843,20 @@ const App: React.FC = () => {
           p_is_competition: sess.is_competition || false,
           p_custom_event_name: sess.custom_event_name || null,
           p_covering_coach_name: sess.covering_coach_name || null
+        };
+
+        let { error: rpcErr } = await supabase.rpc('save_session_as_coach', {
+          ...baseArgs,
+          p_session_group_id: sess.session_group_id || null
         });
+
+        // Older databases still have the 10-argument version of this function,
+        // so retry without the grouping argument before giving up.
+        if (rpcErr && (rpcErr.message.includes('p_session_group_id') || rpcErr.message.includes('does not exist') || rpcErr.code === 'PGRST202')) {
+          const retry = await supabase.rpc('save_session_as_coach', baseArgs);
+          rpcErr = retry.error;
+        }
+
         if (rpcErr) {
           rpcSuccess = false;
           console.error("RPC save_session_as_coach error:", rpcErr);
@@ -1791,9 +1868,34 @@ const App: React.FC = () => {
       }
     }
 
-    if (error) { 
-      alert("Session Save Error: " + error.message + "\n\nNote: If you are a coach, ask your gym owner to execute the fix_sessions_rls.sql script in Supabase SQL Editor to allow coaches to log sessions."); 
-      return; 
+    if (error) {
+      alert("Session Save Error: " + error.message + "\n\nNote: If you are a coach, ask your gym owner to execute the fix_sessions_rls.sql script in Supabase SQL Editor to allow coaches to log sessions.");
+      return;
+    }
+
+    // Editing a slot REPLACES its whole group.
+    //
+    // The edit screen only reuses the original row id when exactly one coach is
+    // selected. Change a one-coach session into a two-coach session and it writes
+    // two brand-new rows while the original is left behind — so the session shows
+    // up twice on the invoice, once at the full rate and once at the split rate.
+    // Sweep away any sibling row that is no longer part of this group.
+    const editedGroupId = editingSession?.session_group_id;
+    if (editedGroupId) {
+      try {
+        const keep = new Set(sessionsToUpsert.map(s => s.id));
+        const { data: siblings } = await supabase
+          .from('sessions')
+          .select('id')
+          .eq('session_group_id', editedGroupId)
+          .eq('user_id', targetUserId);
+        const stale = (siblings || []).map((r: any) => r.id).filter((id: string) => !keep.has(id));
+        if (stale.length > 0) {
+          await supabase.from('sessions').delete().in('id', stale).eq('user_id', targetUserId);
+        }
+      } catch (e) {
+        console.error('Could not clean up replaced session rows:', e);
+      }
     }
 
     // Owner Notification — in-app bell + FCM push to the owner's device.
@@ -1854,7 +1956,17 @@ const App: React.FC = () => {
           const syncedPayloads: any[] = [];
 
           for (const item of pending) {
-            const { error } = await supabase.from('sessions').upsert(item.payload);
+            let { error } = await supabase.from('sessions').upsert(item.payload);
+
+            // Queued offline before add_session_group_id.sql was run — retry
+            // without the column rather than stranding the session.
+            if (error && (error.message.includes('session_group_id') || error.message.includes('column'))) {
+              const stripped = { ...item.payload };
+              delete stripped.session_group_id;
+              const retry = await supabase.from('sessions').upsert(stripped);
+              error = retry.error;
+            }
+
             if (error) {
               await updateItemStatus(item.id, 'failed', error.message);
               hasFailures = true;
@@ -1984,134 +2096,91 @@ const App: React.FC = () => {
       const now = new Date();
       const dueDateStr = new Date(now.getFullYear(), now.getMonth() + 1, 3).toISOString().split('T')[0];
 
-      // 1. Group Data by Billing Month
+      // 1. Price every session once, through the shared engine, then group by
+      //    billing month. All four call sites now use the same arithmetic.
+      const pricingContext: PricingContext = {
+        gyms: state.gyms || [],
+        classTypes: state.classTypes || [],
+        students: state.students || [],
+        staff: state.staff || [],
+        profile: { id: state.profile.id, pay_rate: state.profile.pay_rate, name: state.profile.name }
+      };
+      const { clientLines, coachLines } = priceSessions(sessionsToReset, pricingContext);
+
       const globalRevByMonth = new Map<string, { monthName: string, year: number, revenue: number }>();
       const familyRevByMonth = new Map<string, { monthLabel: string, famId: string, revenue: number, snapAddress: string, snapPhone: string, currentLabel: string }>();
       const coachRevByMonth = new Map<string, { monthLabel: string, coachId: string, revenue: number, currentLabel: string }>();
 
-      sessionsToReset.forEach(sess => {
-        const ct = (state.classTypes || []).find(c => c.id === sess.classTypeId);
-        const gym = (state.gyms || []).find(g => g.id === sess.classTypeId);
-        
-        let price = ct ? ct.price : (gym ? gym.pay_amount : 0);
-        if (gym && sess.custom_event_name) {
-          const customPreset = gym.custom_event_presets?.find(p => {
-            const name = p.includes(':') ? p.split(':')[0] : p;
-            return name.toLowerCase() === sess.custom_event_name?.toLowerCase();
-          });
-          if (customPreset && customPreset.includes(':')) {
-            const ratePart = customPreset.split(':')[1];
-            const parsed = parseFloat(ratePart);
-            if (!isNaN(parsed)) {
-              price = parsed;
-            }
-          }
-        }
-        if (sess.is_competition && gym?.competition_rate) price = gym.competition_rate;
+      // Each priced line already knows its billing month (the engine applied the
+      // gym's billing_day), so never recompute it from the bare date here.
+      const monthKeyFor = (line: { billingMonthName: string, billingYear: number, billingMonthKey: string }) => ({
+        monthName: line.billingMonthName,
+        year: line.billingYear,
+        key: line.billingMonthKey
+      });
 
-        let billingDay = gym?.billing_day || 1;
-        if (gym?.parent_gym_id) {
-          const parent = (state.gyms || []).find(g => g.id === gym.parent_gym_id);
-          if (parent?.billing_day) billingDay = parent.billing_day;
-        }
-        const { monthName, year } = getSessionBillingMonth(sess.date, billingDay);
-        const monthLabelKey = `${monthName} ${year}`;
-
-        const className = ct ? ct.name : '';
-        // -- Global --
-        let sessionRev = 0;
-        if (gym) {
-          sessionRev = price * (sess.hours_coached || gym.default_hours || 1);
+      const labelForFamily = (famId: string) => {
+        let currentLabel = 'Client'; let snapAddress = ''; let snapPhone = '';
+        const g2 = (state.gyms || []).find(g => g.id === famId);
+        if (g2) {
+          currentLabel = g2.bill_to_name || g2.name || 'Client';
+          snapAddress = g2.bill_to_address || '';
+          snapPhone = g2.bill_to_phone || '';
         } else {
-          sessionRev = (sess.studentIds || []).reduce((sum, sid) => {
-            const student = state.students.find(s => s.id === sid);
-            return sum + getStudentSessionPrice(student, sess, price, className);
-          }, 0);
+          const members = (state.students || []).filter(s => s.groupKey === famId || (s.id === famId && !s.groupKey));
+          if (members.length > 0) currentLabel = members.map(m => m.name).join(' & ');
         }
-        
-        if (!globalRevByMonth.has(monthLabelKey)) {
-          globalRevByMonth.set(monthLabelKey, { monthName, year, revenue: 0 });
+        return { currentLabel, snapAddress, snapPhone };
+      };
+
+      // -- Global revenue + per-client invoices --
+      clientLines.forEach(line => {
+        const { monthName, year, key } = monthKeyFor(line);
+
+        if (!globalRevByMonth.has(key)) {
+          globalRevByMonth.set(key, { monthName, year, revenue: 0 });
         }
-        globalRevByMonth.get(monthLabelKey)!.revenue += sessionRev;
+        globalRevByMonth.get(key)!.revenue += line.amount;
 
-        // -- Families --
-        const familiesToBill = new Set<string>();
-        if (gym) {
-          familiesToBill.add(gym.parent_gym_id || gym.id);
-        } else {
-          (sess.studentIds || []).forEach(sid => {
-            const student = state.students.find(s => s.id === sid);
-            if (student) {
-              const famId = student.groupKey || student.id;
-              const gymEnt = state.gyms.find(g => g.id === famId);
-              familiesToBill.add(gymEnt?.parent_gym_id || famId);
-            }
-          });
+        if (line.amount <= 0) return;
+        const famKey = `${line.billToId}_${key}`;
+        if (!familyRevByMonth.has(famKey)) {
+          const { currentLabel, snapAddress, snapPhone } = labelForFamily(line.billToId);
+          familyRevByMonth.set(famKey, { monthLabel: key, famId: line.billToId, revenue: 0, snapAddress, snapPhone, currentLabel });
         }
+        familyRevByMonth.get(famKey)!.revenue += line.amount;
+      });
 
-        familiesToBill.forEach(famId => {
-          let famRev = 0;
-          if (gym && (gym.id === famId || gym.parent_gym_id === famId)) {
-            famRev = price * (sess.hours_coached || gym.default_hours || 1);
-          } else {
-            const familyStudents = (sess.studentIds || []).filter(sid => {
-              const student = state.students.find(st => st.id === sid);
-              if (!student) return false;
-              const studentFamId = student.groupKey || student.id;
-              const studentGym = state.gyms.find(g => g.id === studentFamId);
-              return studentFamId === famId || studentGym?.parent_gym_id === famId;
-            });
-            famRev = familyStudents.reduce((sum, sid) => {
-              const student = state.students.find(st => st.id === sid);
-              return sum + getStudentSessionPrice(student, sess, price, className);
-            }, 0);
-          }
-
-          if (famRev > 0) {
-            const famKey = `${famId}_${monthLabelKey}`;
-            if (!familyRevByMonth.has(famKey)) {
-              let currentLabel = 'Client'; let snapAddress = ''; let snapPhone = '';
-              const g2 = (state.gyms || []).find(g => g.id === famId);
-              if (g2) {
-                currentLabel = g2.bill_to_name || g2.name || 'Client';
-                snapAddress = g2.bill_to_address || '';
-                snapPhone = g2.bill_to_phone || '';
-              } else {
-                const members = (state.students || []).filter(s => s.groupKey === famId || (s.id === famId && !s.groupKey));
-                if (members.length > 0) currentLabel = members.map(m => m.name).join(' & ');
-              }
-              familyRevByMonth.set(famKey, { monthLabel: monthLabelKey, famId, revenue: 0, snapAddress, snapPhone, currentLabel });
-            }
-            familyRevByMonth.get(famKey)!.revenue += famRev;
-          }
-        });
-
-        // -- Coaches --
-        if (sess.coach_id) {
-          const coach = state.staff.find(s => s.id === sess.coach_id);
-          const isMe = sess.coach_id === user.id;
-          if (coach || isMe) {
-            const rate = coach?.pay_rate || 0;
-            const coachRev = rate * (sess.hours_coached || 1);
-            if (coachRev > 0) {
-              const coachKey = `${sess.coach_id}_${monthLabelKey}`;
-              if (!coachRevByMonth.has(coachKey)) {
-                coachRevByMonth.set(coachKey, { monthLabel: monthLabelKey, coachId: sess.coach_id, revenue: 0, currentLabel: coach?.name || 'Coach' });
-              }
-              coachRevByMonth.get(coachKey)!.revenue += coachRev;
-            }
-          }
+      // -- Coach turn-in expense (what JFlips owes each coach) --
+      // Cheer/school coach lines are deliberately NOT written as payment rows:
+      // they are a per-coach breakdown of the school's master invoice, which is
+      // already recorded above, so writing them would double-count the revenue.
+      coachLines.filter(line => line.orgId === null).forEach(line => {
+        if (line.amount <= 0) return;
+        const { key } = monthKeyFor(line);
+        const coachKey = `${line.coachId}_${key}`;
+        if (!coachRevByMonth.has(coachKey)) {
+          const coach = (state.staff || []).find(s => s.id === line.coachId);
+          const name = coach?.name || (line.coachId === state.profile.id ? (state.profile.name || 'Owner') : 'Coach');
+          coachRevByMonth.set(coachKey, { monthLabel: key, coachId: line.coachId, revenue: 0, currentLabel: name });
         }
+        coachRevByMonth.get(coachKey)!.revenue += line.amount;
+      });
+
+      // Which billing month each raw session row landed in, so the history
+      // snapshot files sessions under the same month their money went to.
+      const sessionMonthKey = new Map<string, string>();
+      [...clientLines, ...coachLines].forEach(l => {
+        if (!sessionMonthKey.has(l.sessionId)) sessionMonthKey.set(l.sessionId, l.billingMonthKey);
       });
 
       // 2. Global History DB Insert/Update
       for (const [monthLabelKey, data] of Array.from(globalRevByMonth.entries())) {
         const { data: existingHist } = await supabase.from('history').select('*').eq('month_name', data.monthName).eq('year', data.year).eq('user_id', user.id);
-        
-        const monthSessions = sessionsToReset.filter(sess => {
-          const { monthName, year } = getSessionBillingMonth(sess.date);
-          return monthName === data.monthName && year === data.year;
-        });
+
+        const monthSessions = sessionsToReset.filter(sess =>
+          (sessionMonthKey.get(sess.id) || billingMonthFor(sess.date).key) === monthLabelKey
+        );
 
         if (existingHist && existingHist.length > 0) {
           const currentSessions = existingHist[0].sessions_json || [];
@@ -2319,7 +2388,16 @@ const App: React.FC = () => {
 
   const executeResetSingleInvoice = async (familyId: string, label: string) => {
     if (!user) return;
-    
+
+    // Coach invoices are derived documents — a turn-in payout and a per-coach
+    // breakdown of a school's master invoice. They are archived automatically
+    // when the underlying client invoice is reset. Resetting one directly would
+    // have to delete sessions that the school still needs to be billed for.
+    if (familyId.startsWith('turnin::') || familyId.startsWith('org::')) {
+      alert("Coach invoices can't be reset on their own — they're generated from the sessions behind the client invoices.\n\nReset the gym, school or family invoice instead and this coach's invoice will be archived with it.");
+      return;
+    }
+
     const sessionsToReset = (state.sessions || []).filter(s => {
       const gym = state.gyms.find(g => g.id === s.classTypeId);
       if (gym && (gym.id === familyId || gym.parent_gym_id === familyId)) return true;
@@ -2357,49 +2435,34 @@ const App: React.FC = () => {
       payments: state.payments || []
     };
 
-    // Group revenues by targeted billing month
+    // Revenue for THIS client only, grouped by billing month. Priced by the
+    // shared engine, so a reset can never disagree with the invoice the user was
+    // just looking at — and a class shared with other families now archives only
+    // this family's share instead of the whole session's revenue.
     const revenueByMonth = new Map<string, { monthName: string, year: number, revenue: number }>();
 
-    sessionsToReset.forEach(sess => {
-      const ct = (state.classTypes || []).find(c => c.id === sess.classTypeId);
-      const gym = (state.gyms || []).find(g => g.id === sess.classTypeId);
-      let price = ct ? ct.price : (gym ? gym.pay_amount : 0);
-      if (gym && sess.custom_event_name) {
-        const customPreset = gym.custom_event_presets?.find(p => {
-          const name = p.includes(':') ? p.split(':')[0] : p;
-          return name.toLowerCase() === sess.custom_event_name?.toLowerCase();
-        });
-        if (customPreset && customPreset.includes(':')) {
-          const ratePart = customPreset.split(':')[1];
-          const parsed = parseFloat(ratePart);
-          if (!isNaN(parsed)) {
-            price = parsed;
-          }
-        }
-      }
-      let sessionRev = 0;
-      if (gym) {
-        sessionRev = price * (sess.hours_coached || gym.default_hours || 1);
-      } else {
-        const className = ct ? ct.name : '';
-        sessionRev = (sess.studentIds || []).reduce((sum, sid) => {
-          const student = state.students.find(s => s.id === sid);
-          return sum + getStudentSessionPrice(student, sess, price, className);
-        }, 0);
-      }
+    const { clientLines: resetClientLines } = priceSessions(sessionsToReset, {
+      gyms: state.gyms || [],
+      classTypes: state.classTypes || [],
+      students: state.students || [],
+      staff: state.staff || [],
+      profile: { id: state.profile.id, pay_rate: state.profile.pay_rate, name: state.profile.name }
+    });
 
-      let billingDay = gym?.billing_day || 1;
-      if (gym?.parent_gym_id) {
-        const parent = (state.gyms || []).find(g => g.id === gym.parent_gym_id);
-        if (parent?.billing_day) billingDay = parent.billing_day;
-      }
-      const { monthName, year } = getSessionBillingMonth(sess.date, billingDay);
-      const key = `${monthName} ${year}`;
-      
+    const familyLines = resetClientLines.filter(line => line.billToId === familyId);
+
+    familyLines.forEach(line => {
+      // The engine already applied this gym's billing_day.
+      const key = line.billingMonthKey;
       if (!revenueByMonth.has(key)) {
-        revenueByMonth.set(key, { monthName, year, revenue: 0 });
+        revenueByMonth.set(key, { monthName: line.billingMonthName, year: line.billingYear, revenue: 0 });
       }
-      revenueByMonth.get(key)!.revenue += sessionRev;
+      revenueByMonth.get(key)!.revenue += line.amount;
+    });
+
+    const resetSessionMonthKey = new Map<string, string>();
+    familyLines.forEach(l => {
+      if (!resetSessionMonthKey.has(l.sessionId)) resetSessionMonthKey.set(l.sessionId, l.billingMonthKey);
     });
 
     const now = new Date();
@@ -2447,10 +2510,9 @@ const App: React.FC = () => {
         .eq('year', data.year)
         .eq('user_id', user.id);
 
-      const monthSessions = sessionsToReset.filter(sess => {
-        const { monthName, year } = getSessionBillingMonth(sess.date);
-        return monthName === data.monthName && year === data.year;
-      });
+      const monthSessions = sessionsToReset.filter(sess =>
+        (resetSessionMonthKey.get(sess.id) || billingMonthFor(sess.date).key) === monthLabelFull
+      );
 
       if (existingHist && existingHist.length > 0) {
         const hist = existingHist[0];
@@ -2478,11 +2540,48 @@ const App: React.FC = () => {
       }
     }
 
-    // 3. Delete sessions
-    const sessionIds = sessionsToReset.map(s => s.id);
-    const { error: delErr } = await supabase.from('sessions').delete().in('id', sessionIds).eq('user_id', user.id);
-    
-    if (delErr) { alert("Delete Error: " + delErr.message); return; }
+    // 3. Retire the billed work for THIS client only.
+    //    A class session shared with other families must NOT be deleted outright
+    //    or those families lose their billing — we strip this family's athletes
+    //    from the row and keep it. Rows left with nobody on them are deleted.
+    const familyStudentIds = new Set(
+      (state.students || [])
+        .filter(st => {
+          const famId = st.groupKey || st.id;
+          const gymEnt = (state.gyms || []).find(g => g.id === famId);
+          return (gymEnt?.parent_gym_id || famId) === familyId;
+        })
+        .map(st => st.id)
+    );
+
+    const idsToDelete: string[] = [];
+    const rowsToTrim: { id: string, student_ids: string[] }[] = [];
+
+    sessionsToReset.forEach(sess => {
+      const gym = (state.gyms || []).find(g => g.id === sess.classTypeId);
+      if (gym) {
+        // Gym / school session — billed wholly to that entity, so only retire it
+        // when this reset actually belongs to it.
+        if ((gym.parent_gym_id || gym.id) === familyId) idsToDelete.push(sess.id);
+        return;
+      }
+      const remaining = (sess.studentIds || []).filter(sid => !familyStudentIds.has(sid));
+      if (remaining.length === 0) idsToDelete.push(sess.id);
+      else rowsToTrim.push({ id: sess.id, student_ids: remaining });
+    });
+
+    if (idsToDelete.length > 0) {
+      const { error: delErr } = await supabase.from('sessions').delete().in('id', idsToDelete).eq('user_id', user.id);
+      if (delErr) { alert("Delete Error: " + delErr.message); return; }
+    }
+
+    for (const row of rowsToTrim) {
+      const { error: trimErr } = await supabase.from('sessions')
+        .update({ student_ids: row.student_ids })
+        .eq('id', row.id)
+        .eq('user_id', user.id);
+      if (trimErr) { alert("Update Error: " + trimErr.message); return; }
+    }
 
     // Also migrate any 'Active' payment to the first billing month if it exists
     const { data: activePay } = await supabase.from('payments')
@@ -4495,7 +4594,25 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
     
     const finalAthletes = isCompetition ? teamAthletes.map(a => a.id) : selectedAthletes;
     if (gymType !== 'tumbling' && finalAthletes.length === 0) return alert("Select at least one athlete.");
-    
+
+    // A competition must be logged against a sub-team. Hourly rates and
+    // competition rates only exist on sub-teams — a parent organization carries
+    // no rate at all — so a competition attached to the parent would price at R0
+    // for the school and for every coach on it.
+    if (isCompetition) {
+      const needsSubTeam = selectedTeamIds
+        .map(id => state.gyms.find(g => g.id === id))
+        .filter((t): t is Gym => !!t && !t.parent_gym_id)
+        .filter(t => state.gyms.some(g => g.parent_gym_id === t.id) && !compTargetGymIds[t.id]);
+
+      if (needsSubTeam.length > 0) {
+        return alert(
+          `Choose which sub-team this competition is for: ${needsSubTeam.map(t => t.name).join(', ')}.\n\n` +
+          `Competition and hourly rates are set on the sub-team, so a competition logged against the whole organisation would come out at R0.`
+        );
+      }
+    }
+
     let sessions: any[] = [];
 
     if (isCompetition && Object.keys(compCoachHours).length > 0) {
@@ -4688,7 +4805,7 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
                   <div className="flex items-center gap-2 px-1">
                     <Trophy size={14} className="text-amber-500" />
                     <span className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400">
-                      Competition For Sub-Team (Optional)
+                      Competition For Sub-Team (Required)
                     </span>
                   </div>
                   {activeTeams.filter(t => !t.parent_gym_id).map((parentTeam, idx) => {
@@ -4702,7 +4819,7 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
                           onChange={e => setCompTargetGymIds(prev => ({ ...prev, [parentTeam.id]: e.target.value }))}
                           className="w-full bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-amber-100 dark:border-amber-800/40 rounded-xl p-2.5 text-xs font-black outline-none shadow-sm appearance-none cursor-pointer"
                         >
-                          <option value="" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">- All {parentTeam.name} -</option>
+                          <option value="" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">- Select Sub-Team -</option>
                           {subTeams.map((sub, sIdx) => (
                             <option key={`subteam-opt-${sub.id}-${sIdx}`} value={sub.id} className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">
                               {sub.name}
@@ -7380,6 +7497,104 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
     return { month: mIndex, year };
   }, [monthLabel]);
 
+  const pricingContext: PricingContext = useMemo(() => ({
+    gyms: state.gyms || [],
+    classTypes: state.classTypes || [],
+    students: state.students || [],
+    staff: state.staff || [],
+    profile: { id: state.profile.id, pay_rate: state.profile.pay_rate, name: state.profile.name }
+  }), [state.gyms, state.classTypes, state.students, state.staff, state.profile]);
+
+  /**
+   * ONE pricing pass over the month's sessions produces every figure on this
+   * screen — client charges and coach earnings together. Nothing else on the
+   * page is allowed to compute money.
+   */
+  const priced = useMemo(
+    () => priceSessions(state.sessions || [], pricingContext),
+    [state.sessions, pricingContext]
+  );
+
+  /**
+   * The invoice month being viewed. Lines are selected on their BILLING month,
+   * not the calendar month of the date.
+   *
+   * This matters for a gym with billing_day = 20: work logged on 20 August
+   * belongs to the September invoice. The old code filtered sessions by calendar
+   * month before pricing them, so those sessions disappeared from every invoice
+   * until they happened to be archived — the September invoice you sent was
+   * missing everything from 20–31 August.
+   */
+  const activeMonthKey = useMemo(() => {
+    const m = calendarProps ? calendarProps.month : new Date().getMonth();
+    const y = calendarProps ? calendarProps.year : new Date().getFullYear();
+    return `${MONTHS[m]} ${y}`;
+  }, [calendarProps]);
+
+  /**
+   * Decode a coach invoice id into who it pays and which school it covers.
+   * `org::<coachId>::<orgId>` — the `::` separator matters, because gym ids
+   * themselves contain underscores.
+   */
+  const coachTargetFor = useCallback((group: any): { coachId: string, orgId: string | null } | null => {
+    if (!group || !group.isStaff) return null;
+    if (group.coachId) return { coachId: group.coachId, orgId: group.orgId ?? null };
+
+    const id: string = group.family_id || '';
+    if (id.startsWith('org::')) {
+      const [, coachId, orgId] = id.split('::');
+      return { coachId, orgId: orgId || null };
+    }
+    if (id.startsWith('turnin::')) {
+      return { coachId: id.slice('turnin::'.length), orgId: null };
+    }
+    // Archived coach payment rows store the bare coach id.
+    return { coachId: id, orgId: null };
+  }, []);
+
+  /** Every priced line for one invoice, across ALL billing months. */
+  const allLinesForGroup = useCallback((group: any): any[] => {
+    if (!group) return [];
+
+    const target = coachTargetFor(group);
+    if (target) {
+      return priced.coachLines.filter(l =>
+        l.coachId === target.coachId &&
+        (target.orgId ? l.orgId === target.orgId : l.orgId === null)
+      );
+    }
+
+    return priced.clientLines.filter(l => l.billToId === group.family_id);
+  }, [priced, coachTargetFor]);
+
+  /** The lines that belong on the invoice for the month being viewed. */
+  const linesForGroup = useCallback(
+    (group: any): any[] => allLinesForGroup(group).filter(l => l.billingMonthKey === activeMonthKey),
+    [allLinesForGroup, activeMonthKey]
+  );
+
+  /**
+   * Work that exists but sits in a DIFFERENT billing month.
+   *
+   * With billing_day = 20, a session logged on the 25th belongs to next month's
+   * invoice. Without surfacing that, the invoice just looks mysteriously empty —
+   * so the card says "+2 logs → September" instead of hiding it.
+   */
+  const otherMonthsForGroup = useCallback((group: any) => {
+    const others = allLinesForGroup(group).filter(l => l.billingMonthKey !== activeMonthKey);
+    if (others.length === 0) return null;
+    return {
+      count: new Set(others.map(l => l.groupId)).size,
+      months: Array.from(new Set(others.map(l => l.billingMonthKey)))
+    };
+  }, [allLinesForGroup, activeMonthKey]);
+
+  /** Distinct real-world sessions on an invoice — what the "N logs" badge shows. */
+  const countForGroup = useCallback(
+    (group: any) => new Set(linesForGroup(group).map(l => l.groupId)).size,
+    [linesForGroup]
+  );
+
   const groupedInvoices = useMemo(() => {
     if (monthLabel) {
       const monthPayments = (state.payments || []).filter(p => p.invoice_id === monthLabel);
@@ -7424,22 +7639,54 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       return Array.from(uniqueMap.values());
     }
 
-    // ── COACH VIEW: only show their own payable invoice ───────────────────────
+    // ── COACH VIEW ────────────────────────────────────────────────────────────
+    // A coach sees the same breakdown the owner sees for them: one turn-in
+    // payout for tumbling/class work, plus one invoice per school they coached
+    // at. Previously they saw a single "turnin" document, which silently
+    // excluded every cheer/school session they had worked.
     if (state.profile.role === 'coach') {
       const myStaff = (state.staff || []).find(st => st.id === user?.id || (st.email && user?.email && st.email.toLowerCase() === user.email.toLowerCase()));
-      const myIds = new Set([user?.id, myStaff?.id, myStaff?.email].filter(Boolean));
-      const coachSessions = (state.sessions || []).filter(s => myIds.has(s.coach_id));
-      if (coachSessions.length === 0) return [];
-      return [{
-        id: `coach-self-${user?.id || 'coach'}`,
-        label: 'My Coaching Invoice',
-        studentIds: [],
-        family_id: user?.id || 'coach',
-        isGym: false,
-        isStaff: true,
-        isHistory: false,
-        isOrganization: false,
-      }];
+      const myCoachId = myStaff?.id || user?.id || state.profile.id;
+      const mine = priced.coachLines.filter(l => l.coachId === myCoachId);
+      if (mine.length === 0) return [];
+
+      const out: any[] = [];
+
+      if (mine.some(l => l.orgId === null)) {
+        out.push({
+          id: `coach-self-turnin-${myCoachId}`,
+          label: 'My Coaching Invoice',
+          subLabel: 'Turn-in Pay',
+          studentIds: [],
+          family_id: `turnin::${myCoachId}`,
+          coachId: myCoachId,
+          invoiceType: 'turnin',
+          isGym: false,
+          isStaff: true,
+          isHistory: false,
+          isOrganization: false,
+        });
+      }
+
+      Array.from(new Set(mine.filter(l => l.orgId).map(l => l.orgId as string))).forEach(orgId => {
+        const org = state.gyms.find(g => g.id === orgId);
+        out.push({
+          id: `coach-self-org-${myCoachId}-${orgId}`,
+          label: org?.name || 'Organization',
+          subLabel: `School Invoice`,
+          studentIds: [],
+          family_id: `org::${myCoachId}::${orgId}`,
+          coachId: myCoachId,
+          orgId,
+          invoiceType: 'organization',
+          isGym: false,
+          isStaff: true,
+          isHistory: false,
+          isOrganization: false,
+        });
+      });
+
+      return out;
     }
 
     const groups: { [key: string]: (Student | Gym)[] } = {};
@@ -7501,39 +7748,49 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
 
     // Add Staff Invoices (split into Turn-in & Organization invoices)
     if (state.profile.role === 'owner') {
-      (state.staff || []).forEach(coach => {
+      const allCoaches = [...(state.staff || [])];
+      if (state.profile.id && !allCoaches.some(c => c.id === state.profile.id)) {
+        allCoaches.push({
+          id: state.profile.id,
+          name: state.profile.name || 'Owner',
+          pay_rate: state.profile.pay_rate || 0
+        } as any);
+      }
+
+      allCoaches.forEach(coach => {
         if (!coach.id) return;
 
-        // 1. Turn-in Invoice (Owner pays coach for Tumbling/ClassType/Direct sessions)
-        res.push({
-          id: `staff-turnin-${coach.id}`,
-          label: `${coach.name} - Turn-in`,
-          subLabel: `Turn-in Pay (JFlips Owes Coach)`,
-          studentIds: [],
-          family_id: `turnin_${coach.id}`,
-          coachId: coach.id,
-          invoiceType: 'turnin',
-          isGym: false,
-          isStaff: true,
-          isHistory: false,
-          isOrganization: false
-        } as any);
+        // 1. Turn-in Invoice — what JFlips owes this coach for tumbling gym and
+        //    class work, at their own profile hourly rate. Only listed when they
+        //    actually coached something, so the list stops filling with R0 rows.
+        // Listed if the coach has ANY un-archived turn-in work — deliberately not
+        // restricted to the month on screen. Gating this on the active month made
+        // a coach's tumbling invoice vanish outright whenever its sessions fell
+        // into another billing period, which reads as data loss.
+        const hasTurnIn = priced.coachLines.some(l => l.coachId === coach.id && l.orgId === null);
+        if (hasTurnIn) {
+          res.push({
+            id: `staff-turnin-${coach.id}`,
+            label: `${coach.name} - Turn-in`,
+            subLabel: `Turn-in Pay (JFlips Owes Coach)`,
+            studentIds: [],
+            family_id: `turnin::${coach.id}`,
+            coachId: coach.id,
+            invoiceType: 'turnin',
+            isGym: false,
+            isStaff: true,
+            isHistory: false,
+            isOrganization: false
+          } as any);
+        }
 
-        // 2. Organization Invoices (Coaching for cheer organizations)
-        const cheerOrgSessions = (state.sessions || []).filter(s => {
-          if (s.coach_id !== coach.id) return false;
-          const gym = state.gyms.find(g => g.id === s.classTypeId);
-          return gym && gym.gym_type === 'cheer';
-        });
-
-        const orgsWithSessions = new Set<string>();
-        cheerOrgSessions.forEach(s => {
-          const gym = state.gyms.find(g => g.id === s.classTypeId);
-          if (gym) {
-            const parentId = gym.parent_gym_id || gym.id;
-            orgsWithSessions.add(parentId);
-          }
-        });
+        // 2. School Invoices — one per school this coach worked at, priced from
+        //    the sub-team rate split across the coaches who attended.
+        const orgsWithSessions = new Set<string>(
+          priced.coachLines
+            .filter(l => l.coachId === coach.id && l.orgId)
+            .map(l => l.orgId as string)
+        );
 
         orgsWithSessions.forEach(orgId => {
           const org = state.gyms.find(g => g.id === orgId);
@@ -7542,7 +7799,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
             label: `${coach.name} @ ${org?.name || 'Organization'}`,
             subLabel: `Org Invoice for ${org?.name || 'Organization'}`,
             studentIds: [],
-            family_id: `org_${coach.id}_${orgId}`,
+            family_id: `org::${coach.id}::${orgId}`,
             coachId: coach.id,
             orgId: orgId,
             invoiceType: 'organization',
@@ -7556,7 +7813,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
     }
 
     return res;
-  }, [state.students, state.gyms, state.payments, state.sessions, monthLabel]);
+  }, [state.students, state.gyms, state.payments, state.sessions, monthLabel, state.staff, state.profile, user, priced, activeMonthKey]);
 
   const filteredInvoices = useMemo(() => {
     return (groupedInvoices || []).filter(g => {
@@ -7599,153 +7856,21 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
 
   const athleteSessions = useMemo(() => {
     if (!selectedGroup) return [];
-
-    const activeTargetMonth = calendarProps ? calendarProps.month : new Date().getMonth();
-    const activeTargetYear = calendarProps ? calendarProps.year : new Date().getFullYear();
-
-    const monthSessions = (state.sessions || []).filter(s => {
-      if (!s.date) return false;
-      const d = new Date(s.date);
-      return d.getMonth() === activeTargetMonth && d.getFullYear() === activeTargetYear;
-    });
-
-    if (selectedGroup.isStaff) {
-      const g = selectedGroup as any;
-      const coachId = g.coachId || selectedGroup.family_id.replace(/^(turnin_|org_[^_]+_)/, '');
-      const invoiceType = g.invoiceType || (selectedGroup.family_id.startsWith('org_') ? 'organization' : 'turnin');
-      const orgId = g.orgId || (selectedGroup.family_id.startsWith('org_') ? selectedGroup.family_id.split('_')[2] : null);
-
-      const coach = state.staff.find(st => st.id === coachId);
-      const defaultPayRate = coach?.pay_rate || 0;
-
-      if (invoiceType === 'organization' && orgId) {
-        const orgGym = state.gyms.find(gym => gym.id === orgId);
-        const orgPayRate = orgGym?.coach_rates?.[coachId] !== undefined ? orgGym.coach_rates[coachId] : defaultPayRate;
-
-        return monthSessions.filter(s => {
-          if (s.coach_id !== coachId) return false;
-          const gym = state.gyms.find(gm => gm.id === s.classTypeId);
-          return gym && (gym.id === orgId || gym.parent_gym_id === orgId);
-        }).map(s => {
-          const gym = (state.gyms || []).find(gm => gm.id === s.classTypeId);
-          const className = gym ? gym.name : 'Cheer Session';
-          const coverSuffix = s.covering_coach_name ? ` - ${s.covering_coach_name}` : '';
-          const customSuffix = s.custom_event_name ? ` - ${s.custom_event_name}` : '';
-          
-          return {
-            ...s,
-            targetStudentName: orgGym?.name || 'Organization Coaching',
-            displayPrice: orgPayRate * (s.hours_coached || 1),
-            displayClassName: `${className}${coverSuffix}${customSuffix}${s.is_competition ? ' Competition' : ''} (${s.hours_coached || 1} hrs)`
-          };
-        }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-      } else {
-        return monthSessions.filter(s => {
-          if (s.coach_id !== coachId) return false;
-          const gym = state.gyms.find(gm => gm.id === s.classTypeId);
-          return !gym || gym.gym_type !== 'cheer';
-        }).map(s => {
-          const gym = (state.gyms || []).find(gm => gm.id === s.classTypeId);
-          const ct = (state.classTypes || []).find(c => c.id === s.classTypeId);
-          const className = ct ? ct.name : (gym ? gym.name : 'Tumbling / Class Session');
-          const coverSuffix = s.covering_coach_name ? ` - ${s.covering_coach_name}` : '';
-          const customSuffix = s.custom_event_name ? ` - ${s.custom_event_name}` : '';
-          
-          return {
-            ...s,
-            targetStudentName: 'Turn-in Coaching Fee',
-            displayPrice: defaultPayRate * (s.hours_coached || 1),
-            displayClassName: `${className}${coverSuffix}${customSuffix}${s.is_competition ? ' Competition' : ''} (${s.hours_coached || 1} hrs)`
-          };
-        }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-      }
-    }
-
-    let billableIds: string[] = [];
-    if (monthLabel) {
-      const familySessions = monthSessions.filter(s => {
-        const gym = state.gyms.find(g => g.id === s.classTypeId);
-        if (gym && (gym.id === selectedGroup.family_id || gym.parent_gym_id === selectedGroup.family_id)) return true;
-        
-        return (s.studentIds || []).some(sid => {
-          const student = state.students.find(st => st.id === sid);
-          if (!student) return false;
-          const studentFamId = student.groupKey || student.id;
-          const studentGym = state.gyms.find(g => g.id === studentFamId);
-          return studentFamId === selectedGroup.family_id || studentGym?.parent_gym_id === selectedGroup.family_id;
-        });
-      });
-      billableIds = Array.from(new Set(familySessions.flatMap(s => s.studentIds)));
-    } else {
-      billableIds = selectedGroup.studentIds || [];
-    }
-
-    return monthSessions.filter(s => {
-      const gym = state.gyms.find(g => g.id === s.classTypeId);
-      if (gym && (gym.id === selectedGroup.family_id || gym.parent_gym_id === selectedGroup.family_id)) {
-        return true;
-      }
-      if (gym) return false; // Gym sessions are billed to the gym, not the athletes
-      return (s.studentIds || []).some(sid => billableIds.includes(sid));
-    }).flatMap(s => {
-      const ct = (state.classTypes || []).find(c => c.id === s.classTypeId);
-      const gym = (state.gyms || []).find(g => g.id === s.classTypeId);
-      
-      let price = ct ? ct.price : (gym ? gym.pay_amount : 0);
-      if (gym && s.custom_event_name) {
-        const customPreset = gym.custom_event_presets?.find(p => {
-          const name = p.includes(':') ? p.split(':')[0] : p;
-          return name.toLowerCase() === s.custom_event_name?.toLowerCase();
-        });
-        if (customPreset && customPreset.includes(':')) {
-          const ratePart = customPreset.split(':')[1];
-          const parsed = parseFloat(ratePart);
-          if (!isNaN(parsed)) {
-            price = parsed;
-          }
-        }
-      }
-
-      const className = ct ? ct.name : (gym ? gym.name : 'Session');
-      const baseClassName = className;
-      const coverSuffix = s.covering_coach_name ? ` - ${s.covering_coach_name}` : '';
-      const customSuffix = s.custom_event_name ? ` - ${s.custom_event_name}` : '';
-
-      if (gym && (gym.id === selectedGroup.family_id || gym.parent_gym_id === selectedGroup.family_id)) {
-        let currentPrice = price;
-        if (s.is_competition && gym.competition_rate) {
-          currentPrice = gym.competition_rate;
-        }
-
-        const lineTotal = currentPrice * (s.hours_coached || gym.default_hours || 1);
-        const displayName = s.custom_event_name 
-          ? `${s.custom_event_name}${coverSuffix} (${s.hours_coached || gym.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`
-          : `${baseClassName}${coverSuffix}${customSuffix} (${s.hours_coached || gym.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`;
-
-        return [{
-          ...s,
-          targetStudentName: gym.name,
-          displayPrice: lineTotal,
-          displayClassName: displayName
-        }];
-      }
-
-      const matching = (s.studentIds || []).filter(sid => billableIds.includes(sid));
-      return matching.map(sid => {
-        const studentObj = state.students.find(st => st.id === sid);
-        const studentPrice = getStudentSessionPrice(studentObj, s, price, baseClassName);
-        const displayName = s.custom_event_name 
-          ? `${s.custom_event_name}${coverSuffix} (${s.hours_coached || gym?.default_hours || 1} hrs)${s.is_competition ? ' - COMPETITION' : ''}`
-          : `${baseClassName}${coverSuffix}${customSuffix}`;
-        return {
-          ...s,
-          targetStudentName: studentObj?.name || (sid === selectedGroup?.family_id ? selectedGroup.label : 'Client'),
-          displayPrice: studentPrice || 0,
-          displayClassName: displayName
-        };
-      });
-    }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [state.sessions, selectedGroup, state.students, state.classTypes, state.gyms, monthLabel]);
+    // Multi-athlete family invoices name the athlete under each line; gym and
+    // school invoices name the coaches instead, so a split total can be audited
+    // against who actually attended.
+    const multiAthlete = !!(selectedGroup.studentIds && selectedGroup.studentIds.length > 1);
+    return linesForGroup(selectedGroup).map((l: any) => ({
+      id: l.sessionId,
+      date: l.date,
+      targetStudentName: l.targetName,
+      displayPrice: l.amount,
+      displayClassName: l.description,
+      subLine: (l.coachNames && l.coachNames.length > 0)
+        ? `Coaches: ${l.coachNames.join(', ')}`
+        : (multiAthlete ? l.targetName : '')
+    }));
+  }, [selectedGroup, linesForGroup]);
 
   const currentDisplay = useMemo(() => {
     if (monthLabel) return monthLabel;
@@ -7773,108 +7898,12 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
 
   const dbInvoiceId = useMemo(() => monthLabel || 'Active', [monthLabel]);
 
-  const calculateTotal = useCallback((group: { family_id: string, studentIds?: string[], isGym?: boolean, isStaff?: boolean }) => {
-    const activeTargetMonth = calendarProps ? calendarProps.month : new Date().getMonth();
-    const activeTargetYear = calendarProps ? calendarProps.year : new Date().getFullYear();
-
-    const monthSessions = (state.sessions || []).filter(s => {
-      if (!s.date) return false;
-      const d = new Date(s.date);
-      return d.getMonth() === activeTargetMonth && d.getFullYear() === activeTargetYear;
-    });
-
-    if (group.isStaff) {
-      const g = group as any;
-      const coachId = g.coachId || group.family_id.replace(/^(turnin_|org_[^_]+_)/, '');
-      const invoiceType = g.invoiceType || (group.family_id.startsWith('org_') ? 'organization' : 'turnin');
-      const orgId = g.orgId || (group.family_id.startsWith('org_') ? group.family_id.split('_')[2] : null);
-
-      const coach = state.staff.find(s => s.id === coachId);
-      const defaultPayRate = coach?.pay_rate || 0;
-
-      if (invoiceType === 'organization' && orgId) {
-        const orgGym = state.gyms.find(gym => gym.id === orgId);
-        const orgPayRate = orgGym?.coach_rates?.[coachId] !== undefined ? orgGym.coach_rates[coachId] : defaultPayRate;
-        return monthSessions.filter(s => {
-          if (s.coach_id !== coachId) return false;
-          const gym = state.gyms.find(gm => gm.id === s.classTypeId);
-          return gym && (gym.id === orgId || gym.parent_gym_id === orgId);
-        }).reduce((acc: number, s) => acc + (orgPayRate * (s.hours_coached || 1)), 0);
-      } else {
-        return monthSessions.filter(s => {
-          if (s.coach_id !== coachId) return false;
-          const gym = state.gyms.find(gm => gm.id === s.classTypeId);
-          return !gym || gym.gym_type !== 'cheer';
-        }).reduce((acc: number, s) => acc + (defaultPayRate * (s.hours_coached || 1)), 0);
-      }
-    }
-    const billableSessions = monthSessions.filter(s => {
-      const gym = state.gyms.find(g => g.id === s.classTypeId);
-      if (gym && (gym.id === group.family_id || gym.parent_gym_id === group.family_id)) {
-        return true;
-      }
-      if (gym) return false; // Gym sessions don't bill athletes
-      
-      return (s.studentIds || []).some(sid => {
-        if (monthLabel) {
-          const student = state.students.find(st => st.id === sid);
-          if (!student) return false;
-          const studentFamId = student.groupKey || student.id;
-          const studentGym = state.gyms.find(g => g.id === studentFamId);
-          return studentFamId === group.family_id || studentGym?.parent_gym_id === group.family_id;
-        }
-        return (group.studentIds || []).includes(sid);
-      });
-    });
-
-    return billableSessions.reduce((acc: number, s) => {
-      const ct = (state.classTypes || []).find(c => c.id === s.classTypeId);
-      const gym = (state.gyms || []).find(g => g.id === s.classTypeId);
-      
-      let price = ct ? ct.price : (gym ? gym.pay_amount : 0);
-      if (gym && s.custom_event_name) {
-        const customPreset = gym.custom_event_presets?.find(p => {
-          const name = p.includes(':') ? p.split(':')[0] : p;
-          return name.toLowerCase() === s.custom_event_name?.toLowerCase();
-        });
-        if (customPreset && customPreset.includes(':')) {
-          const ratePart = customPreset.split(':')[1];
-          const parsed = parseFloat(ratePart);
-          if (!isNaN(parsed)) {
-            price = parsed;
-          }
-        }
-      }
-      if (s.is_competition && gym?.competition_rate) {
-        price = gym.competition_rate;
-      }
-
-      if (gym && (gym.id === group.family_id || gym.parent_gym_id === group.family_id)) {
-        return acc + (price * (s.hours_coached || gym.default_hours || 1));
-      } else {
-        const className = ct ? ct.name : (gym ? gym.name : '');
-        const matchingStudents = (s.studentIds || []).filter(sid => {
-          if (monthLabel) {
-            const student = state.students.find(st => st.id === sid);
-            if (!student) return false;
-            const studentFamId = student.groupKey || student.id;
-            const studentGym = state.gyms.find(g => g.id === studentFamId);
-            return studentFamId === group.family_id || studentGym?.parent_gym_id === group.family_id;
-          }
-          return (group.studentIds || []).includes(sid);
-        });
-        const sessionSum = matchingStudents.reduce((sum, sid) => {
-          const student = state.students.find(st => st.id === sid);
-          return sum + getStudentSessionPrice(student, s, price, className);
-        }, 0);
-        return acc + sessionSum;
-      }
-    }, 0);
-  }, [state.sessions, state.classTypes, state.gyms, state.students, monthLabel]);
-
-  const total = useMemo(() =>
-    selectedGroup ? calculateTotal(selectedGroup) : 0,
-    [selectedGroup, calculateTotal]
+  // The total IS the sum of the rows printed on the page. The old second
+  // calculation (calculateTotal) is gone, so a total can no longer disagree
+  // with the line items above it.
+  const total = useMemo(
+    () => sumLines(athleteSessions.map(s => ({ amount: s.displayPrice }))),
+    [athleteSessions]
   );
 
   const currentPayment = useMemo(() => {
@@ -8069,7 +8098,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
         <div className="flex justify-between items-center mb-2">
           <button onClick={() => setSel(null)} className="text-slate-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-1 hover:text-[#1e4da1]">&larr; Back</button>
             <div className="flex gap-2">
-              {!monthLabel && (
+              {!monthLabel && !selectedGroup.isStaff && (
               <motion.button
                 whileTap={{ scale: 0.95 }}
                 onClick={() => onResetInvoice(selectedGroup.family_id, selectedGroup.label)}
@@ -8184,19 +8213,19 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                           <div className="mb-8">
                             <p className="text-[12px] font-black uppercase tracking-[0.3em] text-[#1e4da1] mb-2">Bill To</p>
                             {(() => {
-                              const targetId = selectedGroup?.isStaff ? (selectedGroup as any).orgId : selectedGroup?.family_id;
+                              const coachTarget = coachTargetFor(selectedGroup);
+                              const targetId = coachTarget ? coachTarget.orgId : selectedGroup?.family_id;
                               const gymEntity = state.gyms.find(g => g.id === targetId);
                               const isCheerTeam = gymEntity?.gym_type === 'cheer';
-                              
-                              if (selectedGroup?.isStaff) {
-                                const g = selectedGroup as any;
-                                const coachId = g.coachId || selectedGroup.family_id.replace(/^(turnin_|org_[^_]+_)/, '');
-                                const invoiceType = g.invoiceType || (selectedGroup.family_id.startsWith('org_') ? 'organization' : 'turnin');
-                                const orgId = g.orgId || (selectedGroup.family_id.startsWith('org_') ? selectedGroup.family_id.split('_')[2] : null);
-                                const coach = state.staff.find(s => s.id === coachId);
+
+                              if (coachTarget) {
+                                const coachId = coachTarget.coachId;
+                                const orgId = coachTarget.orgId;
+                                const coach = state.staff.find(s => s.id === coachId)
+                                  || (coachId === state.profile.id ? { name: state.profile.name || 'Owner' } as any : null);
                                 const orgGym = orgId ? state.gyms.find(gym => gym.id === orgId) : null;
 
-                                if (invoiceType === 'organization' && orgGym) {
+                                if (orgGym) {
                                   return (
                                     <>
                                       <p className="text-xl font-black uppercase italic text-slate-900 dark:text-slate-100">{orgGym?.bill_to_name || orgGym?.name}</p>
@@ -8284,8 +8313,8 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                                 <p className="text-[14px] font-black text-slate-900 dark:text-slate-100 uppercase italic leading-tight">
                                   {s.displayClassName}
                                 </p>
-                                {selectedGroup?.studentIds && selectedGroup.studentIds.length > 1 && (
-                                  <p className="text-[12px] text-slate-400 font-bold mt-0.5 normal-case not-italic">{s.targetStudentName}</p>
+                                {s.subLine && (
+                                  <p className="text-[12px] text-slate-400 font-bold mt-0.5 normal-case not-italic">{s.subLine}</p>
                                 )}
                               </div>
                               <span className="text-[14px] font-black text-slate-900 dark:text-slate-100 text-right tabular-nums">
@@ -8311,13 +8340,21 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                             <div className="space-y-1">
                               <p className="text-[12px] font-black uppercase tracking-[0.25em] text-[#1e4da1] mb-2">Banking Details</p>
                               {(() => {
-                                const coach = selectedGroup?.isStaff ? state.staff.find(s => s.id === selectedGroup.family_id) : null;
-                                const hasCoachBank = coach && coach.bank_name && coach.account_number;
-                                
-                                let bankName = hasCoachBank ? coach.bank_name : state.profile.bankName;
-                                let accountNumber = hasCoachBank ? coach.account_number : state.profile.accountNumber;
-                                let branchCode = hasCoachBank ? coach.branch_code : state.profile.branchCode;
-                                let accountType = hasCoachBank ? coach.account_type : state.profile.accountType;
+                                // Resolve by coach id — family_id is `turnin::<id>`,
+                                // never a bare staff id — and read the camelCase
+                                // fields staff_profiles is actually mapped to.
+                                // Both of these were wrong, which is why every
+                                // coach invoice used to print the owner's bank.
+                                const bankTarget = coachTargetFor(selectedGroup);
+                                const coach: any = bankTarget ? state.staff.find(s => s.id === bankTarget.coachId) : null;
+                                const coachBank = coach?.bankName ?? coach?.bank_name;
+                                const coachAcc = coach?.accountNumber ?? coach?.account_number;
+                                const hasCoachBank = !!(coachBank && coachAcc);
+
+                                let bankName = hasCoachBank ? coachBank : state.profile.bankName;
+                                let accountNumber = hasCoachBank ? coachAcc : state.profile.accountNumber;
+                                let branchCode = hasCoachBank ? (coach?.branchCode ?? coach?.branch_code) : state.profile.branchCode;
+                                let accountType = hasCoachBank ? (coach?.accountType ?? coach?.account_type) : state.profile.accountType;
 
                                 if (!hasCoachBank && bankAllocation === 'business') {
                                   bankName = state.profile.bizBankName || state.profile.bankName;
@@ -8420,35 +8457,11 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
 
       <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-3">
         {(!filteredInvoices || filteredInvoices.length === 0) ? <div className="bg-white dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-[2rem] p-10 text-center shadow-sm"><UserCircle className="mx-auto text-slate-200 dark:text-slate-600 mb-4" size={48} /><p className="text-[#94a3b8] text-[10px] font-black uppercase">No Invoices Found</p></div> : filteredInvoices.map((group, idx) => {
-          const count = (state.sessions || []).filter(sess => {
-            if (group.isStaff) {
-              const g = group as any;
-              const coachId = g.coachId || group.family_id.replace(/^(turnin_|org_[^_]+_)/, '');
-              const invoiceType = g.invoiceType || (group.family_id.startsWith('org_') ? 'organization' : 'turnin');
-              const orgId = g.orgId || (group.family_id.startsWith('org_') ? group.family_id.split('_')[2] : null);
-
-              if (invoiceType === 'organization' && orgId) {
-                return sess.coach_id === coachId && state.gyms.some(gm => (gm.id === orgId || gm.parent_gym_id === orgId) && gm.id === sess.classTypeId);
-              } else {
-                return sess.coach_id === coachId && (!state.gyms.some(gm => gm.id === sess.classTypeId && gm.gym_type === 'cheer'));
-              }
-            }
-            
-            const gym = state.gyms.find(g => g.id === sess.classTypeId);
-            if (gym && (gym.id === group.family_id || gym.parent_gym_id === group.family_id)) return true;
-            if (gym) return false; // Gym sessions are billed to the gym, not the athletes
-            
-            return (sess.studentIds || []).some(sid => {
-              if (monthLabel) {
-                const student = state.students.find(st => st.id === sid);
-                if (!student) return false;
-                const studentFamId = student.groupKey || student.id;
-                const studentGym = state.gyms.find(g => g.id === studentFamId);
-                return studentFamId === group.family_id || studentGym?.parent_gym_id === group.family_id;
-              }
-              return (group.studentIds || []).includes(sid);
-            });
-          }).length;
+          // Both figures come from the same pricing pass that renders the
+          // invoice itself, so the card and the document always agree.
+          const count = countForGroup(group);
+          const groupTotal = sumLines(linesForGroup(group));
+          const elsewhere = otherMonthsForGroup(group);
 
           const groupPayment = (state.payments || []).find(p => p.family_id === group.family_id && p.invoice_id === dbInvoiceId);
           return (
@@ -8475,11 +8488,20 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-1.5 mt-0.5"><Calendar size={9} className="text-[#94a3b8]" /><p className="text-[9px] text-slate-500 font-black uppercase">{count} logs</p></div>
+                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                    <Calendar size={9} className="text-[#94a3b8]" />
+                    <p className="text-[9px] text-slate-500 font-black uppercase">{count} logs</p>
+                    {elsewhere && (
+                      <span className="text-[8px] font-black uppercase text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded-md border border-amber-100 dark:border-amber-900/40">
+                        +{elsewhere.count} → {elsewhere.months.join(', ')}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
               <div className="flex items-center gap-2 shrink-0 ml-2">
+                <p className="text-[15px] font-black italic tabular-nums text-slate-800 dark:text-slate-100">R{groupTotal}</p>
                 <ChevronRight className="text-slate-300 group-hover:text-[#1e4da1]" size={20} />
               </div>
             </motion.div>
@@ -9006,11 +9028,14 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
       isSubTeam ? (isNaN(parsedPay) ? 0 : parsedPay) : 0, 
       gymType, 
       isSubTeam ? (isNaN(parsedHours) ? 1 : parsedHours) : 1, 
-      isSubTeam ? teamRosterText.split(/\r?\n/).map(n => n.trim()).filter(n => n.length > 0) : [], 
-      '', // No billing info in main gym profile
-      '', 
-      '', 
-      parentGymId, 
+      isSubTeam ? teamRosterText.split(/\r?\n/).map(n => n.trim()).filter(n => n.length > 0) : [],
+      // Pass the existing Bill To details straight through. These used to be
+      // hardcoded to '', which wiped bill_to_name/address/phone to NULL on every
+      // single gym save — so an invoice could never show a billing address.
+      billToName,
+      billToAddress,
+      billToPhone,
+      parentGymId,
       isSubTeam && gymType === 'cheer' ? (isNaN(parsedComp) ? 0 : parsedComp) : 0,
       isSubTeam ? selectedCoachIds : [], // No assigned coaches for main gym
       isSubTeam ? defaultCoachId : '',
