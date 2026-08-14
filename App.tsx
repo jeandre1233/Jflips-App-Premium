@@ -7567,27 +7567,26 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
     return priced.clientLines.filter(l => l.billToId === group.family_id);
   }, [priced, coachTargetFor]);
 
-  /** The lines that belong on the invoice for the month being viewed. */
-  const linesForGroup = useCallback(
-    (group: any): any[] => allLinesForGroup(group).filter(l => l.billingMonthKey === activeMonthKey),
-    [allLinesForGroup, activeMonthKey]
-  );
-
   /**
-   * Work that exists but sits in a DIFFERENT billing month.
+   * The lines that belong on the invoice being viewed.
    *
-   * With billing_day = 20, a session logged on the 25th belongs to next month's
-   * invoice. Without surfacing that, the invoice just looks mysteriously empty —
-   * so the card says "+2 logs → September" instead of hiding it.
+   * THE LIVE INVOICE IS THE CURRENTLY ACTIVE ONE. It carries every session that
+   * has not been archived yet, whatever date those sessions fall on — because
+   * `state.sessions` only ever holds un-archived work. Log a session on 24 July
+   * and it stays on the active invoice until you reset, exactly as it did before.
+   *
+   * Do NOT reintroduce a month filter here. Filtering the live invoice by month
+   * makes late-July work vanish from the invoice you are about to send on the
+   * 20th of August. The billing day still decides which month the revenue is
+   * FILED under when you reset — that is an archiving concern, not a display one.
+   *
+   * Only the archived/history view (`monthLabel` set) selects a specific month.
    */
-  const otherMonthsForGroup = useCallback((group: any) => {
-    const others = allLinesForGroup(group).filter(l => l.billingMonthKey !== activeMonthKey);
-    if (others.length === 0) return null;
-    return {
-      count: new Set(others.map(l => l.groupId)).size,
-      months: Array.from(new Set(others.map(l => l.billingMonthKey)))
-    };
-  }, [allLinesForGroup, activeMonthKey]);
+  const linesForGroup = useCallback((group: any): any[] => {
+    const lines = allLinesForGroup(group);
+    if (!monthLabel) return lines;
+    return lines.filter(l => l.billingMonthKey === activeMonthKey);
+  }, [allLinesForGroup, activeMonthKey, monthLabel]);
 
   /** Distinct real-world sessions on an invoice — what the "N logs" badge shows. */
   const countForGroup = useCallback(
@@ -8461,7 +8460,6 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
           // invoice itself, so the card and the document always agree.
           const count = countForGroup(group);
           const groupTotal = sumLines(linesForGroup(group));
-          const elsewhere = otherMonthsForGroup(group);
 
           const groupPayment = (state.payments || []).find(p => p.family_id === group.family_id && p.invoice_id === dbInvoiceId);
           return (
@@ -8488,15 +8486,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                    <Calendar size={9} className="text-[#94a3b8]" />
-                    <p className="text-[9px] text-slate-500 font-black uppercase">{count} logs</p>
-                    {elsewhere && (
-                      <span className="text-[8px] font-black uppercase text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded-md border border-amber-100 dark:border-amber-900/40">
-                        +{elsewhere.count} → {elsewhere.months.join(', ')}
-                      </span>
-                    )}
-                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5"><Calendar size={9} className="text-[#94a3b8]" /><p className="text-[9px] text-slate-500 font-black uppercase">{count} logs</p></div>
                 </div>
               </div>
 
