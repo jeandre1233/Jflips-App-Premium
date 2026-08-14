@@ -1004,6 +1004,26 @@ const App: React.FC = () => {
             assigned_cheer_org_ids: assignedCheerOrgIds,
             id: user.id
           };
+
+          // Load the coach's colleagues so they can pick who coached WITH them,
+          // exactly as the owner can. Name and id ONLY — deliberately no pay
+          // rates or banking details, since a coach must not see what their
+          // colleagues earn.
+          const { data: siblingStaff } = await supabase
+            .from('staff_profiles')
+            .select('id, name, status')
+            .eq('owner_id', staffP.owner_id)
+            .eq('status', 'approved');
+
+          if (siblingStaff) {
+            staffList = siblingStaff.map((s: any) => ({
+              id: s.id,
+              name: s.name,
+              status: s.status || 'approved',
+              canViewTumbling: false,
+              assignedCheerOrgIds: []
+            })) as StaffProfile[];
+          }
         } else {
           // New owner auto-creation
           const defaultKey = `JFLIPS-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -2888,10 +2908,19 @@ const App: React.FC = () => {
               <button onClick={() => setShowAllLogs(false)} className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded-xl text-slate-400 shadow-sm transition-all hover:bg-slate-100"><X size={20} /></button>
             </div>
             <div className="flex-1 overflow-y-auto no-scrollbar px-8 pb-10 space-y-3">
-              {(!state.sessions || state.sessions.length === 0) ? (
-                <p className="text-center py-20 text-slate-400 text-[10px] font-black uppercase">No logs found</p>
-              ) : (() => {
-                const logs = [...(state.sessions || [])].sort((a, b) => {
+              {(() => {
+                // A coach only ever sees the sessions THEY coached. The owner
+                // sees everything. This list previously read state.sessions
+                // straight through, so a coach saw every log in the business.
+                const visibleSessions = state.profile.role === 'owner'
+                  ? (state.sessions || [])
+                  : (state.sessions || []).filter(s => s.coach_id === state.profile.id);
+
+                if (visibleSessions.length === 0) {
+                  return <p className="text-center py-20 text-slate-400 text-[10px] font-black uppercase">No logs found</p>;
+                }
+
+                const logs = [...visibleSessions].sort((a, b) => {
                   const dateA = a.date ? new Date(a.date).getTime() : 0;
                   const dateB = b.date ? new Date(b.date).getTime() : 0;
                   if (dateB !== dateA) {
@@ -7248,7 +7277,9 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
                 <span className="font-black text-sm italic uppercase">{opt.name}</span>
                 {opt.isGym && <span className="text-[8px] opacity-70 ml-1">{opt.gym_type === 'cheer' ? 'TEAM' : 'GYM'}</span>}
               </div>
-              <span className="text-[10px] font-black opacity-60">R{opt.price}</span>
+              {/* What a class costs the parents is the owner's business, not the
+                  coach's — coaches are paid their own hourly rate. */}
+              {isOwner && <span className="text-[10px] font-black opacity-60">R{opt.price}</span>}
             </motion.button>
           ))}
         </motion.div>
@@ -9587,8 +9618,12 @@ const ClassTypeForm: React.FC<any> = ({ students, gyms, staff, isOwner, initialD
   return (
     <div className="space-y-4 max-h-[70vh] overflow-y-auto no-scrollbar">
       <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Class Name</label><input placeholder="NAME" value={name} onChange={e => setName(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
-      <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Price per session</label><input placeholder="PRICE" type="number" value={price} onChange={e => setPrice(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
-      
+      {/* Owner only. The existing price is still carried through on save, so a
+          coach editing a class cannot wipe it. */}
+      {isOwner && (
+        <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Price per session</label><input placeholder="PRICE" type="number" value={price} onChange={e => setPrice(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
+      )}
+
       {isOwner && staff && staff.length > 0 && (
         <div className="space-y-1">
           <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Assigned Coaches (leave blank = owner default)</label>
