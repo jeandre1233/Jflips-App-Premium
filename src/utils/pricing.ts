@@ -53,11 +53,23 @@
  *      2. `competition_rate` when the session is flagged competition
  *      3. `pay_amount`, falling back to the parent's
  *
- *  ── BILLING MONTH ──────────────────────────────────────────────────────────
- *  Every line carries the invoice month it belongs to, derived from the parent
- *  gym's `billing_day`. With billing_day = 20, work on/after the 20th lands on
- *  next month's invoice, so "September" covers 20 Aug → 19 Sep. Callers filter
- *  on `billingMonthKey` — never on the raw calendar month of the date.
+ *  ── NO DATE RESTRICTION ────────────────────────────────────────────────────
+ *  A live invoice carries EVERY un-archived session, whatever month it falls in.
+ *  Log a class in July, send the invoice in August, and both July and August
+ *  work appear on it. Resetting an invoice is what closes a period — never the
+ *  calendar. `billingMonthKey` exists only to label archived history.
+ *
+ *  ── WHO GETS AN INVOICE ────────────────────────────────────────────────────
+ *  Families      : one per family/athlete — class name, hours, amount
+ *  Tumbling gym  : one organization invoice. Gyms never produce per-coach
+ *                  invoices; only cheer schools involve external staff.
+ *  Cheer school  : one organization master invoice (sub-team AND main-org logs),
+ *                  plus one invoice per staff coach who worked there.
+ *  Staff coach   : "<Coach> - Tumbling" for class work, and "<Coach> - <Org>"
+ *                  for each school. Two separate documents.
+ *  The OWNER     : never gets an invoice. They still count toward a cheer split
+ *                  (they were in the room), so the school is billed in full —
+ *                  their own share simply isn't rendered as a document.
  * ============================================================================
  */
 
@@ -78,34 +90,21 @@ export const MONTH_NAMES = [
 ];
 
 /**
- * Which invoice month a session falls into, honouring a gym's billing cycle.
+ * The calendar month of a session, used only to LABEL archived history.
  *
- * `billingDay` is the day of the month you invoice on. With billingDay = 20,
- * anything from the 20th onward belongs to NEXT month's invoice, so the
- * September invoice covers 20 Aug → 19 Sep. billingDay 1 (or unset) means plain
- * calendar months.
- *
- * The billing day lives on the PARENT gym/organization and applies to all of its
- * sub-teams and classes.
+ * There is deliberately NO date restriction anywhere in invoicing. A session
+ * logged in July stays on the active invoice until it is reset, and appears on
+ * whatever invoice you send — including an August one. `billing_day` is
+ * intentionally not applied here: the reset action is what closes an invoice
+ * period, not the calendar.
  */
 export function billingMonthFor(
   dateStr: string,
-  billingDay: number = 1
+  _billingDay: number = 1
 ): { monthName: string; year: number; key: string } {
   const d = new Date(dateStr);
-  let month = d.getMonth();
-  let year = d.getFullYear();
-
-  const day = Number(billingDay);
-  if (Number.isFinite(day) && day > 1 && d.getDate() >= day) {
-    month += 1;
-    if (month > 11) {
-      month = 0;
-      year += 1;
-    }
-  }
-
-  const monthName = MONTH_NAMES[month];
+  const monthName = MONTH_NAMES[d.getMonth()];
+  const year = d.getFullYear();
   return { monthName, year, key: `${monthName} ${year}` };
 }
 
@@ -329,11 +328,9 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
       new Set(rows.map(r => r.coach_id).filter((id): id is string => isInvoiceableCoach(id, ctx)))
     );
 
-    // The billing day is configured on the parent organization and governs all
-    // of its sub-teams. With billingDay = 20, work from the 20th onward lands on
-    // next month's invoice.
-    const billingDay = positive(parent?.billing_day ?? gym?.billing_day, 1);
-    const bm = billingMonthFor(head.date, billingDay);
+    // Calendar month only — this labels archived history and never filters what
+    // appears on a live invoice.
+    const bm = billingMonthFor(head.date);
     const monthStamp = {
       billingMonthKey: bm.key,
       billingMonthName: bm.monthName,
@@ -455,6 +452,7 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
     // Athletes are identical across the group's rows; union defensively so a
     // multi-coach class is charged once, not once per coach.
     const athleteIds = Array.from(new Set(rows.flatMap(r => r.studentIds || [])));
+    const classHours = resolveHours(head);
 
     for (const sid of athleteIds) {
       const student = ctx.students.find(st => st.id === sid);
@@ -465,7 +463,8 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
         date: head.date,
         billToId: billToForStudent(student, ctx),
         targetName: student.name,
-        description: describe(className, head),
+        // The parent's invoice shows the class and the hours trained.
+        description: describe(className, head, { hours: classHours }),
         amount: money(getStudentSessionPrice(student, head, basePrice, className)),
         kind: 'class',
         ...monthStamp

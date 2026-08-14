@@ -123,10 +123,9 @@ import { RosterView } from './src/Pages/Setup';
 /**
  * Which invoice month a session belongs to.
  *
- * This used to accept `billingDay` and silently ignore it, which made the whole
- * "Billing Cycle Start Day" setting decorative. It now delegates to the pricing
- * engine, so billing_day = 20 really does push work from the 20th onward onto
- * next month's invoice.
+ * Plain calendar month. Used ONLY to label archived history — invoicing itself
+ * has no date restriction, because resetting an invoice is what closes a period.
+ * The "Billing Cycle Start Day" field is therefore not applied here.
  */
 export function getSessionBillingMonth(dateStr: string, billingDay: number = 1): { monthName: string, year: number } {
   const { monthName, year } = billingMonthFor(dateStr, billingDay);
@@ -2111,8 +2110,8 @@ const App: React.FC = () => {
       const familyRevByMonth = new Map<string, { monthLabel: string, famId: string, revenue: number, snapAddress: string, snapPhone: string, currentLabel: string }>();
       const coachRevByMonth = new Map<string, { monthLabel: string, coachId: string, revenue: number, currentLabel: string }>();
 
-      // Each priced line already knows its billing month (the engine applied the
-      // gym's billing_day), so never recompute it from the bare date here.
+      // Each priced line already knows which month it files under, so never
+      // recompute it from the bare date here.
       const monthKeyFor = (line: { billingMonthName: string, billingYear: number, billingMonthKey: string }) => ({
         monthName: line.billingMonthName,
         year: line.billingYear,
@@ -2155,14 +2154,16 @@ const App: React.FC = () => {
       // Cheer/school coach lines are deliberately NOT written as payment rows:
       // they are a per-coach breakdown of the school's master invoice, which is
       // already recorded above, so writing them would double-count the revenue.
-      coachLines.filter(line => line.orgId === null).forEach(line => {
+      // Staff only — never the owner. The owner is not paid a turn-in fee by
+      // their own business, so an expense row for them would be fictional.
+      coachLines.filter(line => line.orgId === null && line.coachId !== state.profile.id).forEach(line => {
         if (line.amount <= 0) return;
+        const coach = (state.staff || []).find(s => s.id === line.coachId);
+        if (!coach) return;
         const { key } = monthKeyFor(line);
         const coachKey = `${line.coachId}_${key}`;
         if (!coachRevByMonth.has(coachKey)) {
-          const coach = (state.staff || []).find(s => s.id === line.coachId);
-          const name = coach?.name || (line.coachId === state.profile.id ? (state.profile.name || 'Owner') : 'Coach');
-          coachRevByMonth.set(coachKey, { monthLabel: key, coachId: line.coachId, revenue: 0, currentLabel: name });
+          coachRevByMonth.set(coachKey, { monthLabel: key, coachId: line.coachId, revenue: 0, currentLabel: coach.name || 'Coach' });
         }
         coachRevByMonth.get(coachKey)!.revenue += line.amount;
       });
@@ -2900,22 +2901,40 @@ const App: React.FC = () => {
                   const createdB = b.created_at ? new Date(b.created_at).getTime() : 0;
                   return createdB - createdA;
                 });
-                const grouped: (AttendanceSession & { groupIds?: string[] })[] = [];
+                // DISPLAY ONLY — one row per real-world session, listing every
+                // coach who covered it, instead of one row per coach. Invoicing
+                // still prices each coach's row separately.
+                const grouped: (AttendanceSession & { groupIds?: string[]; coachNames?: string[] })[] = [];
                 const seen = new Map<string, number>();
 
+                const keyFor = (log: AttendanceSession) =>
+                  log.session_group_id
+                    ? `sgid:${log.session_group_id}`
+                    : `${log.classTypeId}_${log.date}_${(log.custom_event_name || '').toLowerCase()}_${log.is_competition ? 1 : 0}`;
+
+                const nameFor = (coachId?: string): string | null => {
+                  if (!coachId) return null;
+                  const staffMember = (state.staff || []).find((s: any) => s.id === coachId);
+                  if (staffMember?.name) return staffMember.name;
+                  if (coachId === state.profile.id) return state.profile.name || 'Me';
+                  return null;
+                };
+
                 logs.forEach(log => {
-                  if (log.is_competition) {
-                    const key = `${log.classTypeId}_${log.date}_comp`;
-                    if (seen.has(key)) {
-                      const index = seen.get(key)!;
-                      if (!grouped[index].groupIds) grouped[index].groupIds = [grouped[index].id];
-                      grouped[index].groupIds?.push(log.id);
-                    } else {
-                      seen.set(key, grouped.length);
-                      grouped.push({ ...log, groupIds: [log.id] });
+                  const key = keyFor(log);
+                  const name = nameFor(log.coach_id);
+                  const index = seen.get(key);
+
+                  if (index !== undefined) {
+                    const row = grouped[index];
+                    if (!row.groupIds) row.groupIds = [row.id];
+                    row.groupIds.push(log.id);
+                    if (name && !(row.coachNames || []).includes(name)) {
+                      row.coachNames = [...(row.coachNames || []), name];
                     }
                   } else {
-                    grouped.push(log);
+                    seen.set(key, grouped.length);
+                    grouped.push({ ...log, groupIds: [log.id], coachNames: name ? [name] : [] });
                   }
                 });
 
@@ -2939,7 +2958,12 @@ const App: React.FC = () => {
                           </p>
                           {session.is_competition && <span className="bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[7px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest shrink-0">Comp</span>}
                         </div>
-                        <p className="text-[9px] font-bold text-[#94a3b8] uppercase mt-0.5">{new Date(session.date).toLocaleDateString()}</p>
+                        <p className="text-[9px] font-bold text-[#94a3b8] uppercase mt-0.5">
+                          {new Date(session.date).toLocaleDateString()}
+                          {session.coachNames && session.coachNames.length > 0 && (
+                            <span className="text-[#1e4da1] dark:text-blue-400"> · {session.coachNames.join(', ')}</span>
+                          )}
+                        </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <button onClick={() => { setShowAllLogs(false); startEditSession(session); }} className="p-2 bg-white dark:bg-slate-700 text-slate-400 rounded-lg shadow-sm border border-slate-100 dark:border-slate-600"><Pencil size={12} /></button>
@@ -7516,14 +7540,8 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
   );
 
   /**
-   * The invoice month being viewed. Lines are selected on their BILLING month,
-   * not the calendar month of the date.
-   *
-   * This matters for a gym with billing_day = 20: work logged on 20 August
-   * belongs to the September invoice. The old code filtered sessions by calendar
-   * month before pricing them, so those sessions disappeared from every invoice
-   * until they happened to be archived — the September invoice you sent was
-   * missing everything from 20–31 August.
+   * Only used by the ARCHIVED history view, which shows one stored month.
+   * The live invoice ignores this entirely — see linesForGroup below.
    */
   const activeMonthKey = useMemo(() => {
     const m = calendarProps ? calendarProps.month : new Date().getMonth();
@@ -7639,13 +7657,12 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
     }
 
     // ── COACH VIEW ────────────────────────────────────────────────────────────
-    // A coach sees the same breakdown the owner sees for them: one turn-in
-    // payout for tumbling/class work, plus one invoice per school they coached
-    // at. Previously they saw a single "turnin" document, which silently
-    // excluded every cheer/school session they had worked.
+    // A coach sees exactly what the owner sees for them: one Tumbling invoice for
+    // class work, plus one invoice per school they coached at.
     if (state.profile.role === 'coach') {
       const myStaff = (state.staff || []).find(st => st.id === user?.id || (st.email && user?.email && st.email.toLowerCase() === user.email.toLowerCase()));
       const myCoachId = myStaff?.id || user?.id || state.profile.id;
+      const myName = myStaff?.name || state.profile.name || 'My';
       const mine = priced.coachLines.filter(l => l.coachId === myCoachId);
       if (mine.length === 0) return [];
 
@@ -7654,8 +7671,8 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       if (mine.some(l => l.orgId === null)) {
         out.push({
           id: `coach-self-turnin-${myCoachId}`,
-          label: 'My Coaching Invoice',
-          subLabel: 'Turn-in Pay',
+          label: `${myName} - Tumbling`,
+          subLabel: 'Tumbling Pay',
           studentIds: [],
           family_id: `turnin::${myCoachId}`,
           coachId: myCoachId,
@@ -7671,7 +7688,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
         const org = state.gyms.find(g => g.id === orgId);
         out.push({
           id: `coach-self-org-${myCoachId}-${orgId}`,
-          label: org?.name || 'Organization',
+          label: `${myName} - ${org?.name || 'Organization'}`,
           subLabel: `School Invoice`,
           studentIds: [],
           family_id: `org::${myCoachId}::${orgId}`,
@@ -7745,33 +7762,27 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       });
     });
 
-    // Add Staff Invoices (split into Turn-in & Organization invoices)
+    // ── COACH INVOICES ────────────────────────────────────────────────────────
+    // Registered STAFF only. The owner never gets an invoice — they are the one
+    // being paid by the gyms, not paid by themselves. Note the owner is still
+    // counted when a cheer session's rate is split (they were in the room), so
+    // the school is always billed in full; their own share simply isn't rendered
+    // as a document.
     if (state.profile.role === 'owner') {
-      const allCoaches = [...(state.staff || [])];
-      if (state.profile.id && !allCoaches.some(c => c.id === state.profile.id)) {
-        allCoaches.push({
-          id: state.profile.id,
-          name: state.profile.name || 'Owner',
-          pay_rate: state.profile.pay_rate || 0
-        } as any);
-      }
+      const allCoaches = (state.staff || []).filter(c => c.id && c.id !== state.profile.id);
 
       allCoaches.forEach(coach => {
         if (!coach.id) return;
 
-        // 1. Turn-in Invoice — what JFlips owes this coach for tumbling gym and
-        //    class work, at their own profile hourly rate. Only listed when they
-        //    actually coached something, so the list stops filling with R0 rows.
-        // Listed if the coach has ANY un-archived turn-in work — deliberately not
-        // restricted to the month on screen. Gating this on the active month made
-        // a coach's tumbling invoice vanish outright whenever its sessions fell
-        // into another billing period, which reads as data loss.
-        const hasTurnIn = priced.coachLines.some(l => l.coachId === coach.id && l.orgId === null);
-        if (hasTurnIn) {
+        // 1. "<Coach> - Tumbling" — their tumbling/class work, paid at the hourly
+        //    rate on their own staff profile. Listed whenever they have any
+        //    un-archived tumbling work, with no date restriction.
+        const hasTumbling = priced.coachLines.some(l => l.coachId === coach.id && l.orgId === null);
+        if (hasTumbling) {
           res.push({
             id: `staff-turnin-${coach.id}`,
-            label: `${coach.name} - Turn-in`,
-            subLabel: `Turn-in Pay (JFlips Owes Coach)`,
+            label: `${coach.name} - Tumbling`,
+            subLabel: `Tumbling Pay`,
             studentIds: [],
             family_id: `turnin::${coach.id}`,
             coachId: coach.id,
@@ -7783,8 +7794,9 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
           } as any);
         }
 
-        // 2. School Invoices — one per school this coach worked at, priced from
-        //    the sub-team rate split across the coaches who attended.
+        // 2. "<Coach> - <School>" — one per cheer school they coached at, priced
+        //    from the sub-team rate split across the coaches who attended.
+        //    Tumbling gyms never appear here: only cheer schools involve staff.
         const orgsWithSessions = new Set<string>(
           priced.coachLines
             .filter(l => l.coachId === coach.id && l.orgId)
@@ -7795,8 +7807,8 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
           const org = state.gyms.find(g => g.id === orgId);
           res.push({
             id: `staff-org-${coach.id}-${orgId}`,
-            label: `${coach.name} @ ${org?.name || 'Organization'}`,
-            subLabel: `Org Invoice for ${org?.name || 'Organization'}`,
+            label: `${coach.name} - ${org?.name || 'Organization'}`,
+            subLabel: `School Invoice`,
             studentIds: [],
             family_id: `org::${coach.id}::${orgId}`,
             coachId: coach.id,
@@ -9013,11 +9025,13 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
     const parsedComp = parseFloat(competitionRate);
 
     onSubmit(
-      name, 
-      isSubTeam ? sessionTypes : '', 
-      isSubTeam ? (isNaN(parsedPay) ? 0 : parsedPay) : 0, 
-      gymType, 
-      isSubTeam ? (isNaN(parsedHours) ? 1 : parsedHours) : 1, 
+      name,
+      isSubTeam ? sessionTypes : '',
+      // Rate and session length now save for main organizations too, so a session
+      // logged against the organization itself bills instead of coming out at R0.
+      isNaN(parsedPay) ? 0 : parsedPay,
+      gymType,
+      isNaN(parsedHours) ? 1 : parsedHours,
       isSubTeam ? teamRosterText.split(/\r?\n/).map(n => n.trim()).filter(n => n.length > 0) : [],
       // Pass the existing Bill To details straight through. These used to be
       // hardcoded to '', which wiped bill_to_name/address/phone to NULL on every
@@ -9062,71 +9076,82 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
         />
       </div>
 
+      {/* ── RATE & SESSION LENGTH ──────────────────────────────────────────────
+          Available on sub-teams AND on the main organization. A session logged
+          directly against the organization (rather than one of its sub-teams)
+          used to price at R0, because the rate box only existed on sub-teams. */}
+      <div className="grid grid-cols-2 gap-3">
+        {isSubTeam && gymType === 'cheer' && (
+          <div className="space-y-1">
+            <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Session Description</label>
+            <div className="relative">
+              <Dumbbell className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
+              <input
+                placeholder="E.G. TUMBLING"
+                value={sessionTypes}
+                onChange={e => setSessionTypes(e.target.value)}
+                className="w-full p-4 pl-10 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200"
+              />
+            </div>
+          </div>
+        )}
+        <div className={`space-y-1 ${!(isSubTeam && gymType === 'cheer') ? 'col-span-2' : ''}`}>
+          <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Rate per Hour (R)</label>
+          <div className="relative">
+            <Wallet className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
+            <input
+              type="number"
+              placeholder="300"
+              value={payAmount}
+              onChange={e => setPayAmount(e.target.value)}
+              className="w-full p-4 pl-10 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className={`space-y-1 ${!(isSubTeam && gymType === 'cheer') ? 'col-span-2' : ''}`}>
+          <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Session Length (Hours)</label>
+          <div className="relative">
+            <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
+            <input
+              type="number"
+              step="0.5"
+              min="0.5"
+              placeholder="2"
+              value={defaultHours}
+              onChange={e => setDefaultHours(e.target.value)}
+              className="w-full p-4 pl-10 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200"
+            />
+          </div>
+        </div>
+        {isSubTeam && gymType === 'cheer' && (
+          <div className="space-y-1">
+            <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Competition Rate (R/Hour)</label>
+            <div className="relative">
+              <Trophy className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
+              <input
+                type="number"
+                placeholder="500"
+                value={competitionRate}
+                onChange={e => setCompetitionRate(e.target.value)}
+                className="w-full p-4 pl-10 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {!isSubTeam && (
+        <p className="text-[8px] text-slate-400 leading-relaxed px-1">
+          This rate applies to sessions logged directly against {gymType === 'cheer' ? 'the organisation' : 'the gym'} itself.
+          {gymType === 'cheer' ? ' Sub-teams use their own rate.' : ' Classes under it use their own rate.'}
+        </p>
+      )}
+
       {isSubTeam && (
         <>
-          <div className="grid grid-cols-2 gap-3">
-            {gymType === 'cheer' && (
-              <div className="space-y-1">
-                <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Session Description</label>
-                <div className="relative">
-                  <Dumbbell className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                  <input
-                    placeholder="E.G. TUMBLING"
-                    value={sessionTypes}
-                    onChange={e => setSessionTypes(e.target.value)}
-                    className="w-full p-4 pl-10 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200"
-                  />
-                </div>
-              </div>
-            )}
-            <div className={`space-y-1 ${gymType === 'tumbling' ? 'col-span-2' : ''}`}>
-              <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Rate per Hour (R)</label>
-              <div className="relative">
-                <Wallet className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                <input
-                  type="number"
-                  placeholder="300"
-                  value={payAmount}
-                  onChange={e => setPayAmount(e.target.value)}
-                  className="w-full p-4 pl-10 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className={`space-y-1 ${gymType === 'tumbling' ? 'col-span-2' : ''}`}>
-              <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Session Length (Hours)</label>
-              <div className="relative">
-                <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                <input
-                  type="number"
-                  step="0.5"
-                  min="0.5"
-                  placeholder="2"
-                  value={defaultHours}
-                  onChange={e => setDefaultHours(e.target.value)}
-                  className="w-full p-4 pl-10 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200"
-                />
-              </div>
-            </div>
-            {gymType === 'cheer' && (
-              <div className="space-y-1">
-                <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Competition Rate (R/Hour)</label>
-                <div className="relative">
-                  <Trophy className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
-                  <input
-                    type="number"
-                    placeholder="500"
-                    value={competitionRate}
-                    onChange={e => setCompetitionRate(e.target.value)}
-                    className="w-full p-4 pl-10 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
           {gymType === 'cheer' && (
             <>
               <div className="space-y-1">

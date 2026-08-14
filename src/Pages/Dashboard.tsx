@@ -560,27 +560,58 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
       const createdB = b.created_at ? new Date(b.created_at).getTime() : 0;
       return createdB - createdA;
     });
-    const grouped: (AttendanceSession & { groupIds?: string[] })[] = [];
+    // DISPLAY ONLY — collapse the per-coach rows the app writes into one row per
+    // real-world session, so a class covered by two coaches is listed once with
+    // both names instead of appearing twice. Invoicing is untouched: it still
+    // prices each coach's row separately.
+    //
+    // This previously collapsed competition sessions only, which is why ordinary
+    // multi-coach classes showed up duplicated.
+    const grouped: (AttendanceSession & { groupIds?: string[]; coachNames?: string[] })[] = [];
     const seen = new Map<string, number>();
 
+    const keyFor = (log: AttendanceSession) =>
+      log.session_group_id
+        ? `sgid:${log.session_group_id}`
+        : `${log.classTypeId}_${log.date}_${(log.custom_event_name || '').toLowerCase()}_${log.is_competition ? 1 : 0}`;
+
+    const nameFor = (coachId?: string): string | null => {
+      if (!coachId) return null;
+      const staffMember = (state.staff || []).find((s: any) => s.id === coachId);
+      if (staffMember?.name) return staffMember.name;
+      if (coachId === state.profile.id) return state.profile.name || 'Me';
+      return null;
+    };
+
     logs.forEach(log => {
-      if (log.is_competition) {
-        const key = `${log.classTypeId}_${log.date}_comp`;
-        if (seen.has(key)) {
-          const index = seen.get(key)!;
-          if (!grouped[index].groupIds) grouped[index].groupIds = [grouped[index].id];
-          grouped[index].groupIds?.push(log.id);
-        } else {
-          seen.set(key, grouped.length);
-          grouped.push({ ...log, groupIds: [log.id] });
+      const key = keyFor(log);
+      const name = nameFor(log.coach_id);
+      const index = seen.get(key);
+
+      if (index !== undefined) {
+        const row = grouped[index];
+        if (!row.groupIds) row.groupIds = [row.id];
+        row.groupIds.push(log.id);
+        if (name && !(row.coachNames || []).includes(name)) {
+          row.coachNames = [...(row.coachNames || []), name];
         }
       } else {
-        grouped.push(log);
+        seen.set(key, grouped.length);
+        grouped.push({ ...log, groupIds: [log.id], coachNames: name ? [name] : [] });
       }
     });
 
     return grouped.slice(0, 10);
-  }, [state.sessions]);
+  }, [coachSessions, state.staff, state.profile]);
+
+  /** Distinct real-world sessions, so "View All (N)" matches the collapsed list. */
+  const totalLogCount = useMemo(() => new Set(
+    (coachSessions || []).map(log =>
+      log.session_group_id
+        ? `sgid:${log.session_group_id}`
+        : `${log.classTypeId}_${log.date}_${(log.custom_event_name || '').toLowerCase()}_${log.is_competition ? 1 : 0}`
+    )
+  ).size, [coachSessions]);
 
   const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -758,7 +789,7 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
             onClick={() => onShowAllLogs(true)}
             className="text-[#1e4da1] dark:text-blue-400 text-[9px] font-black uppercase tracking-widest hover:underline"
           >
-            View All ({state.sessions?.length || 0})
+            View All ({totalLogCount})
           </button>
         </div>
         <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-3">
@@ -784,7 +815,12 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                       <span className="bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[7px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest shrink-0">Comp</span>
                     )}
                   </div>
-                  <p className="text-[9px] font-bold text-[#94a3b8] uppercase mt-0.5">{new Date(session.date).toLocaleDateString()}</p>
+                  <p className="text-[9px] font-bold text-[#94a3b8] uppercase mt-0.5">
+                    {new Date(session.date).toLocaleDateString()}
+                    {(session as any).coachNames?.length > 0 && (
+                      <span className="text-[#1e4da1] dark:text-blue-400"> · {(session as any).coachNames.join(', ')}</span>
+                    )}
+                  </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {gym && <span className="text-[9px] font-black text-[#1e4da1] mr-1">{session.hours_coached || gym.default_hours || 1} HRS</span>}
