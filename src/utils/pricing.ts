@@ -496,7 +496,8 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
         amount: money(coachRate * coachHours),
         rate: coachRate,
         hours: coachHours,
-        splitCount: 1
+        splitCount: 1,
+        ...monthStamp
       });
     }
   }
@@ -513,4 +514,204 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
 /** Total of a set of lines, safe against float drift. */
 export function sumLines(lines: { amount: number }[]): number {
   return money((lines || []).reduce((acc, l) => acc + num(l.amount, 0), 0));
+}
+
+export interface CycleFinancials {
+  tumbling: {
+    grossRevenue: number;
+    coachTurnInPay: number;
+    netProfit: number;
+    sessionCount: number;
+    studentAttendanceCount: number;
+  };
+  schools: {
+    grossInvoiced: number;
+    coachPay: number;
+    netImpact: number;
+    sessionCount: number;
+    hoursCoached: number;
+  };
+  gyms: {
+    grossRevenue: number;
+    netProfit: number;
+    sessionCount: number;
+    hoursCoached: number;
+  };
+  totals: {
+    grossInvoiced: number;
+    totalCoachPayout: number;
+    netCycleRevenue: number;
+    totalSessions: number;
+  };
+  itemized: Array<{
+    id: string;
+    groupId: string;
+    date: string;
+    title: string;
+    category: 'tumbling' | 'schools' | 'gyms';
+    grossAmount: number;
+    coachCost: number;
+    netAmount: number;
+    subtext: string;
+  }>;
+}
+
+/**
+ * Calculates cycle revenue and stream breakdowns strictly based on the current
+ * live invoice state (pricedResult), ensuring zero drift when sessions are added,
+ * edited, or deleted.
+ */
+export function calculateCycleFinancials(
+  priced: PricedResult,
+  sessions: SessionRow[] = [],
+  monthFilter?: { month: number; year: number }
+): CycleFinancials {
+  const filterFn = (dateStr: string) => {
+    if (!monthFilter) return true;
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    return d.getMonth() === monthFilter.month && d.getFullYear() === monthFilter.year;
+  };
+
+  const clientLines = priced.clientLines.filter(l => filterFn(l.date));
+  const coachLines = priced.coachLines.filter(l => filterFn(l.date));
+
+  // Map coachLines by groupId for fast lookup of coach costs per session
+  const coachLinesByGroup = new Map<string, PricedCoachLine[]>();
+  coachLines.forEach(cl => {
+    const list = coachLinesByGroup.get(cl.groupId) || [];
+    list.push(cl);
+    coachLinesByGroup.set(cl.groupId, list);
+  });
+
+  // Client lines grouped by groupId
+  const clientLinesByGroup = new Map<string, PricedClientLine[]>();
+  clientLines.forEach(cl => {
+    const list = clientLinesByGroup.get(cl.groupId) || [];
+    list.push(cl);
+    clientLinesByGroup.set(cl.groupId, list);
+  });
+
+  // 1. Tumbling
+  const tumblingClientLines = clientLines.filter(l => l.kind === 'class');
+  const tumblingGross = sumLines(tumblingClientLines);
+  
+  // Tumbling coach costs: coachLines corresponding to class groups
+  const tumblingCoachLines = coachLines.filter(l => {
+    const cLines = clientLinesByGroup.get(l.groupId);
+    return cLines && cLines.some(cl => cl.kind === 'class');
+  });
+  const tumblingCoachCost = sumLines(tumblingCoachLines);
+  const tumblingNet = money(tumblingGross - tumblingCoachCost);
+  const tumblingGroupIds = new Set(tumblingClientLines.map(l => l.groupId));
+
+  // 2. Schools (Cheer)
+  const schoolClientLines = clientLines.filter(l => l.kind === 'cheer');
+  const schoolsGross = sumLines(schoolClientLines);
+  const schoolCoachLines = coachLines.filter(l => l.orgId !== null);
+  const schoolsCoachPay = sumLines(schoolCoachLines);
+  const schoolsGroupIds = new Set(schoolClientLines.map(l => l.groupId));
+  
+  // Calculate total school hours coached
+  const schoolsHours = money(schoolCoachLines.reduce((acc, l) => acc + num(l.hours, 0), 0));
+
+  // 3. Gyms (External partner gym coaching)
+  const gymClientLines = clientLines.filter(l => l.kind === 'gym');
+  const gymsGross = sumLines(gymClientLines);
+  const gymsNet = gymsGross; // 100% straight to business
+  const gymsGroupIds = new Set(gymClientLines.map(l => l.groupId));
+  
+  const gymSessionsFiltered = (sessions || []).filter(s => {
+    if (!filterFn(s.date)) return false;
+    const gKey = sessionGroupKey(s);
+    return gymsGroupIds.has(gKey);
+  });
+  const gymsHours = money(gymSessionsFiltered.reduce((acc, s) => acc + positive(s.hours_coached, 1), 0));
+
+  // Itemized breakdown per group
+  const allGroupIds = Array.from(new Set([...tumblingGroupIds, ...schoolsGroupIds, ...gymsGroupIds]));
+  const itemized: CycleFinancials['itemized'] = [];
+
+  allGroupIds.forEach(gid => {
+    const cLines = clientLinesByGroup.get(gid) || [];
+    const kLines = coachLinesByGroup.get(gid) || [];
+    if (cLines.length === 0 && kLines.length === 0) return;
+
+    const firstClient = cLines[0];
+    const category = firstClient ? (firstClient.kind === 'cheer' ? 'schools' : firstClient.kind === 'gym' ? 'gyms' : 'tumbling') : 'schools';
+    const date = firstClient?.date || kLines[0]?.date || '';
+    const title = firstClient ? (category === 'tumbling' ? (firstClient.description.split(' (')[0] || firstClient.targetName) : firstClient.targetName) : (kLines[0]?.targetName || 'Session');
+    
+    const grossAmount = sumLines(cLines);
+    let coachCost = 0;
+    let netAmount = grossAmount;
+    let subtext = '';
+
+    if (category === 'tumbling') {
+      coachCost = sumLines(kLines);
+      netAmount = money(grossAmount - coachCost);
+      const studentCount = cLines.length;
+      const coachText = kLines.length > 0 ? ` • ${kLines.length} Coach${kLines.length > 1 ? 'es' : ''} (R${coachCost} turn-in)` : ' • Owner coached';
+      subtext = `${studentCount} Athlete${studentCount !== 1 ? 's' : ''}${coachText}`;
+    } else if (category === 'schools') {
+      coachCost = sumLines(kLines);
+      netAmount = 0; // Pass-through
+      const coachNames = firstClient?.coachNames?.join(', ') || (kLines.length > 0 ? `${kLines.length} coaches` : 'Coaches');
+      subtext = `School Pass-Through • ${coachNames} (R${coachCost} paid)`;
+    } else { // gyms
+      coachCost = 0;
+      netAmount = grossAmount;
+      subtext = `Gym Org • Direct Business Revenue`;
+    }
+
+    itemized.push({
+      id: gid,
+      groupId: gid,
+      date,
+      title,
+      category,
+      grossAmount,
+      coachCost,
+      netAmount,
+      subtext
+    });
+  });
+
+  itemized.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  // Totals
+  const totalGrossInvoiced = money(tumblingGross + schoolsGross + gymsGross);
+  const totalCoachPayout = money(tumblingCoachCost + schoolsCoachPay);
+  const netCycleRevenue = money(tumblingNet + gymsNet); // + schoolsNet which is 0
+  const totalSessions = tumblingGroupIds.size + schoolsGroupIds.size + gymsGroupIds.size;
+
+  return {
+    tumbling: {
+      grossRevenue: tumblingGross,
+      coachTurnInPay: tumblingCoachCost,
+      netProfit: tumblingNet,
+      sessionCount: tumblingGroupIds.size,
+      studentAttendanceCount: tumblingClientLines.length
+    },
+    schools: {
+      grossInvoiced: schoolsGross,
+      coachPay: schoolsCoachPay,
+      netImpact: 0,
+      sessionCount: schoolsGroupIds.size,
+      hoursCoached: schoolsHours
+    },
+    gyms: {
+      grossRevenue: gymsGross,
+      netProfit: gymsNet,
+      sessionCount: gymsGroupIds.size,
+      hoursCoached: gymsHours
+    },
+    totals: {
+      grossInvoiced: totalGrossInvoiced,
+      totalCoachPayout,
+      netCycleRevenue,
+      totalSessions
+    },
+    itemized
+  };
 }

@@ -140,6 +140,7 @@ export interface StaffProfile {
   ownerId?: string; // owner_id uuid
   name?: string; // name text
   email?: string; // email text
+  username?: string; // username text
   payRate?: number; // pay_rate numeric
   bankName?: string; // bank_name text
   accountNumber?: string; // account_number text
@@ -157,6 +158,7 @@ export interface Profile {
   id?: string;
   /** The signed-in person's own name (coaches: their staff_profiles.name). */
   name?: string;
+  username?: string;
   businessName: string;
   bankName: string;
   accountNumber: string;

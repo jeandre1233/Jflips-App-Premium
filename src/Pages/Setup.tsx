@@ -73,6 +73,7 @@ const CoachApprovalCard: React.FC<{
   const [canViewSchoolGyms, setCanViewSchoolGyms] = useState<boolean>(coach.canViewSchoolGyms ?? false);
   const [assignedCheerOrgIds, setAssignedCheerOrgIds] = useState<string[]>(coach.assignedCheerOrgIds || []);
   const [payRate, setPayRate] = useState<number>(coach.payRate || 0);
+  const [username, setUsername] = useState<string>(coach.username || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -80,7 +81,8 @@ const CoachApprovalCard: React.FC<{
     setCanViewSchoolGyms(coach.canViewSchoolGyms ?? false);
     setAssignedCheerOrgIds(coach.assignedCheerOrgIds || []);
     setPayRate(coach.payRate || 0);
-  }, [coach.canViewTumbling, coach.canViewSchoolGyms, coach.assignedCheerOrgIds, coach.payRate]);
+    setUsername(coach.username || '');
+  }, [coach.canViewTumbling, coach.canViewSchoolGyms, coach.assignedCheerOrgIds, coach.payRate, coach.username]);
 
   const toggleCheerGym = (gymId: string) => {
     if (assignedCheerOrgIds.includes(gymId)) {
@@ -93,12 +95,14 @@ const CoachApprovalCard: React.FC<{
   const handleApproveOrUpdate = async (status: 'approved' | 'rejected') => {
     setIsSubmitting(true);
     try {
+      const cleanUsername = username.trim().replace(/^@/, '').toLowerCase();
       const updateData: any = {
         status,
         can_view_tumbling: canViewTumbling,
         can_view_school_gyms: canViewSchoolGyms,
         assigned_cheer_org_ids: assignedCheerOrgIds,
-        pay_rate: payRate
+        pay_rate: payRate,
+        username: cleanUsername || null
       };
       if (status === 'approved') {
         updateData.approved_at = new Date().toISOString();
@@ -111,8 +115,8 @@ const CoachApprovalCard: React.FC<{
         .select('*')
         .single();
 
-      if (dbErr && (dbErr.message.includes('can_view_school_gyms') || dbErr.message.includes('column'))) {
-        delete updateData.can_view_school_gyms;
+      if (dbErr && (dbErr.message.includes('can_view_school_gyms') || dbErr.message.includes('username') || dbErr.message.includes('column'))) {
+        if (dbErr.message.includes('can_view_school_gyms')) delete updateData.can_view_school_gyms;
         const retry = await supabase
           .from('staff_profiles')
           .update(updateData)
@@ -150,7 +154,7 @@ const CoachApprovalCard: React.FC<{
 
       showToast(
         status === 'approved' 
-          ? `Coach ${coach.name || coach.email} approved and permissions updated!` 
+          ? `Coach ${coach.name || coach.email} approved and updated!` 
           : `Coach request for ${coach.name || coach.email} marked as rejected.`,
         status === 'approved' ? 'success' : 'info'
       );
@@ -165,16 +169,23 @@ const CoachApprovalCard: React.FC<{
 
   return (
     <div className="p-6 bg-white dark:bg-slate-800/80 border border-slate-100 dark:border-slate-800 rounded-3xl shadow-sm space-y-4">
-      {/* Header: Name, Email & Status */}
+      {/* Header: Name, Email, Username & Status */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/40 text-[#1e4da1] dark:text-blue-400 font-black rounded-2xl flex items-center justify-center uppercase">
             {(coach.name || coach.email || 'C').charAt(0)}
           </div>
           <div>
-            <p className="text-sm font-black text-slate-900 dark:text-white italic uppercase">
-              {coach.name || 'Unnamed Coach'}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-black text-slate-900 dark:text-white italic uppercase">
+                {coach.name || 'Unnamed Coach'}
+              </p>
+              {coach.username && (
+                <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-mono font-bold text-[8px] rounded-md">
+                  @{coach.username}
+                </span>
+              )}
+            </div>
             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
               {coach.email}
             </p>
@@ -192,11 +203,33 @@ const CoachApprovalCard: React.FC<{
         </span>
       </div>
 
-      {/* Permissions Configuration */}
+      {/* Permissions & Credentials Configuration */}
       <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl space-y-3 border border-slate-100 dark:border-slate-800/80">
         <p className="text-[9px] font-black uppercase tracking-widest text-[#1e4da1] dark:text-blue-400">
-          Coach Access Permissions
+          Coach Credentials & Access Permissions
         </p>
+
+        {/* Coach Username Input */}
+        <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-transparent flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-black uppercase text-slate-800 dark:text-slate-200 block">
+              Coach Username
+            </span>
+            <span className="text-[8px] text-slate-400 font-bold">
+              Used for instant login without entering email
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-xs font-mono font-black text-slate-400">@</span>
+            <input
+              type="text"
+              value={username}
+              onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ''))}
+              className="w-36 p-2 bg-slate-50 dark:bg-slate-900 rounded-lg text-xs font-mono font-bold outline-none text-left dark:text-slate-200 border border-slate-100 dark:border-slate-800 focus:border-blue-400"
+              placeholder="username"
+            />
+          </div>
+        </div>
 
         {/* Tumbling Toggle */}
         <label className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-xl cursor-pointer hover:border-blue-200 transition-colors border border-transparent">
@@ -320,7 +353,7 @@ const CoachApprovalCard: React.FC<{
             onClick={() => handleApproveOrUpdate('approved')}
             className="w-full bg-[#1e4da1] hover:bg-blue-600 text-white py-3 rounded-xl font-black text-[9px] uppercase tracking-wider shadow-md flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
           >
-            <Check size={14} /> Update Coach Permissions
+            <Check size={14} /> Update Coach & Permissions
           </button>
         )}
       </div>
@@ -338,6 +371,7 @@ const StaffManagementSection: React.FC<{
     ownerId: s.ownerId || (s as any).owner_id,
     name: s.name || 'Unnamed Coach',
     email: s.email || '',
+    username: s.username || (s as any).username || '',
     payRate: s.payRate || (s as any).pay_rate,
     status: s.status || 'pending',
     canViewTumbling: s.canViewTumbling ?? (s as any).can_view_tumbling ?? false,
@@ -485,6 +519,10 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
   const [profileForm, setProfileForm] = useState<Profile>(state.profile);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isOwner = state.profile.role === 'owner';
+
+  useEffect(() => {
+    setProfileForm(state.profile);
+  }, [state.profile]);
 
   const [googleUser, setGoogleUser] = useState<any>(null);
   const [googleToken, setGoogleToken] = useState<string | null>(null);
@@ -925,6 +963,18 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                   <div className="space-y-1">
                     <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Coach Name</label>
                     <input placeholder="NAME" value={profileForm.businessName} onChange={e => setProfileForm({ ...profileForm, businessName: e.target.value })} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Username (Login Handle)</label>
+                    <div className="relative flex items-center">
+                      <span className="absolute left-4 text-xs font-mono font-black text-slate-400">@</span>
+                      <input 
+                        placeholder="username" 
+                        value={profileForm.username || ''} 
+                        onChange={e => setProfileForm({ ...profileForm, username: e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, '') })} 
+                        className="w-full p-4 pl-9 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-mono font-bold text-[10px] outline-none dark:text-slate-200" 
+                      />
+                    </div>
                   </div>
                   <div className="space-y-1">
                     <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Email Address</label>

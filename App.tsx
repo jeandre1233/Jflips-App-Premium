@@ -943,6 +943,7 @@ const App: React.FC = () => {
             ownerId: s.owner_id,
             name: s.name,
             email: s.email,
+            username: s.username || undefined,
             payRate: s.pay_rate,
             bankName: s.bank_name,
             accountNumber: s.account_number,
@@ -993,6 +994,7 @@ const App: React.FC = () => {
           mappedProfile = {
             ...INITIAL_PROFILE,
             name: staffP.name || undefined,
+            username: staffP.username || undefined,
             businessName: coachOwnerP?.business_name || INITIAL_PROFILE.businessName,
             logo: coachOwnerP?.logo || INITIAL_PROFILE.logo,
             role: 'coach',
@@ -1699,12 +1701,17 @@ const App: React.FC = () => {
       });
       if (pErr) { alert("Owner Profile Save Error: " + pErr.message); return; }
     } else {
-      const { error: sErr } = await supabase.from('staff_profiles').update({
+      const coachUpdateData: any = {
+        name: profile.name || profile.businessName,
         bank_name: profile.bankName,
         account_number: profile.accountNumber,
         branch_code: profile.branchCode,
         account_type: profile.accountType
-      }).eq('id', user.id);
+      };
+      if (profile.username !== undefined) {
+        coachUpdateData.username = profile.username.trim().replace(/^@/, '').toLowerCase() || null;
+      }
+      const { error: sErr } = await supabase.from('staff_profiles').update(coachUpdateData).eq('id', user.id);
       if (sErr) { alert("Coach Profile Save Error: " + sErr.message); return; }
     }
 
@@ -3918,7 +3925,9 @@ const RejectedCoachScreen: React.FC<{ email?: string; onLogout: () => void }> = 
 
 const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const [authMode, setAuthMode] = useState<'signin' | 'coach_signup' | 'owner_signup'>('signin');
+  const [loginIdentifier, setLoginIdentifier] = useState('');
   const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [businessName, setBusinessName] = useState('');
@@ -3931,7 +3940,51 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     setLoading(true);
     setError(null);
     try {
-      const { error: authError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      const trimmedInput = loginIdentifier.trim();
+      let targetEmail = trimmedInput;
+
+      // If user typed a username instead of an email address
+      if (!trimmedInput.includes('@')) {
+        const cleanUsername = trimmedInput.replace(/^@/, '').toLowerCase();
+        
+        // 1. Try secure RPC function
+        let resolvedEmail: string | null = null;
+        try {
+          const { data: rpcEmail, error: rpcErr } = await supabase
+            .rpc('get_email_by_username', { p_username: cleanUsername });
+          if (!rpcErr && rpcEmail) {
+            resolvedEmail = rpcEmail;
+          }
+        } catch (rpcEx) {
+          console.warn('RPC lookup note:', rpcEx);
+        }
+
+        // 2. Fallback direct lookup on staff_profiles
+        if (!resolvedEmail) {
+          const { data: staffMatch } = await supabase
+            .from('staff_profiles')
+            .select('email')
+            .ilike('username', cleanUsername)
+            .maybeSingle();
+
+          if (staffMatch?.email) {
+            resolvedEmail = staffMatch.email;
+          }
+        }
+
+        if (!resolvedEmail) {
+          setError(`No account found with username "@${cleanUsername}". Please verify your username or sign in with your email.`);
+          setLoading(false);
+          return;
+        }
+
+        targetEmail = resolvedEmail;
+      }
+
+      const { error: authError } = await supabase.auth.signInWithPassword({ 
+        email: targetEmail.trim().toLowerCase(), 
+        password 
+      });
       if (authError) setError(authError.message);
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred during sign in');
@@ -3983,11 +4036,13 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
       }
 
       // 3. Create staff_profiles row with status: 'pending'
+      const cleanUsername = username.trim().replace(/^@/, '').toLowerCase();
       const { error: staffErr } = await supabase.from('staff_profiles').insert({
         id: authData.user.id,
         owner_id: owner.id,
         name: name.trim(),
         email: email.trim().toLowerCase(),
+        username: cleanUsername || null,
         status: 'pending',
         can_view_tumbling: false,
         assigned_cheer_org_ids: []
@@ -4137,14 +4192,14 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         {authMode === 'signin' && (
           <form onSubmit={handleSignIn} className="space-y-4">
             <div className="space-y-1">
-              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Email Address</label>
+              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Username or Email</label>
               <div className="relative">
                 <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={16} />
                 <input
-                  type="email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="you@example.com"
+                  type="text"
+                  value={loginIdentifier}
+                  onChange={e => setLoginIdentifier(e.target.value)}
+                  placeholder="username or you@gym.com"
                   className="w-full bg-white/5 border border-white/8 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
                   required
                 />
@@ -4193,6 +4248,20 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                   placeholder="Coach Name"
                   className="w-full bg-white/5 border border-white/8 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
                   required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[8px] font-black text-white/30 uppercase ml-4">Username (Optional)</label>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 font-mono text-sm">@</span>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ''))}
+                  placeholder="coach_username"
+                  className="w-full bg-white/5 border border-white/8 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-bold outline-none text-white placeholder-white/20 focus:border-blue-500/50 transition-colors"
                 />
               </div>
             </div>

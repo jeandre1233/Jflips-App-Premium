@@ -23,12 +23,18 @@ import {
   ClassType, 
   Gym, 
   ClassSchedule, 
-  HistoryMonth,
-  StaffProfile,
-  Profile,
+  HistoryMonth, 
+  StaffProfile, 
+  Profile, 
   getStudentSessionPrice 
 } from '../../types';
 import { SyncStatusBadge } from '../components/SyncStatusBadge';
+import { 
+  priceSessions, 
+  calculateCycleFinancials, 
+  sumLines, 
+  PricingContext 
+} from '../utils/pricing';
 
 // --- CONSTANTS ---
 const MONTHS = [
@@ -380,176 +386,46 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
   const [breakdownYear, setBreakdownYear] = useState(now.getFullYear());
   const isOwner = state.profile.role === 'owner';
 
+  const pricingCtx: PricingContext = useMemo(() => ({
+    gyms: state.gyms || [],
+    classTypes: state.classTypes || [],
+    students: state.students || [],
+    staff: state.staff || [],
+    profile: state.profile
+  }), [state.gyms, state.classTypes, state.students, state.staff, state.profile]);
+
+  const priced = useMemo(
+    () => priceSessions(state.sessions || [], pricingCtx),
+    [state.sessions, pricingCtx]
+  );
+
+  // Live cycle financials across all active invoice data (no date restriction)
+  const activeCycleFinancials = useMemo(
+    () => calculateCycleFinancials(priced, state.sessions || []),
+    [priced, state.sessions]
+  );
+
+  // Month-filtered financials for the breakdown modal
+  const monthlyFinancials = useMemo(
+    () => calculateCycleFinancials(priced, state.sessions || [], { month: breakdownMonth, year: breakdownYear }),
+    [priced, state.sessions, breakdownMonth, breakdownYear]
+  );
+
   const coachSessions = useMemo(() => {
     if (isOwner) return state.sessions || [];
     const myId = state.profile?.id;
     return (state.sessions || []).filter(s => s.coach_id === myId);
   }, [state.sessions, isOwner, state.profile]);
 
-  const revenue = useMemo(() => (state.sessions || []).reduce((acc, sess) => {
-    const ct = (state.classTypes || []).find(c => c.id === sess.classTypeId);
-    const gym = (state.gyms || []).find(g => g.id === sess.classTypeId);
-    
-    let price = ct ? ct.price : (gym ? gym.pay_amount : 0);
-    if (gym && sess.custom_event_name) {
-      const customPreset = gym.custom_event_presets?.find(p => {
-        const name = p.includes(':') ? p.split(':')[0] : p;
-        return name.toLowerCase() === sess.custom_event_name?.toLowerCase();
-      });
-      if (customPreset && customPreset.includes(':')) {
-        const ratePart = customPreset.split(':')[1];
-        const parsed = parseFloat(ratePart);
-        if (!isNaN(parsed)) {
-          price = parsed;
-        }
-      }
-    }
-    if (sess.is_competition && gym?.competition_rate) {
-      price = gym.competition_rate;
-    }
-
-    if (gym) {
-      return acc + (price * (sess.hours_coached || gym.default_hours || 1));
-    }
-    const className = ct ? ct.name : '';
-    const sessionSum = (sess.studentIds || []).reduce((sum, sid) => {
-      const student = (state.students || []).find(s => s.id === sid);
-      return sum + getStudentSessionPrice(student, sess, price, className);
-    }, 0);
-    return acc + sessionSum;
-  }, 0), [state.sessions, state.classTypes, state.gyms]);
-
-  const monthlyData = useMemo(() => {
-    const sessionsInMonth = (state.sessions || []).filter(sess => {
-      if (!sess.date) return false;
-      const d = new Date(sess.date);
-      return d.getMonth() === breakdownMonth && d.getFullYear() === breakdownYear;
-    });
-
-    let tumblingRevenue = 0;
-    let tumblingCount = 0;
-    let tumblingStudentsCount = 0;
-
-    let schoolsRevenue = 0;
-    let schoolsCount = 0;
-    let schoolsHours = 0;
-
-    let gymsRevenue = 0;
-    let gymsCount = 0;
-    let gymsHours = 0;
-
-    const itemizedList: {
-      id: string;
-      date: string;
-      title: string;
-      category: 'tumbling' | 'schools' | 'gyms';
-      amount: number;
-      subtext: string;
-    }[] = [];
-
-    sessionsInMonth.forEach(sess => {
-      const ct = (state.classTypes || []).find(c => c.id === sess.classTypeId);
-      const gym = (state.gyms || []).find(g => g.id === sess.classTypeId);
-
-      let price = ct ? ct.price : (gym ? gym.pay_amount : 0);
-      if (gym && sess.custom_event_name) {
-        const customPreset = gym.custom_event_presets?.find(p => {
-          const name = p.includes(':') ? p.split(':')[0] : p;
-          return name.toLowerCase() === sess.custom_event_name?.toLowerCase();
-        });
-        if (customPreset && customPreset.includes(':')) {
-          const ratePart = customPreset.split(':')[1];
-          const parsed = parseFloat(ratePart);
-          if (!isNaN(parsed)) {
-            price = parsed;
-          }
-        }
-      }
-      if (sess.is_competition && gym?.competition_rate) {
-        price = gym.competition_rate;
-      }
-
-      if (gym) {
-        const hours = sess.hours_coached || gym.default_hours || 1;
-        const amt = price * hours;
-        const isSchool = gym.gym_type === 'cheer' || gym.name.toLowerCase().includes('school');
-
-        if (isSchool) {
-          schoolsRevenue += amt;
-          schoolsCount += 1;
-          schoolsHours += hours;
-          itemizedList.push({
-            id: sess.id,
-            date: sess.date,
-            title: gym.name + (sess.custom_event_name ? ` (${sess.custom_event_name})` : ''),
-            category: 'schools',
-            amount: amt,
-            subtext: `${hours} HR${hours > 1 ? 'S' : ''} @ R${price}/hr`
-          });
-        } else {
-          gymsRevenue += amt;
-          gymsCount += 1;
-          gymsHours += hours;
-          itemizedList.push({
-            id: sess.id,
-            date: sess.date,
-            title: gym.name + (sess.custom_event_name ? ` (${sess.custom_event_name})` : ''),
-            category: 'gyms',
-            amount: amt,
-            subtext: `${hours} HR${hours > 1 ? 'S' : ''} @ R${price}/hr`
-          });
-        }
-      } else {
-        const className = ct ? ct.name : 'Tumbling Session';
-        const studentCount = sess.studentIds?.length || 0;
-        const sessionSum = (sess.studentIds || []).reduce((sum, sid) => {
-          const student = (state.students || []).find(s => s.id === sid);
-          return sum + getStudentSessionPrice(student, sess, price, className);
-        }, 0);
-
-        tumblingRevenue += sessionSum;
-        tumblingCount += 1;
-        tumblingStudentsCount += studentCount;
-
-        itemizedList.push({
-          id: sess.id,
-          date: sess.date,
-          title: className + (sess.custom_event_name ? ` (${sess.custom_event_name})` : ''),
-          category: 'tumbling',
-          amount: sessionSum,
-          subtext: `${studentCount} Student${studentCount !== 1 ? 's' : ''}`
-        });
-      }
-    });
-
-    const total = tumblingRevenue + schoolsRevenue + gymsRevenue;
-
-    return {
-      total,
-      tumblingRevenue,
-      tumblingCount,
-      tumblingStudentsCount,
-      schoolsRevenue,
-      schoolsCount,
-      schoolsHours,
-      gymsRevenue,
-      gymsCount,
-      gymsHours,
-      itemizedList: itemizedList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    };
-  }, [breakdownMonth, breakdownYear, state.sessions, state.classTypes, state.gyms, state.students]);
-
   const matTime = useMemo(() => {
     return (coachSessions || []).reduce((acc, sess) => acc + (sess.hours_coached || 1), 0);
   }, [coachSessions]);
 
-  const staffPay = useMemo(() => {
-    return (coachSessions || []).reduce((acc, sess) => {
-      const coach = (state.staff || []).find(s => s.id === sess.coach_id);
-      const coachPayRate = isOwner ? (coach?.payRate || 0) : (state.profile.pay_rate || 0);
-      return acc + (coachPayRate * (sess.hours_coached || 1));
-    }, 0);
-  }, [coachSessions, state.staff, isOwner, state.profile.pay_rate]);
+  const coachEarnings = useMemo(() => {
+    if (isOwner) return activeCycleFinancials.totals.totalCoachPayout;
+    const myId = state.profile?.id;
+    return sumLines(priced.coachLines.filter(cl => cl.coachId === myId));
+  }, [isOwner, activeCycleFinancials.totals.totalCoachPayout, priced.coachLines, state.profile?.id]);
 
   const recentLogs = useMemo(() => {
     const logs = [...(coachSessions || [])].sort((a, b) => {
@@ -678,13 +554,20 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
             <p className="text-white/60 text-[9px] font-black uppercase tracking-[0.15em] mb-1">
               {isOwner ? 'Cycle Revenue' : 'Mat Time'}
             </p>
-            <h3 className="text-3xl font-black italic">{isOwner ? `R${revenue}` : `${matTime} HRS`}</h3>
+            <h3 className="text-3xl font-black italic">
+              {isOwner ? `R${activeCycleFinancials.totals.netCycleRevenue}` : `${matTime} HRS`}
+            </h3>
+            {isOwner && (
+              <p className="text-[9px] font-bold text-white/70 mt-0.5">
+                Gross: R{activeCycleFinancials.totals.grossInvoiced}
+              </p>
+            )}
           </div>
           
-          <div className="z-10 border-t border-white/10 pt-3 w-full">
+          <div className="z-10 border-t border-white/10 pt-2.5 w-full">
             <div className="flex flex-col">
-              <p className="text-white/60 text-[8px] font-black uppercase tracking-widest">{isOwner ? 'Staff Pay' : 'My Earnings'}</p>
-              <p className={`text-sm font-black italic ${isOwner ? 'text-emerald-400' : 'text-blue-200'}`}>R{staffPay}</p>
+              <p className="text-white/60 text-[8px] font-black uppercase tracking-widest">{isOwner ? 'Staff Payout' : 'My Earnings'}</p>
+              <p className={`text-sm font-black italic ${isOwner ? 'text-emerald-400' : 'text-blue-200'}`}>R{coachEarnings}</p>
             </div>
           </div>
           {isOwner ? (
@@ -859,11 +742,11 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                       <PieChart size={20} />
                     </span>
                     <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase italic">
-                      Revenue Breakdown
+                      Cycle Revenue Streams
                     </h3>
                   </div>
                   <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">
-                    Monthly income across revenue streams
+                    Calculated from current live invoices & coach turn-in rates
                   </p>
                 </div>
                 <button
@@ -916,12 +799,16 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                 <div className="flex justify-between items-start relative z-10">
                   <div>
                     <p className="text-blue-200 text-[9px] font-black uppercase tracking-widest">
-                      Total Monthly Revenue
+                      Net Business Revenue
                     </p>
-                    <h2 className="text-4xl font-black italic mt-1">R{monthlyData.total}</h2>
+                    <h2 className="text-4xl font-black italic mt-1">R{monthlyFinancials.totals.netCycleRevenue}</h2>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[10px] font-bold text-blue-100">
+                      <span>Gross Invoiced: <b className="text-white">R{monthlyFinancials.totals.grossInvoiced}</b></span>
+                      <span>Staff Payout: <b className="text-white">R{monthlyFinancials.totals.totalCoachPayout}</b></span>
+                    </div>
                   </div>
                   <span className="px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-[9px] font-black uppercase tracking-wider">
-                    {monthlyData.itemizedList.length} Sessions
+                    {monthlyFinancials.totals.totalSessions} Sessions
                   </span>
                 </div>
                 <TrendingUp className="absolute -bottom-4 -right-4 text-white/10 w-28 h-28 rotate-12" />
@@ -934,7 +821,7 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                 </h4>
 
                 {/* 1. Tumbling */}
-                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2">
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
@@ -942,36 +829,36 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                       </div>
                       <div>
                         <h5 className="text-xs font-black uppercase italic text-slate-900 dark:text-white">
-                          Tumbling
+                          Tumbling Classes
                         </h5>
                         <p className="text-[8px] font-bold text-slate-400 uppercase">
-                          Classes & Private Sessions
+                          Individual Athlete Invoices (Gross – Turn-in Pay)
                         </p>
                       </div>
                     </div>
                     <div className="text-right">
                       <span className="text-sm font-black italic text-[#1e4da1] dark:text-blue-400">
-                        R{monthlyData.tumblingRevenue}
+                        Net: R{monthlyFinancials.tumbling.netProfit}
                       </span>
                       <p className="text-[8px] font-bold text-slate-400">
-                        {monthlyData.total > 0 ? Math.round((monthlyData.tumblingRevenue / monthlyData.total) * 100) : 0}% of total
+                        Gross: R{monthlyFinancials.tumbling.grossRevenue} · Coach Cost: R{monthlyFinancials.tumbling.coachTurnInPay}
                       </p>
                     </div>
                   </div>
                   <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
                     <div
                       className="bg-[#1e4da1] dark:bg-blue-500 h-full transition-all duration-500"
-                      style={{ width: `${monthlyData.total > 0 ? (monthlyData.tumblingRevenue / monthlyData.total) * 100 : 0}%` }}
+                      style={{ width: `${monthlyFinancials.totals.grossInvoiced > 0 ? (monthlyFinancials.tumbling.grossRevenue / monthlyFinancials.totals.grossInvoiced) * 100 : 0}%` }}
                     />
                   </div>
                   <div className="flex justify-between text-[8px] font-bold text-slate-400 uppercase pt-0.5">
-                    <span>{monthlyData.tumblingCount} Sessions</span>
-                    <span>{monthlyData.tumblingStudentsCount} Student Attendances</span>
+                    <span>{monthlyFinancials.tumbling.sessionCount} Classes</span>
+                    <span>{monthlyFinancials.tumbling.studentAttendanceCount} Athlete Invoiced Entries</span>
                   </div>
                 </div>
 
                 {/* 2. Schools */}
-                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2">
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold">
@@ -979,36 +866,36 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                       </div>
                       <div>
                         <h5 className="text-xs font-black uppercase italic text-slate-900 dark:text-white">
-                          Schools
+                          School Cheer Teams
                         </h5>
                         <p className="text-[8px] font-bold text-slate-400 uppercase">
-                          School Orgs & Cheer Teams
+                          Pass-Through (Invoiced to Schools = Paid to Coaches)
                         </p>
                       </div>
                     </div>
                     <div className="text-right">
                       <span className="text-sm font-black italic text-amber-600 dark:text-amber-400">
-                        R{monthlyData.schoolsRevenue}
+                        R{monthlyFinancials.schools.grossInvoiced}
                       </span>
                       <p className="text-[8px] font-bold text-slate-400">
-                        {monthlyData.total > 0 ? Math.round((monthlyData.schoolsRevenue / monthlyData.total) * 100) : 0}% of total
+                        Net Business Impact: R0 (Pass-Through)
                       </p>
                     </div>
                   </div>
                   <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
                     <div
                       className="bg-amber-500 h-full transition-all duration-500"
-                      style={{ width: `${monthlyData.total > 0 ? (monthlyData.schoolsRevenue / monthlyData.total) * 100 : 0}%` }}
+                      style={{ width: `${monthlyFinancials.totals.grossInvoiced > 0 ? (monthlyFinancials.schools.grossInvoiced / monthlyFinancials.totals.grossInvoiced) * 100 : 0}%` }}
                     />
                   </div>
                   <div className="flex justify-between text-[8px] font-bold text-slate-400 uppercase pt-0.5">
-                    <span>{monthlyData.schoolsCount} Sessions</span>
-                    <span>{monthlyData.schoolsHours} Hours Coached</span>
+                    <span>{monthlyFinancials.schools.sessionCount} Sessions</span>
+                    <span>{monthlyFinancials.schools.hoursCoached} Hours Coached</span>
                   </div>
                 </div>
 
                 {/* 3. Gym Sessions */}
-                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2">
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-2.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
@@ -1016,31 +903,31 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                       </div>
                       <div>
                         <h5 className="text-xs font-black uppercase italic text-slate-900 dark:text-white">
-                          Gym Sessions
+                          Other Gym Coaching
                         </h5>
                         <p className="text-[8px] font-bold text-slate-400 uppercase">
-                          External Partner Gyms
+                          External Gym Invoices (100% Direct Business Revenue)
                         </p>
                       </div>
                     </div>
                     <div className="text-right">
                       <span className="text-sm font-black italic text-emerald-600 dark:text-emerald-400">
-                        R{monthlyData.gymsRevenue}
+                        Net: R{monthlyFinancials.gyms.netProfit}
                       </span>
                       <p className="text-[8px] font-bold text-slate-400">
-                        {monthlyData.total > 0 ? Math.round((monthlyData.gymsRevenue / monthlyData.total) * 100) : 0}% of total
+                        100% Business Revenue
                       </p>
                     </div>
                   </div>
                   <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
                     <div
                       className="bg-emerald-500 h-full transition-all duration-500"
-                      style={{ width: `${monthlyData.total > 0 ? (monthlyData.gymsRevenue / monthlyData.total) * 100 : 0}%` }}
+                      style={{ width: `${monthlyFinancials.totals.grossInvoiced > 0 ? (monthlyFinancials.gyms.grossRevenue / monthlyFinancials.totals.grossInvoiced) * 100 : 0}%` }}
                     />
                   </div>
                   <div className="flex justify-between text-[8px] font-bold text-slate-400 uppercase pt-0.5">
-                    <span>{monthlyData.gymsCount} Sessions</span>
-                    <span>{monthlyData.gymsHours} Hours Coached</span>
+                    <span>{monthlyFinancials.gyms.sessionCount} Sessions</span>
+                    <span>{monthlyFinancials.gyms.hoursCoached} Hours Coached</span>
                   </div>
                 </div>
               </div>
@@ -1048,15 +935,15 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
               {/* Itemized Session Logs for the Month */}
               <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                  {MONTHS[breakdownMonth]} Session Logs ({monthlyData.itemizedList.length})
+                  {MONTHS[breakdownMonth]} Active Invoice Items ({monthlyFinancials.itemized.length})
                 </h4>
-                {monthlyData.itemizedList.length === 0 ? (
+                {monthlyFinancials.itemized.length === 0 ? (
                   <p className="text-center py-6 text-slate-400 text-[10px] font-bold uppercase">
                     No sessions logged for {MONTHS[breakdownMonth]} {breakdownYear}
                   </p>
                 ) : (
                   <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                    {monthlyData.itemizedList.map((item, idx) => (
+                    {monthlyFinancials.itemized.map((item, idx) => (
                       <div
                         key={`itemized-${item.id}-${idx}`}
                         className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800 text-xs"
@@ -1082,9 +969,21 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                             </p>
                           </div>
                         </div>
-                        <span className="font-black text-slate-900 dark:text-white text-xs italic shrink-0">
-                          +R{item.amount}
-                        </span>
+                        <div className="text-right shrink-0">
+                          <span className="font-black text-slate-900 dark:text-white text-xs italic block">
+                            {item.category === 'schools' ? `R${item.grossAmount}` : `+R${item.netAmount}`}
+                          </span>
+                          {item.category === 'tumbling' && item.coachCost > 0 && (
+                            <span className="text-[8px] text-slate-400 block">
+                              Gross R{item.grossAmount} · Turn-in -R{item.coachCost}
+                            </span>
+                          )}
+                          {item.category === 'schools' && (
+                            <span className="text-[8px] text-amber-600 dark:text-amber-400 block font-bold">
+                              Pass-Through (R0 Net)
+                            </span>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
