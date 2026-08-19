@@ -108,6 +108,17 @@ export interface HistoryMonth {
   year: number;
   sessions: AttendanceSession[];
   revenue: number;
+  tumblingGross?: number;
+  tumblingCoachPay?: number;
+  tumblingNet?: number;
+  schoolsGross?: number;
+  schoolsCoachPay?: number;
+  gymsGross?: number;
+  gymsNet?: number;
+  totalGross?: number;
+  totalCoachPayout?: number;
+  netProfit?: number;
+  sessionCount?: number;
   recordedAt: string;
   snapshot_data?: {
     students: Student[];

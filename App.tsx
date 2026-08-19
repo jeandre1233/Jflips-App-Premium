@@ -119,6 +119,7 @@ import {
 
 import { DashboardView } from './src/Pages/Dashboard';
 import { RosterView } from './src/Pages/Setup';
+import { HistoryView } from './src/Pages/HistoryView';
 
 /**
  * Which invoice month a session belongs to.
@@ -443,7 +444,8 @@ const DesktopSidebar: React.FC<{
   isSyncing: boolean;
   sessionCount: number;
   businessName: string;
-}> = ({ activeView, onNav, collapsed, onToggle, theme, onSettings, onArchive, isSyncing, sessionCount, businessName }) => {
+  isOwner?: boolean;
+}> = ({ activeView, onNav, collapsed, onToggle, theme, onSettings, onArchive, isSyncing, sessionCount, businessName, isOwner = true }) => {
   const sidebarRef = useRef<HTMLElement>(null);
   const navItemsRef = useRef<HTMLDivElement>(null);
 
@@ -474,7 +476,8 @@ const DesktopSidebar: React.FC<{
     { view: View.DASHBOARD,       icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
     { view: View.LOG_SESSION,     icon: <ClipboardCheck size={20} />,  label: 'Log Session' },
     { view: View.TEAM_MANAGEMENT, icon: <Settings size={20} />,          label: 'Management' },
-    { view: View.INVOICES,        icon: <FileText size={20} />,        label: 'Invoices' },
+    { view: View.INVOICES,        icon: <FileText size={20} />,        label: isOwner ? 'Invoices' : 'My Pay' },
+    ...(isOwner ? [{ view: View.HISTORY, icon: <History size={20} />, label: 'History' }] : []),
     { view: View.ROSTER,          icon: <Settings2 size={20} />,       label: 'Setup' },
   ];
 
@@ -1176,7 +1179,18 @@ const App: React.FC = () => {
           monthName: h.month_name, 
           year: h.year, 
           recordedAt: h.recorded_at, 
-          revenue: h.revenue, 
+          revenue: Number(h.total_gross ?? h.revenue ?? 0), 
+          tumblingGross: Number(h.tumbling_gross ?? 0),
+          tumblingCoachPay: Number(h.tumbling_coach_pay ?? 0),
+          tumblingNet: Number(h.tumbling_net ?? 0),
+          schoolsGross: Number(h.schools_gross ?? 0),
+          schoolsCoachPay: Number(h.schools_coach_pay ?? 0),
+          gymsGross: Number(h.gyms_gross ?? 0),
+          gymsNet: Number(h.gyms_net ?? 0),
+          totalGross: Number(h.total_gross ?? h.revenue ?? 0),
+          totalCoachPayout: Number(h.total_coach_payout ?? 0),
+          netProfit: Number(h.net_profit ?? h.revenue ?? 0),
+          sessionCount: Number(h.session_count ?? (h.sessions_json?.length || 0)),
           sessions: h.sessions_json || [],
           snapshot_data: h.snapshot_json 
         })),
@@ -2202,7 +2216,7 @@ const App: React.FC = () => {
         if (!sessionMonthKey.has(l.sessionId)) sessionMonthKey.set(l.sessionId, l.billingMonthKey);
       });
 
-      // 2. Global History DB Insert/Update
+      // 2. Global History DB Insert/Update with Multi-Stream Columns
       for (const [monthLabelKey, data] of Array.from(globalRevByMonth.entries())) {
         const { data: existingHist } = await supabase.from('history').select('*').eq('month_name', data.monthName).eq('year', data.year).eq('user_id', user.id);
 
@@ -2210,11 +2224,39 @@ const App: React.FC = () => {
           (sessionMonthKey.get(sess.id) || billingMonthFor(sess.date).key) === monthLabelKey
         );
 
+        const monthClientLines = clientLines.filter(l => l.billingMonthKey === monthLabelKey);
+        const monthCoachLines = coachLines.filter(l => l.billingMonthKey === monthLabelKey);
+
+        const mTumGross = sumLines(monthClientLines.filter(l => l.kind === 'class'));
+        const mTumCoachPay = sumLines(monthCoachLines.filter(l => l.orgId === null && l.coachId !== state.profile.id));
+        const mTumNet = Number((mTumGross - mTumCoachPay).toFixed(2));
+
+        const mSchGross = sumLines(monthClientLines.filter(l => l.kind === 'cheer'));
+        const mSchCoachPay = sumLines(monthCoachLines.filter(l => l.orgId !== null));
+
+        const mGymGross = sumLines(monthClientLines.filter(l => l.kind === 'gym'));
+        const mGymNet = mGymGross;
+
+        const mTotalGross = Number((mTumGross + mSchGross + mGymGross).toFixed(2));
+        const mTotalCoachPayout = Number((mTumCoachPay + mSchCoachPay).toFixed(2));
+        const mNetProfit = Number((mTumNet + mGymNet).toFixed(2));
+
         if (existingHist && existingHist.length > 0) {
           const currentSessions = existingHist[0].sessions_json || [];
           const updatedSessions = [...currentSessions, ...monthSessions];
           await supabase.from('history').update({
-            revenue: Number(existingHist[0].revenue || 0) + data.revenue,
+            revenue: Number(existingHist[0].revenue || 0) + mTotalGross,
+            total_gross: Number(existingHist[0].total_gross || existingHist[0].revenue || 0) + mTotalGross,
+            tumbling_gross: Number(existingHist[0].tumbling_gross || 0) + mTumGross,
+            tumbling_coach_pay: Number(existingHist[0].tumbling_coach_pay || 0) + mTumCoachPay,
+            tumbling_net: Number(existingHist[0].tumbling_net || 0) + mTumNet,
+            schools_gross: Number(existingHist[0].schools_gross || 0) + mSchGross,
+            schools_coach_pay: Number(existingHist[0].schools_coach_pay || 0) + mSchCoachPay,
+            gyms_gross: Number(existingHist[0].gyms_gross || 0) + mGymGross,
+            gyms_net: Number(existingHist[0].gyms_net || 0) + mGymNet,
+            total_coach_payout: Number(existingHist[0].total_coach_payout || 0) + mTotalCoachPayout,
+            net_profit: Number(existingHist[0].net_profit || 0) + mNetProfit,
+            session_count: Number(existingHist[0].session_count || currentSessions.length) + monthSessions.length,
             sessions_json: updatedSessions,
             recorded_at: new Date().toISOString(),
             snapshot_json: snapshot_data
@@ -2225,7 +2267,18 @@ const App: React.FC = () => {
             month_name: data.monthName,
             year: data.year,
             sessions_json: monthSessions,
-            revenue: data.revenue,
+            revenue: mTotalGross,
+            total_gross: mTotalGross,
+            tumbling_gross: mTumGross,
+            tumbling_coach_pay: mTumCoachPay,
+            tumbling_net: mTumNet,
+            schools_gross: mSchGross,
+            schools_coach_pay: mSchCoachPay,
+            gyms_gross: mGymGross,
+            gyms_net: mGymNet,
+            total_coach_payout: mTotalCoachPayout,
+            net_profit: mNetProfit,
+            session_count: monthSessions.length,
             recorded_at: new Date().toISOString(),
             user_id: user.id,
             snapshot_json: snapshot_data
@@ -2469,7 +2522,7 @@ const App: React.FC = () => {
     // this family's share instead of the whole session's revenue.
     const revenueByMonth = new Map<string, { monthName: string, year: number, revenue: number }>();
 
-    const { clientLines: resetClientLines } = priceSessions(sessionsToReset, {
+    const { clientLines: resetClientLines, coachLines: resetCoachLines } = priceSessions(sessionsToReset, {
       gyms: state.gyms || [],
       classTypes: state.classTypes || [],
       students: state.students || [],
@@ -2531,7 +2584,38 @@ const App: React.FC = () => {
         });
       }
 
-      // 2. Handle History Record
+      // 2. Handle History Record with Stream Separation
+      const monthFamilyLines = familyLines.filter(l => l.billingMonthKey === monthLabelFull);
+      const isCheer = monthFamilyLines.some(l => l.kind === 'cheer');
+      const isGym = monthFamilyLines.some(l => l.kind === 'gym');
+      const isClass = monthFamilyLines.some(l => l.kind === 'class');
+
+      let sTumGross = 0;
+      let sTumCoachPay = 0;
+      let sSchGross = 0;
+      let sSchCoachPay = 0;
+      let sGymGross = 0;
+      let sGymNet = 0;
+
+      if (isClass) {
+        sTumGross = sumLines(monthFamilyLines);
+        const sessionIds = new Set(monthFamilyLines.map(l => l.sessionId));
+        const matchedCoachLines = resetCoachLines.filter(cl => sessionIds.has(cl.sessionId) && cl.orgId === null && cl.coachId !== state.profile.id);
+        sTumCoachPay = sumLines(matchedCoachLines);
+      } else if (isCheer) {
+        sSchGross = sumLines(monthFamilyLines);
+        const matchedCoachLines = resetCoachLines.filter(cl => cl.orgId === familyId);
+        sSchCoachPay = sumLines(matchedCoachLines);
+      } else if (isGym) {
+        sGymGross = sumLines(monthFamilyLines);
+        sGymNet = sGymGross;
+      }
+
+      const sTumNet = Number((sTumGross - sTumCoachPay).toFixed(2));
+      const sTotalGross = Number((sTumGross + sSchGross + sGymGross).toFixed(2));
+      const sTotalCoachPayout = Number((sTumCoachPay + sSchCoachPay).toFixed(2));
+      const sNetProfit = Number((sTumNet + sGymNet).toFixed(2));
+
       const { data: existingHist } = await supabase.from('history')
         .select('*')
         .eq('month_name', data.monthName)
@@ -2544,12 +2628,23 @@ const App: React.FC = () => {
 
       if (existingHist && existingHist.length > 0) {
         const hist = existingHist[0];
-        const updatedRevenue = Number(hist.revenue || 0) + data.revenue;
+        const updatedRevenue = Number(hist.revenue || 0) + sTotalGross;
         const currentSessions = hist.sessions_json || [];
         const updatedSessions = [...currentSessions, ...monthSessions];
         
         await supabase.from('history').update({
           revenue: updatedRevenue,
+          total_gross: Number(hist.total_gross || hist.revenue || 0) + sTotalGross,
+          tumbling_gross: Number(hist.tumbling_gross || 0) + sTumGross,
+          tumbling_coach_pay: Number(hist.tumbling_coach_pay || 0) + sTumCoachPay,
+          tumbling_net: Number(hist.tumbling_net || 0) + sTumNet,
+          schools_gross: Number(hist.schools_gross || 0) + sSchGross,
+          schools_coach_pay: Number(hist.schools_coach_pay || 0) + sSchCoachPay,
+          gyms_gross: Number(hist.gyms_gross || 0) + sGymGross,
+          gyms_net: Number(hist.gyms_net || 0) + sGymNet,
+          total_coach_payout: Number(hist.total_coach_payout || 0) + sTotalCoachPayout,
+          net_profit: Number(hist.net_profit || 0) + sNetProfit,
+          session_count: Number(hist.session_count || currentSessions.length) + monthSessions.length,
           sessions_json: updatedSessions,
           recorded_at: new Date().toISOString(),
           snapshot_json: snapshot_data
@@ -2560,7 +2655,18 @@ const App: React.FC = () => {
           month_name: data.monthName,
           year: data.year,
           sessions_json: monthSessions,
-          revenue: data.revenue,
+          revenue: sTotalGross,
+          total_gross: sTotalGross,
+          tumbling_gross: sTumGross,
+          tumbling_coach_pay: sTumCoachPay,
+          tumbling_net: sTumNet,
+          schools_gross: sSchGross,
+          schools_coach_pay: sSchCoachPay,
+          gyms_gross: sGymGross,
+          gyms_net: sGymNet,
+          total_coach_payout: sTotalCoachPayout,
+          net_profit: sNetProfit,
+          session_count: monthSessions.length,
           recorded_at: new Date().toISOString(),
           user_id: user.id,
           snapshot_json: snapshot_data
@@ -2637,10 +2743,11 @@ const App: React.FC = () => {
     loadCloudData(true);
   };
 
-  const handleSaveSchedule = async (classIds: string[], dayOfWeek: number, time: string, label?: string, color?: string) => {
+  const handleSaveSchedule = async (classIds: string[], dayOfWeek: number, time: string, label?: string, color?: string, coachId?: string) => {
     if (!user) return;
     const isOwner = state.profile.role === 'owner';
     const targetUserId = isOwner ? user.id : state.profile.owner_id;
+    const assignedCoachId = coachId || (isOwner ? user.id : user.id);
 
     const scheduleId = editingSchedule ? editingSchedule.id : `sched_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
     const { error } = await supabase.from('class_schedules').upsert({ 
@@ -2650,7 +2757,7 @@ const App: React.FC = () => {
       time, 
       label: label || null, 
       user_id: targetUserId,
-      coach_id: targetUserId,
+      coach_id: assignedCoachId,
       color: color || null
     });
     if (error) { alert("Schedule Save Error: " + error.message); return; }
@@ -2668,7 +2775,7 @@ const App: React.FC = () => {
           time,
           label: label || null,
           color: color || null,
-          coach_id: targetUserId
+          coach_id: assignedCoachId
         });
         await syncSchedulesToCalendar(
           updatedSchedules,
@@ -2716,18 +2823,27 @@ const App: React.FC = () => {
     const firstId = ids[0];
     const gym = (state.gyms || []).find(g => g.id === firstId);
     
+    // For coach accounts (role !== 'owner'), default to the logged-in coach
+    const effectiveCoachId = (state.profile.role !== 'owner')
+      ? (state.profile.id || user?.id)
+      : (coachId || state.profile.id || user?.id);
+
     if (gym && gym.gym_type === 'cheer') {
-      setInitialCoachId(coachId || null);
+      setInitialCoachId(effectiveCoachId || null);
       setInitialAthleteIds(athleteIds || []);
       setInitialTeamIds(ids);
       setInitialDate(date);
       setActiveView(View.TEAM_ATTENDANCE);
     } else {
-      setQuickLogModalData({ classIds: ids, date, coachId, athleteIds });
+      setQuickLogModalData({ classIds: ids, date, coachId: effectiveCoachId, athleteIds });
     }
   };
 
   const handleViewChange = (view: View) => {
+    if (view === View.HISTORY && !isOwner) {
+      setActiveView(View.DASHBOARD);
+      return;
+    }
     setActiveView(view);
     if (view === View.ROSTER) {
       setRosterTab('students');
@@ -2868,6 +2984,13 @@ const App: React.FC = () => {
         />
       )}
       {activeView === View.INVOICES && <InvoicesView state={state} user={user} onUpdatePayment={handleUpdatePayment} onResetInvoice={resetSingleInvoice} onShowRecovery={() => setShowRecoveryModal(true)} />}
+      {activeView === View.HISTORY && isOwner && (
+        <HistoryView 
+          state={state} 
+          onShowRecovery={() => setShowRecoveryModal(true)}
+          onRestoreSnapshot={restoreInvoiceSnapshot}
+        />
+      )}
       {activeView === View.ROSTER && (
         <RosterView
           state={state}
@@ -3189,6 +3312,7 @@ const App: React.FC = () => {
           isSyncing={isSyncing}
           sessionCount={state.sessions?.length || 0}
           businessName={state.profile.businessName}
+          isOwner={isOwner}
         />
 
         {/* Content panel */}
@@ -3316,12 +3440,15 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white dark:bg-[#0d1117] border-t border-slate-100 dark:border-white/5 flex justify-between items-center py-2 px-4 z-30 print:hidden transition-colors duration-300">
+      <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white dark:bg-[#0d1117] border-t border-slate-100 dark:border-white/5 flex justify-between items-center py-2 px-3 z-30 print:hidden transition-colors duration-300">
         <NavButton active={activeView === View.DASHBOARD} icon={<LayoutDashboard size={18} />} label="Home" onClick={() => handleViewChange(View.DASHBOARD)} />
         <NavButton active={activeView === View.LOG_SESSION} icon={<ClipboardCheck size={18} />} label="Log" onClick={() => { setEditingSession(null); handleViewChange(View.LOG_SESSION); }} />
         <NavButton active={activeView === View.TEAM_MANAGEMENT} icon={<Settings size={18} />} label="Mgmt" onClick={() => handleViewChange(View.TEAM_MANAGEMENT)} />
         {/* Coaches see their own invoice tab; owners see invoices */}
         <NavButton active={activeView === View.INVOICES} icon={<FileText size={18} />} label={isOwner ? "Invs" : "My Pay"} onClick={() => handleViewChange(View.INVOICES)} />
+        {isOwner && (
+          <NavButton active={activeView === View.HISTORY} icon={<History size={18} />} label="History" onClick={() => handleViewChange(View.HISTORY)} />
+        )}
         <NavButton active={activeView === View.ROSTER} icon={<Settings2 size={18} />} label="Setup" onClick={() => handleViewChange(View.ROSTER)} />
       </nav>
 
@@ -7415,165 +7542,6 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
   );
 });
 
-const HistoryView = memo(({ state, onSelectMonth, onRemove, onOpenStats }: { state: AppState, onSelectMonth: (m: HistoryMonth) => void, onRemove: (id: string) => void, onOpenStats: () => void }) => {
-  const currentYear = new Date().getFullYear();
-  const yearlyRevenue = useMemo(() => (state.history || []).filter(m => m.year === currentYear).reduce((sum, m) => sum + (typeof m.revenue === 'string' ? parseFloat(m.revenue) : Number(m.revenue || 0)), 0), [state.history, currentYear]);
-
-  const chartData = useMemo(() => {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return months.map((m, i) => {
-      const monthData = (state.history || []).find(h => h.year === currentYear && h.monthName.startsWith(m));
-      return {
-        name: m,
-        revenue: monthData ? (typeof monthData.revenue === 'string' ? parseFloat(monthData.revenue) : Number(monthData.revenue)) : 0
-      };
-    });
-  }, [state.history, currentYear]);
-
-  const averageMonthly = useMemo(() => {
-    const activeMonths = chartData.filter(d => d.revenue > 0);
-    return activeMonths.length > 0 ? yearlyRevenue / activeMonths.length : 0;
-  }, [chartData, yearlyRevenue]);
-
-  const growthRate = useMemo(() => {
-    const activeMonths = chartData.filter(d => d.revenue > 0);
-    if (activeMonths.length < 2) return 0;
-    const last = activeMonths[activeMonths.length - 1].revenue;
-    const prev = activeMonths[activeMonths.length - 2].revenue;
-    return prev > 0 ? ((last - prev) / prev) * 100 : 0;
-  }, [chartData]);
-
-  return (
-    <div className="space-y-6 mt-4 pb-20">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">Analytics & History</h2>
-        <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 dark:bg-blue-900/30 rounded-full border border-blue-100 dark:border-blue-800">
-          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-          <span className="text-[8px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">{currentYear} Live</span>
-        </div>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 gap-4">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-white dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-50 dark:border-slate-800 shadow-sm">
-          <p className="text-[#94a3b8] text-[8px] font-black uppercase mb-1">Yearly Total</p>
-          <h3 className="text-xl font-black text-[#1e4da1] italic">R{yearlyRevenue.toLocaleString()}</h3>
-          <div className="mt-2 flex items-center gap-1">
-            <div className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${growthRate >= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
-              {growthRate >= 0 ? '+' : ''}{growthRate.toFixed(1)}%
-            </div>
-            <span className="text-[7px] text-slate-400 font-bold uppercase">vs prev month</span>
-          </div>
-        </motion.div>
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-white dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-50 dark:border-slate-800 shadow-sm">
-          <p className="text-[#94a3b8] text-[8px] font-black uppercase mb-1">Avg Monthly</p>
-          <h3 className="text-xl font-black text-slate-800 dark:text-slate-200 italic">R{averageMonthly.toLocaleString(undefined, { maximumFractionDigits: 0 })}</h3>
-          <p className="text-[7px] text-slate-400 font-bold uppercase mt-2">Based on active months</p>
-        </motion.div>
-      </div>
-
-      {/* Revenue Chart */}
-      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2 }} className="bg-white dark:bg-slate-800/60 p-5 rounded-[2rem] border border-slate-50 dark:border-slate-800 shadow-sm">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Revenue Trend</p>
-            <p className="text-[11px] font-black text-slate-800 dark:text-slate-200 uppercase italic">Monthly Performance</p>
-          </div>
-          <BarChart3 size={18} className="text-blue-500 opacity-50" />
-        </div>
-        
-        <div className="h-[200px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#1e4da1" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#1e4da1" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis 
-                dataKey="name" 
-                axisLine={false} 
-                tickLine={false} 
-                tick={{ fontSize: 8, fontWeight: 900, fill: '#94a3b8' }}
-                interval={0}
-              />
-              <YAxis 
-                axisLine={false} 
-                tickLine={false} 
-                tick={{ fontSize: 8, fontWeight: 900, fill: '#94a3b8' }}
-              />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#1e4da1', 
-                  border: 'none', 
-                  borderRadius: '12px',
-                  color: '#fff',
-                  fontSize: '10px',
-                  fontWeight: '900',
-                  textTransform: 'uppercase'
-                }}
-                itemStyle={{ color: '#fff' }}
-                cursor={{ stroke: '#1e4da1', strokeWidth: 1 }}
-              />
-              <Area 
-                type="monotone" 
-                dataKey="revenue" 
-                stroke="#1e4da1" 
-                strokeWidth={3}
-                fillOpacity={1} 
-                fill="url(#colorRev)" 
-                animationDuration={1500}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </motion.div>
-
-      {/* History List */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between px-1">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Recent Records</p>
-          <button onClick={onOpenStats} className="text-[9px] font-black text-blue-500 uppercase flex items-center gap-1">
-            Full Report <ArrowRight size={10} />
-          </button>
-        </div>
-        
-        <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-3">
-          {(!state.history || state.history.length === 0) ? (
-            <div className="bg-slate-50 dark:bg-slate-900/40 p-10 rounded-3xl border-2 border-dashed border-slate-100 dark:border-slate-800 text-center">
-              <History size={32} className="mx-auto text-slate-200 mb-2" />
-              <p className="text-[9px] font-black text-slate-400 uppercase">No History Records</p>
-            </div>
-          ) : state.history.map((m, idx) => (
-            <motion.div key={m.id || `history-${idx}`} variants={invoiceItemVariants} className="relative group">
-              <motion.button whileTap={{ scale: 0.98 }} onClick={() => onSelectMonth(m)} className="w-full p-4 bg-white dark:bg-slate-800/60 border border-slate-50 dark:border-slate-800 rounded-2xl flex items-center justify-between shadow-sm hover:border-blue-200 transition-colors">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-slate-900 dark:bg-slate-700 text-white rounded-xl flex flex-col items-center justify-center italic font-black">
-                    <span className="text-[7px] uppercase opacity-40 leading-none">{m.monthName.slice(0, 3)}</span>
-                    <span className="text-sm leading-none mt-0.5">{m.year % 100}</span>
-                  </div>
-                  <div className="text-left">
-                    <p className="text-sm font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic leading-none">{m.monthName}</p>
-                    <p className="text-[9px] text-[#1e4da1] font-black uppercase mt-1">R{Number(m.revenue).toLocaleString()}</p>
-                  </div>
-                </div>
-                <ChevronRight className="text-slate-300 group-hover:text-blue-500 transition-colors" size={16} />
-              </motion.button>
-              <button onClick={(e) => { e.stopPropagation(); onRemove(m.id); }} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white p-1.5 rounded-full border-2 border-white dark:border-slate-900 shadow-md active:scale-90 transition-transform opacity-0 group-hover:opacity-100">
-                <Trash2 size={12} />
-              </button>
-            </motion.div>
-          ))}
-        </motion.div>
-      </div>
-    </div>
-  );
-});
-
-
-
 const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetInvoice, onShowRecovery }: { state: AppState, user: any, monthLabel?: string, onUpdatePayment: (p: Partial<Payment>) => void, onResetInvoice: (id: string, label: string) => void, onShowRecovery: () => void }) => {
   const [sel, setSel] = useState<string | null>(null);
   const [allocations, setAllocations] = useState<Record<string, 'personal' | 'business'>>(() => {
@@ -9504,7 +9472,7 @@ const ScheduleForm: React.FC<{
   staff: any[],
   isOwner: boolean,
   initialData?: ClassSchedule,
-  onSubmit: (classIds: string[], dayOfWeek: number, time: string, label?: string, color?: string) => void,
+  onSubmit: (classIds: string[], dayOfWeek: number, time: string, label?: string, color?: string, coachId?: string) => void,
   onCancel: () => void,
   onDelete?: (id: string) => void
 }> = ({ students, classTypes, gyms, staff, isOwner, initialData, onSubmit, onCancel, onDelete }) => {
@@ -9629,6 +9597,21 @@ const ScheduleForm: React.FC<{
         <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Label (Optional)</label>
         <input placeholder="e.g. Tumbling — Tuesdays" value={label} onChange={e => setLabel(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
       </div>
+      {staff && staff.length > 0 && (
+        <div className="space-y-1">
+          <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Assigned Coach (Optional)</label>
+          <select 
+            value={coachId} 
+            onChange={e => setCoachId(e.target.value)}
+            className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none"
+          >
+            <option value="">Default (Logged-in Coach / Owner)</option>
+            {staff.map((s: any, idx: number) => (
+              <option key={s.id || `sched-coach-${idx}`} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="space-y-1">
         <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Color Display</label>
         <div className="flex gap-2">
@@ -9653,7 +9636,7 @@ const ScheduleForm: React.FC<{
               if (athleteIds.length > 0) {
                 finalColor += '|' + athleteIds.join(',');
               }
-              onSubmit(selectedClassIds, dayOfWeek, time, label || undefined, finalColor);
+              onSubmit(selectedClassIds, dayOfWeek, time, label || undefined, finalColor, coachId || undefined);
             }}
             className="flex-[4] bg-[#1e4da1] dark:bg-blue-600 text-white py-4 rounded-xl font-black text-[10px] uppercase shadow-lg"
           >

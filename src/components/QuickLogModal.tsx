@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { X, CheckCircle2, User, Building2, Trophy } from 'lucide-react';
+import { X, CheckCircle2, Check, User, Users, Building2, Trophy, Clock } from 'lucide-react';
 import { AppState, ClassSchedule, ClassType, Gym, Student } from '../../types';
 
 interface QuickLogModalProps {
@@ -14,6 +14,57 @@ interface QuickLogModalProps {
 }
 
 export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, date, coachId, athleteIds, onConfirm, onCancel }) => {
+  const isOwner = state.profile.role === 'owner';
+
+  const coachOptions = useMemo(() => {
+    const list: { id: string; name: string; role?: string }[] = [];
+    if (state.profile.id) {
+      list.push({
+        id: state.profile.id,
+        name: isOwner ? (state.profile.name ? `${state.profile.name} (Myself)` : 'Myself (Owner)') : (state.profile.name || 'Myself'),
+        role: state.profile.role
+      });
+    }
+    (state.staff || []).forEach(s => {
+      if (!list.some(item => item.id === s.id)) {
+        list.push({ id: s.id, name: s.name, role: 'coach' });
+      }
+    });
+    return list;
+  }, [state.staff, state.profile, isOwner]);
+
+  const [selectedCoachIds, setSelectedCoachIds] = useState<string[]>(() => {
+    // If logged in as coach, always default to the logged-in coach
+    if (!isOwner && state.profile.id) {
+      return [state.profile.id];
+    }
+    // If coachId was explicitly passed and matches a known coach/profile
+    if (coachId && (coachId === state.profile.id || (state.staff || []).some(s => s.id === coachId))) {
+      return [coachId];
+    }
+    // Default to current profile
+    if (state.profile.id) {
+      return [state.profile.id];
+    }
+    if (state.staff && state.staff.length > 0) {
+      return [state.staff[0].id];
+    }
+    return [];
+  });
+
+  const toggleCoach = (cId: string) => {
+    setSelectedCoachIds(prev => {
+      if (prev.includes(cId)) {
+        if (prev.length <= 1) {
+          return prev; // Keep at least one coach selected
+        }
+        return prev.filter(id => id !== cId);
+      } else {
+        return [...prev, cId];
+      }
+    });
+  };
+
   const [selectedAthletes, setSelectedAthletes] = useState<string[]>(athleteIds || []);
 
   const { classOptions, entitiesToShow } = useMemo(() => {
@@ -30,7 +81,7 @@ export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, d
       const gym = (state.gyms || []).find(g => g.id === firstId);
       if (gym) {
         if (gym.gym_type !== 'cheer') {
-          entities = []; // Gyms/clubs do not have attendances
+          entities = []; // Gyms/clubs do not have individual athlete attendances
         } else {
           entities = state.students.filter(s => classIds.includes(s.associated_gym_id || ''));
         }
@@ -77,33 +128,41 @@ export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, d
   };
 
   const handleConfirm = () => {
+    if (selectedCoachIds.length === 0) {
+      alert("Please select at least one coach.");
+      return;
+    }
+
     if (entitiesToShow.length > 0 && selectedAthletes.length === 0) {
       if (!window.confirm("No athletes are selected. Are you sure you want to log with no attendance?")) {
         return;
       }
     }
 
-    if (classIds.length === 1) {
+    if (classIds.length === 1 && selectedCoachIds.length === 1) {
       const firstId = classIds[0];
       const gym = state.gyms.find(g => g.id === firstId);
-      const ct = state.classTypes.find(c => c.id === firstId);
       const hours = gym?.default_hours || 1; // Default to 1 hour or gym.default_hours
 
-      onConfirm(firstId, selectedAthletes, date, hours, coachId, false);
+      onConfirm(firstId, selectedAthletes, date, hours, selectedCoachIds[0], false);
     } else {
-      // It's a multi-class scheduled log. We need to create an array for sessionsToUpsert.
-      const sessions = classIds.map(cid => {
-         const gym = state.gyms.find(g => g.id === cid);
-         return {
-           id: '',
-           classTypeId: cid,
-           studentIds: selectedAthletes,
-           date: date,
-           hours: gym?.default_hours || 1,
-           coachId: coachId,
-           isCompetition: false
-         };
-      });
+      // It's a multi-coach or multi-class scheduled log. Create an array of sessions.
+      const sessions: any[] = [];
+      for (const cid of classIds) {
+        const gym = state.gyms.find(g => g.id === cid);
+        const hours = gym?.default_hours || 1;
+        for (const cId of selectedCoachIds) {
+          sessions.push({
+            id: '',
+            classTypeId: cid,
+            studentIds: selectedAthletes,
+            date: date,
+            hours: hours,
+            coachId: cId,
+            isCompetition: false
+          });
+        }
+      }
       onConfirm(sessions);
     }
   };
@@ -127,8 +186,49 @@ export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, d
         <p className="text-[10px] font-bold text-slate-400 uppercase mt-4">Date: <span className="text-slate-600 dark:text-slate-300">{date}</span></p>
       </div>
 
+      {/* Coach Selection Section */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between px-1">
+          <label className="text-[10px] font-black text-[#94a3b8] uppercase">Coaching Staff (Select Assigned Coach)</label>
+          <span className="text-[8px] font-black uppercase text-[#1e4da1] dark:text-blue-400">
+            {selectedCoachIds.length} Selected
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {coachOptions.map((cOption) => {
+            const isSelected = selectedCoachIds.includes(cOption.id);
+            return (
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                type="button"
+                key={`quick-coach-${cOption.id}`}
+                onClick={() => toggleCoach(cOption.id)}
+                className={`p-3 rounded-xl border text-left flex items-center justify-between gap-2 transition-all ${
+                  isSelected
+                    ? 'bg-[#1e4da1] dark:bg-blue-600 text-white border-[#1e4da1] shadow-md'
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-100 dark:border-slate-700 hover:border-blue-300'
+                }`}
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-black uppercase truncate">{cOption.name}</p>
+                  <p className={`text-[8px] font-bold uppercase ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
+                    {cOption.id === state.profile.id ? 'Current User' : 'Coach'}
+                  </p>
+                </div>
+                <div className={`w-4 h-4 rounded-md flex items-center justify-center shrink-0 ${isSelected ? 'bg-white text-[#1e4da1]' : 'border border-slate-300 dark:border-slate-600'}`}>
+                  {isSelected && <Check size={10} strokeWidth={3} />}
+                </div>
+              </motion.button>
+            );
+          })}
+        </div>
+        {coachOptions.length === 0 && (
+          <p className="text-[9px] text-slate-400 font-bold uppercase p-2">No coaches available</p>
+        )}
+      </div>
+
       {!isClubOrGym && (
-        <div className="space-y-3 max-h-[40vh] overflow-y-auto no-scrollbar pb-2">
+        <div className="space-y-3 max-h-[35vh] overflow-y-auto no-scrollbar pb-2">
           <div className="flex items-center justify-between px-1">
              <label className="text-[10px] font-black text-[#94a3b8] uppercase">Attendance</label>
              {entitiesToShow.length > 0 && (
