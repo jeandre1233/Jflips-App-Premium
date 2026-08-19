@@ -384,6 +384,7 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
   const now = new Date();
   const [breakdownMonth, setBreakdownMonth] = useState(now.getMonth());
   const [breakdownYear, setBreakdownYear] = useState(now.getFullYear());
+  const [breakdownFilter, setBreakdownFilter] = useState<'cycle' | 'month'>('cycle');
   const isOwner = state.profile.role === 'owner';
 
   const pricingCtx: PricingContext = useMemo(() => ({
@@ -410,6 +411,8 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
     () => calculateCycleFinancials(priced, state.sessions || [], { month: breakdownMonth, year: breakdownYear }),
     [priced, state.sessions, breakdownMonth, breakdownYear]
   );
+
+  const displayFinancials = breakdownFilter === 'cycle' ? activeCycleFinancials : monthlyFinancials;
 
   const coachSessions = useMemo(() => {
     if (isOwner) return state.sessions || [];
@@ -757,58 +760,86 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                 </button>
               </div>
 
-              {/* Month Selector */}
-              <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/60 p-3 rounded-2xl border border-slate-100 dark:border-slate-700">
+              {/* Cycle vs Month View Filter */}
+              <div className="flex items-center justify-between bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200 dark:border-slate-700">
                 <button
                   type="button"
-                  onClick={() => {
-                    if (breakdownMonth === 0) {
-                      setBreakdownMonth(11);
-                      setBreakdownYear(prev => prev - 1);
-                    } else {
-                      setBreakdownMonth(prev => prev - 1);
-                    }
-                  }}
-                  className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors text-slate-600 dark:text-slate-300"
+                  onClick={() => setBreakdownFilter('cycle')}
+                  className={`flex-1 py-2 px-3 rounded-xl font-black text-[10px] uppercase transition-all ${
+                    breakdownFilter === 'cycle'
+                      ? 'bg-[#1e4da1] dark:bg-blue-600 text-white shadow-md'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
                 >
-                  <ChevronLeft size={18} />
+                  Active Billing Cycle
                 </button>
-                <div className="text-center">
-                  <span className="text-sm font-black uppercase text-slate-900 dark:text-white italic tracking-wide">
-                    {MONTHS[breakdownMonth]} {breakdownYear}
-                  </span>
-                </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (breakdownMonth === 11) {
-                      setBreakdownMonth(0);
-                      setBreakdownYear(prev => prev + 1);
-                    } else {
-                      setBreakdownMonth(prev => prev + 1);
-                    }
-                  }}
-                  className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors text-slate-600 dark:text-slate-300"
+                  onClick={() => setBreakdownFilter('month')}
+                  className={`flex-1 py-2 px-3 rounded-xl font-black text-[10px] uppercase transition-all ${
+                    breakdownFilter === 'month'
+                      ? 'bg-[#1e4da1] dark:bg-blue-600 text-white shadow-md'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
                 >
-                  <ChevronRight size={18} />
+                  Filter By Month
                 </button>
               </div>
 
-              {/* Total Monthly Card */}
+              {/* Month Selector (Only shown when Filter By Month is active) */}
+              {breakdownFilter === 'month' && (
+                <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/60 p-3 rounded-2xl border border-slate-100 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (breakdownMonth === 0) {
+                        setBreakdownMonth(11);
+                        setBreakdownYear(prev => prev - 1);
+                      } else {
+                        setBreakdownMonth(prev => prev - 1);
+                      }
+                    }}
+                    className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors text-slate-600 dark:text-slate-300"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <div className="text-center">
+                    <span className="text-sm font-black uppercase text-slate-900 dark:text-white italic tracking-wide">
+                      {MONTHS[breakdownMonth]} {breakdownYear}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (breakdownMonth === 11) {
+                        setBreakdownMonth(0);
+                        setBreakdownYear(prev => prev + 1);
+                      } else {
+                        setBreakdownMonth(prev => prev + 1);
+                      }
+                    }}
+                    className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors text-slate-600 dark:text-slate-300"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </div>
+              )}
+
+              {/* Total Revenue Card */}
               <div className="bg-gradient-to-br from-[#1e4da1] to-blue-700 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden">
                 <div className="flex justify-between items-start relative z-10">
                   <div>
                     <p className="text-blue-200 text-[9px] font-black uppercase tracking-widest">
-                      Net Business Revenue
+                      {breakdownFilter === 'cycle' ? 'Net Business Revenue (Active Cycle)' : `Net Business Revenue (${MONTHS[breakdownMonth]} ${breakdownYear})`}
                     </p>
-                    <h2 className="text-4xl font-black italic mt-1">R{monthlyFinancials.totals.netCycleRevenue}</h2>
+                    <h2 className="text-4xl font-black italic mt-1">R{displayFinancials.totals.netCycleRevenue}</h2>
                     <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[10px] font-bold text-blue-100">
-                      <span>Gross Invoiced: <b className="text-white">R{monthlyFinancials.totals.grossInvoiced}</b></span>
-                      <span>Staff Payout: <b className="text-white">R{monthlyFinancials.totals.totalCoachPayout}</b></span>
+                      <span>Gross Invoiced: <b className="text-white">R{displayFinancials.totals.grossInvoiced}</b></span>
+                      <span>Staff Payout: <b className="text-white">R{displayFinancials.totals.totalCoachPayout}</b></span>
                     </div>
                   </div>
                   <span className="px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-[9px] font-black uppercase tracking-wider">
-                    {monthlyFinancials.totals.totalSessions} Sessions
+                    {displayFinancials.totals.totalSessions} Sessions
                   </span>
                 </div>
                 <TrendingUp className="absolute -bottom-4 -right-4 text-white/10 w-28 h-28 rotate-12" />
@@ -838,22 +869,22 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                     </div>
                     <div className="text-right">
                       <span className="text-sm font-black italic text-[#1e4da1] dark:text-blue-400">
-                        Net: R{monthlyFinancials.tumbling.netProfit}
+                        Net: R{displayFinancials.tumbling.netProfit}
                       </span>
                       <p className="text-[8px] font-bold text-slate-400">
-                        Gross: R{monthlyFinancials.tumbling.grossRevenue} · Coach Cost: R{monthlyFinancials.tumbling.coachTurnInPay}
+                        Gross: R{displayFinancials.tumbling.grossRevenue} · Coach Cost: R{displayFinancials.tumbling.coachTurnInPay}
                       </p>
                     </div>
                   </div>
                   <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
                     <div
                       className="bg-[#1e4da1] dark:bg-blue-500 h-full transition-all duration-500"
-                      style={{ width: `${monthlyFinancials.totals.grossInvoiced > 0 ? (monthlyFinancials.tumbling.grossRevenue / monthlyFinancials.totals.grossInvoiced) * 100 : 0}%` }}
+                      style={{ width: `${displayFinancials.totals.grossInvoiced > 0 ? (displayFinancials.tumbling.grossRevenue / displayFinancials.totals.grossInvoiced) * 100 : 0}%` }}
                     />
                   </div>
                   <div className="flex justify-between text-[8px] font-bold text-slate-400 uppercase pt-0.5">
-                    <span>{monthlyFinancials.tumbling.sessionCount} Classes</span>
-                    <span>{monthlyFinancials.tumbling.studentAttendanceCount} Athlete Invoiced Entries</span>
+                    <span>{displayFinancials.tumbling.sessionCount} Classes</span>
+                    <span>{displayFinancials.tumbling.studentAttendanceCount} Athlete Invoiced Entries</span>
                   </div>
                 </div>
 
@@ -875,7 +906,7 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                     </div>
                     <div className="text-right">
                       <span className="text-sm font-black italic text-amber-600 dark:text-amber-400">
-                        R{monthlyFinancials.schools.grossInvoiced}
+                        R{displayFinancials.schools.grossInvoiced}
                       </span>
                       <p className="text-[8px] font-bold text-slate-400">
                         Net Business Impact: R0 (Pass-Through)
@@ -885,12 +916,12 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                   <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
                     <div
                       className="bg-amber-500 h-full transition-all duration-500"
-                      style={{ width: `${monthlyFinancials.totals.grossInvoiced > 0 ? (monthlyFinancials.schools.grossInvoiced / monthlyFinancials.totals.grossInvoiced) * 100 : 0}%` }}
+                      style={{ width: `${displayFinancials.totals.grossInvoiced > 0 ? (displayFinancials.schools.grossInvoiced / displayFinancials.totals.grossInvoiced) * 100 : 0}%` }}
                     />
                   </div>
                   <div className="flex justify-between text-[8px] font-bold text-slate-400 uppercase pt-0.5">
-                    <span>{monthlyFinancials.schools.sessionCount} Sessions</span>
-                    <span>{monthlyFinancials.schools.hoursCoached} Hours Coached</span>
+                    <span>{displayFinancials.schools.sessionCount} Sessions</span>
+                    <span>{displayFinancials.schools.hoursCoached} Hours Coached</span>
                   </div>
                 </div>
 
@@ -912,7 +943,7 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                     </div>
                     <div className="text-right">
                       <span className="text-sm font-black italic text-emerald-600 dark:text-emerald-400">
-                        Net: R{monthlyFinancials.gyms.netProfit}
+                        Net: R{displayFinancials.gyms.netProfit}
                       </span>
                       <p className="text-[8px] font-bold text-slate-400">
                         100% Business Revenue
@@ -922,28 +953,28 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                   <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full overflow-hidden">
                     <div
                       className="bg-emerald-500 h-full transition-all duration-500"
-                      style={{ width: `${monthlyFinancials.totals.grossInvoiced > 0 ? (monthlyFinancials.gyms.grossRevenue / monthlyFinancials.totals.grossInvoiced) * 100 : 0}%` }}
+                      style={{ width: `${displayFinancials.totals.grossInvoiced > 0 ? (displayFinancials.gyms.grossRevenue / displayFinancials.totals.grossInvoiced) * 100 : 0}%` }}
                     />
                   </div>
                   <div className="flex justify-between text-[8px] font-bold text-slate-400 uppercase pt-0.5">
-                    <span>{monthlyFinancials.gyms.sessionCount} Sessions</span>
-                    <span>{monthlyFinancials.gyms.hoursCoached} Hours Coached</span>
+                    <span>{displayFinancials.gyms.sessionCount} Sessions</span>
+                    <span>{displayFinancials.gyms.hoursCoached} Hours Coached</span>
                   </div>
                 </div>
               </div>
 
-              {/* Itemized Session Logs for the Month */}
+              {/* Itemized Session Logs */}
               <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                  {MONTHS[breakdownMonth]} Active Invoice Items ({monthlyFinancials.itemized.length})
+                  {breakdownFilter === 'cycle' ? 'All Active Cycle Invoice Items' : `${MONTHS[breakdownMonth]} Active Invoice Items`} ({displayFinancials.itemized.length})
                 </h4>
-                {monthlyFinancials.itemized.length === 0 ? (
+                {displayFinancials.itemized.length === 0 ? (
                   <p className="text-center py-6 text-slate-400 text-[10px] font-bold uppercase">
-                    No sessions logged for {MONTHS[breakdownMonth]} {breakdownYear}
+                    {breakdownFilter === 'cycle' ? 'No sessions logged in the active cycle' : `No sessions logged for ${MONTHS[breakdownMonth]} ${breakdownYear}`}
                   </p>
                 ) : (
                   <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                    {monthlyFinancials.itemized.map((item, idx) => (
+                    {displayFinancials.itemized.map((item, idx) => (
                       <div
                         key={`itemized-${item.id}-${idx}`}
                         className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800 text-xs"
