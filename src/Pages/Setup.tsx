@@ -1014,6 +1014,35 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
               )}
               {isOwner && (
                 <div className="space-y-3 pt-2">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-[#1e4da1] dark:text-blue-400">Default New-Athlete Rate</p>
+                  <div className="p-4 bg-emerald-50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-100 dark:border-emerald-900/30 space-y-3">
+                    <p className="text-[8px] font-bold text-slate-500 dark:text-slate-400 uppercase leading-relaxed">
+                      The class rate every new tumbling athlete starts on, including those who register through the parent signup link. Change any one child in their own profile. Athletes already on your books are never affected.
+                    </p>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400">R</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        placeholder="0"
+                        value={profileForm.default_group_rate ?? ''}
+                        onChange={e => setProfileForm({
+                          ...profileForm,
+                          default_group_rate: e.target.value === '' ? 0 : Math.max(0, Number(e.target.value))
+                        })}
+                        className="w-full p-4 pl-8 bg-white dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200"
+                      />
+                    </div>
+                    <p className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase">
+                      Leave at 0 to fall back to whatever the class itself costs.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {isOwner && (
+                <div className="space-y-3 pt-2">
                   <p className="text-[9px] font-black uppercase tracking-widest text-[#1e4da1] dark:text-blue-400">Sibling Discount</p>
                   <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-2xl border border-blue-100 dark:border-blue-900/30 space-y-3">
                     <p className="text-[8px] font-bold text-slate-500 dark:text-slate-400 uppercase leading-relaxed">

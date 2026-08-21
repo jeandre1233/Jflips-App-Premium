@@ -145,6 +145,8 @@ export interface OwnerProfile {
   logo?: string; // logo text
   /** Rand taken off a class session when linked siblings attend it together. */
   siblingDiscount?: number; // sibling_discount numeric
+  /** Seeds a NEW athlete's custom_group_rate. Never re-applied afterwards. */
+  defaultGroupRate?: number; // default_group_rate numeric
   createdAt?: string; // created_at timestamptz
 }
 
@@ -197,6 +199,12 @@ export interface Profile {
    * attend it together. Owner-level setting; 0 or absent disables it.
    */
   sibling_discount?: number;
+  /**
+   * The group rate a NEWLY created tumbling athlete is given. Copied onto the
+   * athlete's own custom_group_rate at creation and never consulted again, so
+   * changing it never moves an athlete who already exists. 0 disables it.
+   */
+  default_group_rate?: number;
 }
 
 export type NotificationType =

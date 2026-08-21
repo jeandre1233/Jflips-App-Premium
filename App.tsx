@@ -934,6 +934,7 @@ const App: React.FC = () => {
           // Absent on databases that have not run add_sibling_discount.sql yet;
           // the pricing engine treats undefined as "no discount".
           sibling_discount: ownerP.sibling_discount != null ? Number(ownerP.sibling_discount) : 0,
+          default_group_rate: ownerP.default_group_rate != null ? Number(ownerP.default_group_rate) : 0,
           id: user.id
         };
 
@@ -1805,19 +1806,24 @@ const App: React.FC = () => {
         biz_branch_code: profile.bizBranchCode,
         biz_account_type: profile.bizAccountType,
         logo: profile.logo,
-        sibling_discount: Number(profile.sibling_discount) || 0
+        sibling_discount: Number(profile.sibling_discount) || 0,
+        default_group_rate: Number(profile.default_group_rate) || 0
       };
 
       let { error: pErr } = await supabase.from('owner_profiles').upsert(ownerPayload);
 
-      // Tolerate a database that has not had add_sibling_discount.sql run yet:
-      // save everything else rather than losing the whole profile edit.
-      if (pErr && pErr.message.includes('sibling_discount')) {
-        delete ownerPayload.sibling_discount;
-        const retry = await supabase.from('owner_profiles').upsert(ownerPayload);
-        pErr = retry.error;
-        if (!pErr) {
-          alert("Profile saved, but the sibling discount needs a database update. Run add_sibling_discount.sql in your Supabase SQL Editor.");
+      // Tolerate a database missing either newer column: drop whichever one the
+      // error names and save the rest, rather than losing the whole profile edit.
+      if (pErr) {
+        const missing = ['sibling_discount', 'default_group_rate']
+          .filter(col => pErr!.message.includes(col));
+        if (missing.length > 0) {
+          missing.forEach(col => delete ownerPayload[col]);
+          const retry = await supabase.from('owner_profiles').upsert(ownerPayload);
+          pErr = retry.error;
+          if (!pErr) {
+            alert(`Profile saved, but ${missing.join(' and ')} needs a database update. Run the matching .sql file in your Supabase SQL Editor.`);
+          }
         }
       }
 
@@ -3266,6 +3272,7 @@ const App: React.FC = () => {
               otherStudents={(state.students || []).filter(s => s.id !== editingStudent?.id && !s.is_gym_member)}
               initialData={editingStudent || undefined} 
               initialExtra={editingExtra}
+              defaultGroupRate={state.profile.default_group_rate}
               onSubmit={handleSaveStudent} 
               onDelete={removeStudent} 
               onCancel={() => setShowModal(null)} 
@@ -8848,7 +8855,7 @@ const BulkImportModal: React.FC<{ onImport: (names: string[]) => void, onCancel:
   );
 };
 
-const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubmit, onDelete, onCancel, initialExtra }) => {
+const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubmit, onDelete, onCancel, initialExtra, defaultGroupRate }) => {
   const [name, setName] = useState(initialData?.name || '');
 
   // Registration fields
@@ -8862,9 +8869,16 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
   const [parent1Email, setParent1Email] = useState(initialData?.parent1_email || '');
   const [parent2Name, setParent2Name] = useState(initialData?.parent2_name || '');
   const [parent2Phone, setParent2Phone] = useState(initialData?.parent2_phone || '');
-  const [customGroupRate, setCustomGroupRate] = useState<string>(
-    initialData?.custom_group_rate != null ? initialData.custom_group_rate.toString() : ''
-  );
+  // A NEW athlete starts on the business default rate; an existing one shows
+  // whatever they are actually on. Deliberately not applied when editing — the
+  // default is a starting point for new athletes, and seeding it here would
+  // silently reprice a child the moment their profile was opened and saved.
+  const [customGroupRate, setCustomGroupRate] = useState<string>(() => {
+    if (initialData?.custom_group_rate != null) return initialData.custom_group_rate.toString();
+    if (initialData) return '';
+    const seed = Number(defaultGroupRate) || 0;
+    return seed > 0 ? seed.toString() : '';
+  });
   const [customPrivateRate, setCustomPrivateRate] = useState<string>(
     initialData?.custom_private_rate != null ? initialData.custom_private_rate.toString() : ''
   );

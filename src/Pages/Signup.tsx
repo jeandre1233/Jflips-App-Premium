@@ -268,6 +268,7 @@ export default function Signup() {
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [submittedForm, setSubmittedForm] = useState<FormData | null>(null);
   const [submittedClassName, setSubmittedClassName] = useState('');
+  const [defaultGroupRate, setDefaultGroupRate] = useState<number | null>(null);
 
   useEffect(() => {
     async function loadClasses() {
@@ -294,6 +295,20 @@ export default function Signup() {
         const allowedClasses = data.filter((ct: any) => ct.allow_signup !== false);
         setClasses(allowedClasses.map((ct: any) => ({ ...ct, studentIds: ct.enrolled_student_ids || [] })));
       }
+
+      // The gym's default rate for a new athlete, so a child who registers here
+      // arrives already on the right money instead of falling through to the
+      // class price. owner_profiles is not publicly readable (it holds banking
+      // details), hence the narrow RPC. Absent function or column simply means
+      // no seeding, which is the pre-existing behaviour.
+      try {
+        const { data: defaults } = await supabase.rpc('get_signup_defaults', { p_owner_id: gymOwnerId });
+        const rate = Array.isArray(defaults) ? Number(defaults[0]?.default_group_rate) : Number(defaults);
+        if (Number.isFinite(rate) && rate > 0) setDefaultGroupRate(rate);
+      } catch {
+        /* no default configured — fall through to the class price */
+      }
+
       setLoadingClasses(false);
     }
     loadClasses();
@@ -411,7 +426,10 @@ export default function Signup() {
         class_name: selectedClass?.name || '',
         indemnity_signed: true,
         indemnity_date: new Date().toISOString(),
-        signature_data: signatureDataUrl
+        signature_data: signatureDataUrl,
+        // Stamped at creation so the gym's current default is what this child
+        // pays, and so later changes to that default never move them.
+        ...(defaultGroupRate ? { custom_group_rate: defaultGroupRate } : {})
       });
       if (studentError) throw new Error(studentError.message);
 
