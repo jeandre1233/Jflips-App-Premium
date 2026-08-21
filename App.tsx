@@ -931,6 +931,9 @@ const App: React.FC = () => {
           role: 'owner',
           access_code: ownerP.access_code,
           email: ownerP.email || user.email,
+          // Absent on databases that have not run add_sibling_discount.sql yet;
+          // the pricing engine treats undefined as "no discount".
+          sibling_discount: ownerP.sibling_discount != null ? Number(ownerP.sibling_discount) : 0,
           id: user.id
         };
 
@@ -987,12 +990,29 @@ const App: React.FC = () => {
           canViewTumbling = staffP.can_view_tumbling ?? false;
           assignedCheerOrgIds = staffP.assigned_cheer_org_ids || [];
 
-          // Fetch owner details for display
-          const { data: coachOwnerP } = await supabase
-            .from('owner_profiles')
-            .select('*')
-            .eq('id', staffP.owner_id)
-            .maybeSingle();
+          // Fetch the owner's branding for display.
+          //
+          // Deliberately an RPC and not a direct select: owner_profiles holds
+          // the owner's banking details, and RLS is row-level, so any policy
+          // that let a coach read this row would expose every column on it.
+          // get_owner_branding returns the business name and logo and nothing
+          // else. Falls back to a direct read for databases where the function
+          // has not been created yet — that read simply returns no row once the
+          // public policy is gone, which costs branding but breaks nothing.
+          let coachOwnerP: { business_name?: string; logo?: string } | null = null;
+          const { data: brandRows, error: brandErr } = await supabase
+            .rpc('get_owner_branding', { p_owner_id: staffP.owner_id });
+
+          if (!brandErr && Array.isArray(brandRows) && brandRows.length > 0) {
+            coachOwnerP = brandRows[0];
+          } else if (brandErr) {
+            const { data: legacyOwnerP } = await supabase
+              .from('owner_profiles')
+              .select('business_name, logo')
+              .eq('id', staffP.owner_id)
+              .maybeSingle();
+            coachOwnerP = legacyOwnerP;
+          }
 
           mappedProfile = {
             ...INITIAL_PROFILE,
@@ -1030,18 +1050,74 @@ const App: React.FC = () => {
             })) as StaffProfile[];
           }
         } else {
+          // ── FIRST SIGN-IN PROVISIONING ────────────────────────────────────
+          // No owner_profiles row and no staff_profiles row. Either this is a
+          // brand-new owner, or it is a coach whose join request could not be
+          // written during signup because "Confirm email" left them without a
+          // session (auth.uid() is null, so the RLS insert is rejected). The
+          // metadata AuthView stamps onto the auth user tells the two apart.
+          //
+          // Defaulting to owner here is not a harmless guess: it silently hands
+          // a coach their own empty gym instead of a pending join request at
+          // the gym whose access code they typed in.
+          const meta = (user.user_metadata || {}) as Record<string, any>;
+
+          if (meta.jflips_role === 'coach' && meta.jflips_owner_id) {
+            const { error: staffInsErr } = await supabase.from('staff_profiles').insert({
+              id: user.id,
+              owner_id: meta.jflips_owner_id,
+              name: meta.jflips_name || user.email?.split('@')[0] || 'Coach',
+              email: (user.email || '').toLowerCase().trim(),
+              username: meta.jflips_username || null,
+              status: 'pending',
+              can_view_tumbling: false,
+              assigned_cheer_org_ids: []
+            });
+
+            if (staffInsErr) {
+              console.error('Deferred coach provisioning failed:', staffInsErr.message);
+              setDbError('Your coach registration could not be completed. Please ask your gym owner to check their access code and try again.');
+              setIsSyncing(false);
+              setIsLoading(false);
+              return;
+            }
+
+            // The owner never received a request at signup time, so raise it now.
+            try {
+              await notifyUser({
+                userId: meta.jflips_owner_id,
+                type: 'coach_signup',
+                message: `${meta.jflips_name || user.email} has requested to join as a coach. Approve them in Setup → Staff.`,
+                actorId: user.id,
+                metadata: {
+                  coach_id: user.id,
+                  coach_name: meta.jflips_name || null,
+                  coach_email: user.email || null
+                }
+              });
+            } catch (nErr) {
+              console.warn('Could not notify owner of deferred coach signup:', nErr);
+            }
+
+            setCoachStatus('pending');
+            setIsLoading(false);
+            setIsSyncing(false);
+            return;
+          }
+
           // New owner auto-creation
           const defaultKey = `JFLIPS-${Math.floor(1000 + Math.random() * 9000)}`;
           const newOwner = {
             id: user.id,
             email: (user.email || '').toLowerCase().trim(),
-            business_name: INITIAL_PROFILE.businessName,
+            business_name: meta.jflips_business_name || INITIAL_PROFILE.businessName,
             access_code: defaultKey
           };
           const { error: insErr } = await supabase.from('owner_profiles').insert(newOwner);
           if (!insErr) {
             isOwner = true;
             mappedProfile.role = 'owner';
+            mappedProfile.businessName = newOwner.business_name;
             mappedProfile.access_code = defaultKey;
             mappedProfile.email = user.email;
           } else {
@@ -1328,17 +1404,34 @@ const App: React.FC = () => {
   const handleSaveStudent = async (name: string, phone?: string, linkedSiblingId?: string, extraData?: Partial<Student>) => {
     if (!user) return;
 
+    // Sibling link. Picking any one child joins that child's household: if they
+    // already have a group key we adopt it, otherwise we mint one and write it
+    // to BOTH children. An empty linkedSiblingId means "no siblings", which is
+    // also how Unlink clears an existing household.
     let finalGroupKey = '';
     if (linkedSiblingId && linkedSiblingId !== '') {
       const sibling = state.students.find(s => s.id === linkedSiblingId);
       if (sibling) {
+        // team_athletes has no group_key column — a household only ever exists
+        // among tumbling students. Refuse rather than writing the key to one
+        // child and silently dropping it for the other, which is what the old
+        // code did and which left the two billing separately.
+        if (sibling.is_gym_member) {
+          alert(`${sibling.name} is a team athlete and is billed to their school, so they cannot share a family invoice. Link tumbling athletes to each other instead.`);
+          return;
+        }
         if (sibling.groupKey) { finalGroupKey = sibling.groupKey; }
         else {
           const newKey = `group_${Date.now()}`;
           finalGroupKey = newKey;
-          const siblingTable = sibling.is_gym_member ? 'team_athletes' : 'tumbling_students';
-          if (siblingTable === 'tumbling_students') {
-            await supabase.from(siblingTable).update({ group_key: newKey }).eq('id', linkedSiblingId).eq('user_id', user.id);
+          const { error: sibErr } = await supabase
+            .from('tumbling_students')
+            .update({ group_key: newKey })
+            .eq('id', linkedSiblingId)
+            .eq('user_id', user.id);
+          if (sibErr) {
+            alert(`Could not link ${sibling.name}: ${sibErr.message}`);
+            return;
           }
         }
       }
@@ -1700,19 +1793,34 @@ const App: React.FC = () => {
     if (profile.bizAccountType !== undefined) localStorage.setItem(`jflips_biz_accountType_${user.id}`, profile.bizAccountType);
 
     if (isOwner) {
-      const { error: pErr } = await supabase.from('owner_profiles').upsert({ 
-        id: user.id, 
-        business_name: profile.businessName, 
-        bank_name: profile.bankName, 
-        account_number: profile.accountNumber, 
-        branch_code: profile.branchCode, 
-        account_type: profile.accountType, 
+      const ownerPayload: any = {
+        id: user.id,
+        business_name: profile.businessName,
+        bank_name: profile.bankName,
+        account_number: profile.accountNumber,
+        branch_code: profile.branchCode,
+        account_type: profile.accountType,
         biz_bank_name: profile.bizBankName,
         biz_account_number: profile.bizAccountNumber,
         biz_branch_code: profile.bizBranchCode,
         biz_account_type: profile.bizAccountType,
-        logo: profile.logo
-      });
+        logo: profile.logo,
+        sibling_discount: Number(profile.sibling_discount) || 0
+      };
+
+      let { error: pErr } = await supabase.from('owner_profiles').upsert(ownerPayload);
+
+      // Tolerate a database that has not had add_sibling_discount.sql run yet:
+      // save everything else rather than losing the whole profile edit.
+      if (pErr && pErr.message.includes('sibling_discount')) {
+        delete ownerPayload.sibling_discount;
+        const retry = await supabase.from('owner_profiles').upsert(ownerPayload);
+        pErr = retry.error;
+        if (!pErr) {
+          alert("Profile saved, but the sibling discount needs a database update. Run add_sibling_discount.sql in your Supabase SQL Editor.");
+        }
+      }
+
       if (pErr) { alert("Owner Profile Save Error: " + pErr.message); return; }
     } else {
       const coachUpdateData: any = {
@@ -2143,7 +2251,8 @@ const App: React.FC = () => {
         classTypes: state.classTypes || [],
         students: state.students || [],
         staff: state.staff || [],
-        profile: { id: state.profile.id, pay_rate: state.profile.pay_rate, name: state.profile.name }
+        profile: { id: state.profile.id, pay_rate: state.profile.pay_rate, name: state.profile.name },
+        siblingDiscount: state.profile.sibling_discount
       };
       const { clientLines, coachLines } = priceSessions(sessionsToReset, pricingContext);
 
@@ -2527,7 +2636,8 @@ const App: React.FC = () => {
       classTypes: state.classTypes || [],
       students: state.students || [],
       staff: state.staff || [],
-      profile: { id: state.profile.id, pay_rate: state.profile.pay_rate, name: state.profile.name }
+      profile: { id: state.profile.id, pay_rate: state.profile.pay_rate, name: state.profile.name },
+      siblingDiscount: state.profile.sibling_discount
     });
 
     const familyLines = resetClientLines.filter(line => line.billToId === familyId);
@@ -3149,7 +3259,11 @@ const App: React.FC = () => {
           onClose={() => { setShowModal(null); setEditingStudent(null); setEditingGym(null); setEditingClassType(null); setEditingSchedule(null); }}>
           {showModal === 'student' || showModal === 'student_gym' ? (
             <AthleteProfileModal 
-              otherStudents={(state.students || []).filter(s => s.id !== editingStudent?.id)} 
+              // Tumbling athletes only. Team athletes are billed to their school,
+              // never to a household, and handleSaveStudent cannot write a group
+              // key back to team_athletes — offering them here produced a
+              // half-link where only one of the two children got the key.
+              otherStudents={(state.students || []).filter(s => s.id !== editingStudent?.id && !s.is_gym_member)}
               initialData={editingStudent || undefined} 
               initialExtra={editingExtra}
               onSubmit={handleSaveStudent} 
@@ -4061,6 +4175,8 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const [accessCode, setAccessCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Non-error feedback — currently the "confirm your email" hand-off. */
+  const [notice, setNotice] = useState<string | null>(null);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -4124,6 +4240,7 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setNotice(null);
     try {
       if (!accessCode.trim()) {
         setError('Gym owner access code is required.');
@@ -4144,10 +4261,24 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         return;
       }
 
-      // 2. Sign up with Supabase Auth
+      // 2. Sign up with Supabase Auth.
+      //
+      // The join request is stamped into user_metadata as well as being written
+      // to staff_profiles below. That metadata is the ONLY way the account can
+      // be provisioned correctly when "Confirm email" is switched on, because
+      // signUp then returns no session and the insert below cannot run.
+      const cleanUsername = username.trim().replace(/^@/, '').toLowerCase();
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email.trim(),
-        password
+        password,
+        options: {
+          data: {
+            jflips_role: 'coach',
+            jflips_name: name.trim(),
+            jflips_username: cleanUsername || null,
+            jflips_owner_id: owner.id
+          }
+        }
       });
 
       if (authError) {
@@ -4162,8 +4293,21 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         return;
       }
 
-      // 3. Create staff_profiles row with status: 'pending'
-      const cleanUsername = username.trim().replace(/^@/, '').toLowerCase();
+      // 3. Create staff_profiles row with status: 'pending'.
+      //
+      // Without a session auth.uid() is null, so the coach_can_request_to_join
+      // policy rejects this insert. Stop here rather than writing nothing and
+      // reporting success — loadCloudData provisions the row from the metadata
+      // above on the coach's first real sign-in.
+      if (!authData.session) {
+        setNotice(
+          `Almost there — check ${email.trim().toLowerCase()} and confirm your address. ` +
+          `Your join request reaches ${owner.business_name || 'the gym'} the first time you sign in.`
+        );
+        setLoading(false);
+        return;
+      }
+
       const { error: staffErr } = await supabase.from('staff_profiles').insert({
         id: authData.user.id,
         owner_id: owner.id,
@@ -4224,10 +4368,20 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setNotice(null);
     try {
+      // The business name is stamped into user_metadata as well as being written
+      // to owner_profiles below, so it survives the "Confirm email" path where
+      // signUp returns no session and the insert cannot run.
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email.trim(),
-        password
+        password,
+        options: {
+          data: {
+            jflips_role: 'owner',
+            jflips_business_name: businessName.trim() || 'My Gym'
+          }
+        }
       });
 
       if (authError) {
@@ -4238,6 +4392,16 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
 
       if (!authData.user) {
         setError('Registration failed.');
+        setLoading(false);
+        return;
+      }
+
+      // No session means auth.uid() is null and owner_manages_own_profile will
+      // reject the insert. loadCloudData creates the profile on first sign-in.
+      if (!authData.session) {
+        setNotice(
+          `Almost there — check ${email.trim().toLowerCase()} and confirm your address, then sign in to finish setting up your gym.`
+        );
         setLoading(false);
         return;
       }
@@ -4292,7 +4456,7 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         <div className="flex bg-white/5 p-1 rounded-2xl border border-white/5">
           <button
             type="button"
-            onClick={() => { setAuthMode('signin'); setError(null); }}
+            onClick={() => { setAuthMode('signin'); setError(null); setNotice(null); }}
             className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-wider transition-all cursor-pointer ${
               authMode === 'signin' ? 'bg-blue-600 text-white shadow-md' : 'text-white/40 hover:text-white'
             }`}
@@ -4301,7 +4465,7 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
           </button>
           <button
             type="button"
-            onClick={() => { setAuthMode('coach_signup'); setError(null); }}
+            onClick={() => { setAuthMode('coach_signup'); setError(null); setNotice(null); }}
             className={`flex-1 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-wider transition-all cursor-pointer ${
               authMode === 'coach_signup' ? 'bg-blue-600 text-white shadow-md' : 'text-white/40 hover:text-white'
             }`}
@@ -4313,6 +4477,12 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         {error && (
           <div className="p-3 bg-red-900/20 border border-red-500/30 rounded-xl text-red-400 text-[10px] font-bold uppercase text-center leading-relaxed">
             {error}
+          </div>
+        )}
+
+        {notice && (
+          <div className="p-3 bg-blue-900/20 border border-blue-500/30 rounded-xl text-blue-300 text-[10px] font-bold uppercase text-center leading-relaxed">
+            {notice}
           </div>
         )}
 
@@ -7607,7 +7777,8 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
     classTypes: state.classTypes || [],
     students: state.students || [],
     staff: state.staff || [],
-    profile: { id: state.profile.id, pay_rate: state.profile.pay_rate, name: state.profile.name }
+    profile: { id: state.profile.id, pay_rate: state.profile.pay_rate, name: state.profile.name },
+    siblingDiscount: state.profile.sibling_discount
   }), [state.gyms, state.classTypes, state.students, state.staff, state.profile]);
 
   /**
@@ -8708,6 +8879,36 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
   }, [initialData, otherStudents]);
 
   const [linkedSiblingId, setLinkedSiblingId] = useState<string>(initialSiblingId);
+  const [siblingSearch, setSiblingSearch] = useState('');
+
+  /**
+   * Picking any one child joins that child's household, so the list is ordered
+   * to put existing families first — linking a third sibling means finding one
+   * of the two already linked, not hunting through the whole roster.
+   */
+  const siblingCandidates = useMemo(() => {
+    const q = siblingSearch.trim().toLowerCase();
+    const pool = (otherStudents || []) as Student[];
+    const matches = q
+      ? pool.filter(s => (s.name || '').toLowerCase().includes(q))
+      : pool;
+    return [...matches].sort((a, b) => {
+      const aFam = a.groupKey ? 0 : 1;
+      const bFam = b.groupKey ? 0 : 1;
+      if (aFam !== bFam) return aFam - bFam;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [otherStudents, siblingSearch]);
+
+  /** Everyone who ends up on one invoice with this athlete once saved. */
+  const householdPreview = useMemo(() => {
+    if (!linkedSiblingId) return [] as Student[];
+    const pool = (otherStudents || []) as Student[];
+    const picked = pool.find(s => s.id === linkedSiblingId);
+    if (!picked) return [] as Student[];
+    if (!picked.groupKey) return [picked];
+    return pool.filter(s => s.groupKey === picked.groupKey);
+  }, [linkedSiblingId, otherStudents]);
 
   const handleDobChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newDob = e.target.value;
@@ -8803,7 +9004,76 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
 
             {!isTeamOnly && (
               <div className="grid grid-cols-1 gap-3">
-                <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Link Sibling</label><select value={linkedSiblingId} onChange={e => setLinkedSiblingId(e.target.value)} className="w-full p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none"><option value="">- NONE -</option>{(otherStudents || []).map((s: any, idx: number) => <option key={`${s.id}-${idx}`} value={s.id}>{s.name}</option>)}</select></div>
+                <div className="space-y-2">
+                  <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Link Sibling</label>
+
+                  {householdPreview.length > 0 ? (
+                    <div className="p-3 bg-blue-50 dark:bg-blue-950/20 rounded-xl border border-blue-100 dark:border-blue-900/30 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[8px] font-black text-blue-700 dark:text-blue-300 uppercase tracking-wider">One invoice with</p>
+                          <p className="text-[10px] font-black text-slate-800 dark:text-slate-100 uppercase italic break-words leading-tight mt-0.5">
+                            {householdPreview.map(s => s.name).join(' & ')}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { setLinkedSiblingId(''); setSiblingSearch(''); }}
+                          className="shrink-0 px-2.5 py-1.5 bg-white dark:bg-slate-800 text-[8px] font-black uppercase text-rose-500 rounded-lg border border-slate-200 dark:border-slate-700"
+                        >
+                          Unlink
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 dark:text-slate-600" size={13} />
+                        <input
+                          type="text"
+                          value={siblingSearch}
+                          onChange={e => setSiblingSearch(e.target.value)}
+                          placeholder="SEARCH BROTHER OR SISTER"
+                          className="w-full p-3 pl-9 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 placeholder-slate-300 dark:placeholder-slate-600"
+                        />
+                      </div>
+
+                      <div className="max-h-40 overflow-y-auto no-scrollbar space-y-1">
+                        {siblingCandidates.length === 0 ? (
+                          <p className="text-center py-4 text-[8px] font-black uppercase text-slate-300 dark:text-slate-600">
+                            {siblingSearch ? 'No athlete by that name' : 'No other tumbling athletes yet'}
+                          </p>
+                        ) : (
+                          siblingCandidates.map((s: Student) => {
+                            const family = s.groupKey
+                              ? (otherStudents as Student[]).filter(o => o.groupKey === s.groupKey && o.id !== s.id)
+                              : [];
+                            return (
+                              <button
+                                key={s.id}
+                                type="button"
+                                onClick={() => setLinkedSiblingId(s.id)}
+                                className="w-full flex items-center gap-2.5 p-2.5 bg-slate-50 dark:bg-slate-800/40 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-xl text-left transition-colors"
+                              >
+                                <div className="w-7 h-7 shrink-0 bg-white dark:bg-slate-800 rounded-lg flex items-center justify-center text-[#1e4da1] dark:text-blue-400 shadow-sm">
+                                  {family.length > 0 ? <Users size={12} /> : <User size={12} />}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[10px] font-black uppercase text-slate-800 dark:text-slate-100 truncate">{s.name}</p>
+                                  {family.length > 0 && (
+                                    <p className="text-[8px] font-bold uppercase text-slate-400 truncate">
+                                      Already with {family.map(f => f.name).join(', ')}
+                                    </p>
+                                  )}
+                                </div>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             )}
 

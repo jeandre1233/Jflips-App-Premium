@@ -143,6 +143,8 @@ export interface OwnerProfile {
   bizBranchCode?: string; // biz_branch_code text
   bizAccountType?: string; // biz_account_type text
   logo?: string; // logo text
+  /** Rand taken off a class session when linked siblings attend it together. */
+  siblingDiscount?: number; // sibling_discount numeric
   createdAt?: string; // created_at timestamptz
 }
 
@@ -190,6 +192,11 @@ export interface Profile {
   can_view_tumbling?: boolean;
   can_view_school_gyms?: boolean;
   assigned_cheer_org_ids?: string[];
+  /**
+   * Rand deducted once from a class session when two or more linked siblings
+   * attend it together. Owner-level setting; 0 or absent disables it.
+   */
+  sibling_discount?: number;
 }
 
 export type NotificationType =

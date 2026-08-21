@@ -19,6 +19,25 @@
  *      client : class.price × athletes present, ONCE per group
  *      coach  : each coach earns their own profile hourly rate × hours
  *
+ *      Attendees are bucketed by the invoice they bill to, so LINKED SIBLINGS
+ *      (who share a groupKey) collapse onto a single line naming all of them:
+ *      "Group Class (1 hrs)" · "Emma & Lucas" · R350. A child attending alone
+ *      still gets their own line at the full rate.
+ *
+ *  ── SIBLING DISCOUNT ───────────────────────────────────────────────────────
+ *  One flat rand amount — ctx.siblingDiscount, set business-wide by the owner —
+ *  comes off a class session when two or more linked siblings attend it
+ *  together:
+ *
+ *      2 siblings × R200, R50 discount → R350   (not R400)
+ *      3 siblings × R200, R50 discount → R550   (ONE deduction, not three)
+ *      1 sibling  × R200               → R200   (no discount, attended alone)
+ *
+ *  It is deliberately NEVER itemised on the invoice — the parent sees one line
+ *  at the discounted total, with no "sibling discount" row. Private sessions
+ *  are excluded, and the deduction is capped at the line total so a misconfigured
+ *  discount can never produce a negative charge. 0 disables it entirely.
+ *
  *  TUMBLING GYM SESSION (gyms, gym_type='tumbling')
  *      client : rate × hours, ONCE per group
  *      coach  : each coach earns their own profile hourly rate × hours
@@ -115,6 +134,13 @@ export interface PricingContext {
   staff: any[];
   /** The signed-in owner — they can coach too, but are not in `staff`. */
   profile: { id?: string; pay_rate?: number; name?: string };
+  /**
+   * Rand taken off a class session when two or more LINKED siblings attend it
+   * together — see the sibling discount rules at the top of this file. Absent
+   * or 0 disables it, which is why every pre-existing invoice is unchanged
+   * until the owner sets a value.
+   */
+  siblingDiscount?: number;
 }
 
 /** One charge on a client-facing invoice (family, tumbling gym, or school). */
@@ -464,18 +490,51 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
     const athleteIds = Array.from(new Set(rows.flatMap(r => r.studentIds || [])));
     const classHours = resolveHours(head);
 
+    // Bucket the athletes present by the invoice they bill to. Linked siblings
+    // share a groupKey and therefore a bucket, which is what collapses them
+    // onto ONE line — "Group Class · Emma & Lucas" instead of two rows the
+    // parent has to add up themselves.
+    const attendeesByFamily = new Map<string, Student[]>();
     for (const sid of athleteIds) {
       const student = ctx.students.find(st => st.id === sid);
       if (!student) continue;
+      const famId = billToForStudent(student, ctx);
+      const bucket = attendeesByFamily.get(famId);
+      if (bucket) bucket.push(student);
+      else attendeesByFamily.set(famId, [student]);
+    }
+
+    // Mirrors getStudentSessionPrice's own private/group test exactly, so the
+    // rate that gets charged and the discount that gets applied can never
+    // disagree about what kind of session this is.
+    const isPrivateSession = (head.custom_event_name || className || '')
+      .toLowerCase()
+      .includes('private');
+
+    for (const [famId, members] of attendeesByFamily) {
+      const gross = members.reduce(
+        (acc, st) => acc + getStudentSessionPrice(st, head, basePrice, className),
+        0
+      );
+
+      // ONE flat deduction per shared session, however many siblings attended —
+      // three children in one class is still a single discount. Capped at the
+      // line total so an oversized discount can never invoice a negative amount.
+      const discount = (!isPrivateSession && members.length > 1)
+        ? Math.min(Math.max(num(ctx.siblingDiscount, 0), 0), gross)
+        : 0;
+
       clientLines.push({
         sessionId: head.id,
         groupId,
         date: head.date,
-        billToId: billToForStudent(student, ctx),
-        targetName: student.name,
+        billToId: famId,
+        // Every sibling who attended, so the parent can see what they paid for.
+        // The discount itself is deliberately never itemised.
+        targetName: members.map(m => m.name).join(' & '),
         // The parent's invoice shows the class and the hours trained.
         description: describe(className, head, { hours: classHours }),
-        amount: money(getStudentSessionPrice(student, head, basePrice, className)),
+        amount: money(gross - discount),
         kind: 'class',
         ...monthStamp
       });

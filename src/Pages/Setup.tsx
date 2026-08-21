@@ -1012,6 +1012,35 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                   </div>
                 </div>
               )}
+              {isOwner && (
+                <div className="space-y-3 pt-2">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-[#1e4da1] dark:text-blue-400">Sibling Discount</p>
+                  <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-2xl border border-blue-100 dark:border-blue-900/30 space-y-3">
+                    <p className="text-[8px] font-bold text-slate-500 dark:text-slate-400 uppercase leading-relaxed">
+                      Rand taken off a class when two or more linked siblings attend it together. One deduction per class, however many siblings attend. Not applied to private sessions. Never shown on the invoice.
+                    </p>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400">R</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        placeholder="0"
+                        value={profileForm.sibling_discount ?? ''}
+                        onChange={e => setProfileForm({
+                          ...profileForm,
+                          sibling_discount: e.target.value === '' ? 0 : Math.max(0, Number(e.target.value))
+                        })}
+                        className="w-full p-4 pl-8 bg-white dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200"
+                      />
+                    </div>
+                    <p className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase">
+                      Leave at 0 to charge every child the full rate.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <motion.button whileTap={{ scale: 0.95 }} type="submit" className="w-full bg-[#1e4da1] dark:bg-blue-600 text-white py-4 mt-4 rounded-xl font-black text-[10px] uppercase shadow-xl flex items-center justify-center gap-2">Save <CheckCircle2 size={16} /></motion.button>
               <div className="h-px bg-slate-100 dark:bg-slate-800 my-4"></div>
               <motion.button whileTap={{ scale: 0.95 }} type="button" onClick={onLogout} className="w-full bg-slate-50 dark:bg-slate-800/50 text-[#94a3b8] py-4 rounded-xl font-black text-[10px] uppercase flex items-center justify-center gap-2">Log Out <LogOut size={16} /></motion.button>

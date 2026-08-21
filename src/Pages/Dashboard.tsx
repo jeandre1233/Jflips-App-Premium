@@ -392,7 +392,8 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
     classTypes: state.classTypes || [],
     students: state.students || [],
     staff: state.staff || [],
-    profile: state.profile
+    profile: state.profile,
+    siblingDiscount: state.profile.sibling_discount
   }), [state.gyms, state.classTypes, state.students, state.staff, state.profile]);
 
   const priced = useMemo(
