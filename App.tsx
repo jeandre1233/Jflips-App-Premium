@@ -10389,45 +10389,732 @@ const ScheduleForm: React.FC<{
   onSubmit: (classIds: string[], dayOfWeek: number, time: string, label?: string, color?: string, coachId?: string) => void,
   onCancel: () => void,
   onDelete?: (id: string) => void
-}> = ({ students, classTypes, gyms, staff, isOwner, initialData, onSubmit, onCancel, onDelete }) =>xœì=ívÛ6–ÿû¨ÚÉ;’¬ÛqTÛ9®“t=›¯{·3ëã“P"$qB‘’²­Õèœ}ˆ}Â}’½÷ ”ä4ítf›&$\\ ÷[}ÅØ(ÒŒİ¤<ä£Œû¡—¦—~Úd)Ï®¬Â[vÊ)¿Ê¼ŒŸ¤YD“›Û³FYà…Ï½Ì{ÖaİŸ²¿ıİÜî}Wôá{Ë·ã9ÿDÀŸ«7ª	|ˆÇî¡{öŒuu`Y0ãçªA`5Ä¤Ş=t:uBèyH ^áS5ªH@Œö£ØM/}‚p!«aPe˜˜0N$xÚ>Sûá¤uóM—ø^÷Ö€åeÓg\­ßyşºËÊÉÆÆÚå /Ş¾zûşÃÛw×—oß\°øÂØŠİyá‚,”š,òfXú=|¬³uÓU¹ÓyÒq¤UşãËW—ï®Ø¦6ç‡/_–Û¼
-&ÓlcËÎQïéQ¿Üòw·¬jóòåñy§Snó6ñ¢IeO/zG½ƒr«÷Üw7	"?˜Ä­C Ï¼Í%•¹ëóO¼Ğ7üp¹ëgÜÍÊ×Pâ®›Ä)7ëÏ†²jô½Ù'î6›&jÉÃ0¾oèíşLeîúóE2-ÜŞQYEı údÕ†wİ4¶h=Ñ+?÷UùVc’noçY o‚¥^óYÜhì±Ó3Éív»AÕ®—s®8©=óæQ†µ+ø6ÊÚ¯ºƒ|h² ıa9°±¦ğ–À… j£æ5âş%4ÿH…­oWgı‘­÷öšyÿ“åÌèy¢u<Ñú˜İfÉ"ïuÒ ğÙêŠ¡ÛIŞ+ÎPÄX>ä&ÃîéñüüÏÕ²£Ód$aa¤W‹d~y‘ºE•×±»J¯¨r½à©³N¿¨ó#÷£ŠZ¤é"qW:,*½Lg•#m\^¶HD%‹ `Ò‚	L­T e¢ZPQ9 ï¿gW<“bü¬A
-€1[ƒ·Çqò€6F ur@
-,€Â…jA 	
-ÁEe§§§šH¨Œc†ô´—`ôk´œĞT¢;øĞö|ŞörP9°öÜK@@|@ƒ
-h…Ÿ¨` 8G°s…bÊw†øôìó°\¥ÿ»–_‹±ó$ñ–íqÏ UJßÖM—Uâ‚,LBN``dF±†ÚB;¬®Æ<áw4vø·D£páóQfÏDÙ83¨…Æ¾†Â
-vò +“ûÂ[Jr4êõÄî„l{òà´–Î½o-[l>lÕÎä|TUëæ5 °–´ZÈZ7Çó‡[6£¬5½Ñ'&J¿yzàõ‡Ç·l1Ÿódä¥œÍB„'fiŸ\‚¿AaÍXCL{½³ äşŞÉ>õ¥õ]…_ûÍ²V—Í¼‡Öt‹ïx2Fı³ly‹,†i4\¬Kz’¡xá$>Ğj5´ºĞñ,ÆŠíá"ËâÈøÄØı4ùµ7?]­X:òByí§Çl½¶*~âËÓôÒ.ä-RíÇt4å~>€Ü…ş×í†qt£O§+!24:C¤cöìÅ$­>Ş·Æ‹0dóVŸ%1`èë!dÃ8ñyÂÆ!`AÆgik%oŞê‰åù¨”|àğ[€ùvUD9ÉJd€lQëAJ‚†f>¨ÚzÚéì÷:²÷Â¤Tä¢,L¦+n†(8 ‡9BPÊ£ZuêöTYÓdÎÕÊ'Šf®rªş²H³`¼T¯»OM1n{"ÄÈE¡G_ŒÃFHx{o¿ÿ=;¹˜òÑ§‹ …¼ÇÒà¿`˜İÎºÄÀ@Å¯±ı3›”Nöa’ìŞ‰ŒÉª€QwhIà®5ó¤å'×I<Ÿ.İÆÀ»A¶„eÂNaÔ'ß/‚ĞiY¥Ù EßÉ¿§0ë;T.	È%*‹°nÇ’a…Ğ
-28°vFãF›j}²@Ìy9Ù7ä„şqOcQcFÍ—_N ŸKÃ„I'2e—à~¾K‚; ºôç¾4:²Bk—¢xû9%¥?ãè{·‘V	çÍÒywñ,ä³”Æà,ƒ4NÑ
-®’Ê¶X6ò
-¥¶Ëjİjİ“j]TÑ;–Ü–DüÏ*ã‹@CwÃ§Í%³,1å{áúŠÎ4Wøg’ğ%ÿÅeüÎSã˜…GHw¶¡£/!Öİr}w™Zjøù25­–¨»ŠT”)_ëBE=o‘,!&Ù”ôVGÌë¼<†§8î`iÅˆâĞ×4_SÍPØ½‰sNöçgŸ#û'àv2ü«5ŠÃ #Óök;dCÖ~!uñÜ[–4.º0ÙÉ#>]åà5ÊÆ)‡NW\ÊÆ<Üx³ÀÉoğvæ%µ©5¬¦d.ĞØV)¡I<'¡é”/²LïVG\@Ó¶ëA3äÍHÔ©™ô¸Ò"B-ù•j‰Ää^½â‹a’Áó”+•|îÄwc` Ä¿:ñ€-ÏBi$]DkÛÑQï²±'p6[˜œ|J«~æ&ê_˜0q{ÀE™A4_dëÀP§¦&_\ô‰€lšüU¤!m¶#í§°†ğ½Ğa+ŠÙŸ0>
-äÉi·'mv¬ƒ°ÿıïÿa2—æK#HÒ±6Ôá¯}qŒÕX¥™7£F¡¥hÎXË^Ém~ŠFnZÀB´‚@®“Ü[›ËË&ƒ¥…3šı
-±$ô5-OŠt15Ğ‹|ì-ÂŒ5^Å“	 Drr÷ÙÛûL·Dä!›ó¢%©‘‹H7nW'hjÁ#Z‘’N!÷E³¯~²lÏëş’‘BÚ}¤ MÊ6ˆğäŞ˜§±¿)æ}Tís:’Â;¤MZ«I•½cØNí 7FN>°ºcpRM'¥èi^(š/Mğ?0Ú¦"ıÇĞ¥z³l*ÆEñ.[ä†¹+Êìâp¶Xd!
-AaöGR¾b2kÆ·ı*;~wõF¡y,V\"6˜ÈÔ±!€àÚÑk©WÖLà¶H)Zgú2^=$Y£.Cá^ÆBî¥CÁEã`°æàÀÔİü®" Ì¿ Uà¿v-DDó+­´WÂ™éàşpÊê«³?0­ñ_â jÔ›eTÊ|pµÎ‚¬4M¦¥Œˆ„<É~ŒAò¦†nU’J1jX¬+õ‘ËÍÁ-3B°F|úH…*oÌ—Z ÀT5º‚)dV:õüø¾NªuÈ•wÇÙŠíEÈÙ[éêšZA”0ğ‚áÕY¸.¿[èÖ®Ó—°ä±>úmÑ‘mÓcy"Å]¦Àò0VZbÚSqôœ#Yš¶Õ—`ìj¶Ëâh$³Fí<ál/Xº÷†²bæ´³i²T’Íğ³Ú‹%Õ@õÌv`s€Í‚Õ¡,®e«ÒD¸¯›\øúô°³ß—dïG†¿‰%™bÔW5É	Ë(}ªõTp?ôr:,Ên2óÜ¼—%ğôZ°S,OFAØçÓï:ñÒik;Xã¶…$»ÇpsaC4?ÂBâö­ÌÉR)/ãd6`ï¹7ÊÚ//NÀZ<ÃæUc›ÑMák`ºÙğPPI3Ãø$8­sÒ•	f"]Œ $êT5¬VÎt›'ÁH´~‡OÕÍ©â³v_Ñö80P	–R/"01–vÂb^ºKŞ›œ¤KWÊb®‘dz†™)wJ‹´òô¤=LzºÇk1Y{Å»yÇ ì#;kkH©:&Ib}‘Åï9€½Œîb5ÿçVá.ı@“	¶ùˆF´A™Jz’ƒÚ»ŞU±¹#½M{<U®Ğ
-§vş”‘·${•»6Ø7åZ
-“ÂË‘´!Ê‘µá"º6R±³“nIØ0²GÈyÜˆ‡"Ë/›7òÕÎ)#bŸïæIçnz[Úë‹âV:Jâ0zÉ.y%_4(Ñ‚zsşúEl"Å´@ ¿ÚP“cÚÿd€Q„Ë6»rÆĞqÑ„‘ŒehVd`;ò’$ ®Í¦€Òd
--X
-v(H‹˜yšÚ"9Æ¸O:#/ŠâŒİs´NÚì_ö•[I]³sTë-8i6Ç½*¦ g7­û»÷—°ğÂ–b%'š'Pÿ„ &…c9~ıHL: Uî4>Ø‹	y_ÕœaÉÊ0À}âÍ¥I‡ÿ?fEfA„íà coø4Ä4jÉ¶â‘]ƒvÒe“Ñ#Jêƒ9—Gìè_#ÍÀô9*’¿bÊü”mË¹F,işĞê£‰™jÔá„i››n’4“ÜYSË{’ª©ĞF9Š¥Ì§ÂËV¹ Z8JOÚ¶·^MÿÁödõÒ£í©S®ÚdùJïÂEj–WA®®+8v²_vóËÑXs_íïŠÍwoTÎĞÏ›$”›š:óq²Âvâ>+jb-@u^]³Ä»`Xñ åsj\¼9¬›rLÄÈv³_"‘37l.(0ú-™s—éù²	›{üù’:U'*¯S¾«ƒ"ÿÒ;åˆj†'¥#éâK=ù„#Ê5òÁ…ÿÜ<£bO„Í3„·S°ùĞˆ6™–ÇùE	¸8å/ÃØËÂÁ O§¾×dÎàˆ1Â&õ(Ç²©XşÆìíµÿG	ÊkrŸQ…Á*ÿI±ÖÑšü	kpÛ‚“çóùÏĞKL_Ç¾VÄ'ÿ¦Tvà"YÄÑ«x.=Ñ§â>RP2ŒSz¸šÆ÷ïùM„¥ŒQ¢f?¡äcMõ^S-i~ñAŠÖÊFe\¢z*‡<»ç<z¬¯·m+²¤¯û°0VE{',wEà:©ä
-¹ßÙ$­ù˜ÄfeâÚµ3\4!ø}:2ù—£ñ °¾Z˜ekA6%Y¼Õû5¢øi–ãzÔõ{ŞmÉî#²xš“up)³mÃY²hÎˆA®-“¡ÛƒÙ>2mpst.¢Õ”ù‹Ä£w@Í…ªù2ÏNÆ2*M—Ü+2ğ‘‚)9y{wÄ¨	!òĞ:"Ìô‰šXFË[‘ü•9¿×•ÅØ½ïçâãÚZÙ™!7™§š¬,-âç0¨î ıkfq’Û@Çel#—™‰ŸÁ+ÛùXN7“;ì9™
-¦ec³Ëy’À:Ñ™ûb·ë1cÎ\ñ‚ˆ*äï´5Ø¦gdó˜ÍfòS
-ç'Ø”ö·ÑØî²0}»È6SØ(	BIOŸID›á^3ÄëndRX°&M˜%_Ï“}Ròg_íå–Æ0LÆÁˆDZÉÖÀ½ËH¯0@ËDors‹ç¶¥¤0!Œ€|Qü†ĞüAiË¥¨sr/±›ÂTÎ
-=?8¾Ë?ˆÖ/"oòsLìIŸéP¾ZK3É€a	)ìš
-‹¦ÖoÓ®mçnÜÊà•æzuØ!tn·' l=¯ÈÊ79üÛYaZIs»Î‹ÜpDYİPXËM% ²µ„/
-fĞ¡Ñ¦›·éR£+¾,F$ÿc8ê¾5ós¾éµ>»U:¶‡ª¦ïƒHØ= ùxG"V­hæ`nÈVCèaL±V¶¤2ÖN3R÷+ìTS“}†ö+·ó©vüµÍDUóİÛÉƒÙ®æìÀ÷í$’J=
-ÎZn|)üqâˆœL{%yær¿ézø_Ù8ÅÑ—£†@;ÙŸöJı:b;‡j-û™, Œ¦²àØã›'£\`ÛÏÊÑ2É¸Çvâk
-³°fÙ×]ØãuI£h)ÒÆ
-ÙI;áõ	èê/¾¡2C–Ú™d¥Ïp'<Ã´¨R³veN>¢@&R™£ŸzBœê•màÃMß•1#›>ó€(ë”ieN¢ÁH]+á¡ª¢Ä]ú<
-‚GLc)¢	>†œN/ÁM¾xô‰4æÀÁ€ù@!>éÉ·å¬0pU•¨©<a"³åè\TšnÄƒ;Îd†ŒùjGXäÒ¦í2Zt‡L‚ôÌ|~‡V±¨Šğ†ªo@ô~Š £Sê€a,j$·.ş×9¨1ÃTØ¦ŞwÊ&0Î´ëk‹ß,,‘¥œN›5Vt$æ¬©“ñ¦ÁoŸi€»‡Òtswû.¢áÎï–•W³ğ.ËÅ(™$/]Şw{%y_¹İ¶a·­ØTwp¿H9r¦À @P±¦¾;!†Vİ°úŒÀ0ÆŞ7êYÜÌí13~«ÏeUYÖáG¨Ã6º¬äÌ-®”DqæÆÖ•¨$fC-:§¡¨­nß½º.í]–’©G·4Òú&¦K™"SooS£¸‡a.£¹â´m8>ê2¡ÕÚ“ŒÔ! \yOA•İı0`hª•/B¨2º,S[ı1’lu(´]ió1ÂÀŒUê»ÄÊ·<Ê/!T¸%û³›ƒµlT­ûÎ-ÇÉ•ºLh·‘f^’9-êjPÖöxñgÕˆÚGRxóöúòååÅ9súp}yıêÅÕMD—³Üî¹ôIŞãî&ç†°OµØÎ®ÂŸÆ°ÛÊ¤'±·™QıqdÆ”F»ú(£!İb¼(,+È¦YswÚ6Õ¢¨â vÅıj^f`Qx“RşÈ–ï¼.8ËD^¼fV®İ
-%ãsLñÚ#˜0§?xÙ^;‹_Åè£«ïGáï¾›{ûºXƒJj>q'|¨?¥]KdiDî\*ñÇpuºâ´ÄF·`3¬–s‹¶£“Ÿ“ ¨ËaD'^UË"24‹(Í’øÿ1ğ³)(Q‡•íœv’øã˜·âİ/4—Ş¤ëÇÒnuá¨9m£Rê¢+–r°Kè#Ï6ÙM½Øî—›¾ï˜{IõñNíØÍA•ÏœoúŠ9®#7ºšİšâ`äG±4İ8Ñ£&¬tÌ§·•€m¢¡)s>4ã½–‰å8W²Ú«ˆĞÚÇ–ÛØÉh
-îãÖ-lOÕ‹²işög
-ÈâyãkQ * =ˆƒ`›NŞ¨ûJõùë”É„è]¢…!0Š(«"Ö­îŠUo2ùVõ?`ò¼È:ï:@/Æc¨à¸Åtà‹»NµË4åµ¦†ØÌe=¹O;!’Š›ÆñøÓ¥¿§nï”÷¤âxp8ª'j]}ªè±¸i´1)úÉïDÕNÑÉ“.YŞ4GE F• è”İd
-öŞgJà ägêN`´ş=úÅ÷QİjŸí1€l:¨£ßR/?G„äv¸@†ã¥q¦Zi‰H
-\¡–¤¼‰¡«VK$Ù …,¾j4/>©,İåÚ¶zD#¿éXï·¶´ÖÔ(¡YZZÇ± Ñ…¹¶ßçú˜#9éG_ãj$ÀHcæ¿ˆü¢mot'Ûa)nÜd†'=ã~°˜Ù;‹*Ôğâa'£ØÚTì–·«oç`¦ÓU/zÛµ¼Æá=„‘¢›‚ŒJæ‚m]Ÿÿ€l{!Ú™KFL$Zã)˜!pÉ>î·5FÒ–¸ÑÁq)f¤¦÷H½¬âJW^˜aK€©¼zÔVÛrwæDDobæá¶/â09ÅmË¸/ÇC,I ßoˆ‰ˆDv‘‘ıí
-+›g'¶oaÑéÜ`1?«øØ4ÒG‹$“Ö<œ´üÚ#‡é,RFh“ã‡š«
-}äşéJ³4"FêôNŠ³Kzny.»6¶5ŒR#]šÙIË¶ÿ?G‹T\’–‡ŸáÎÏ­ŠÍ=qˆ!Jú«_}u sÚİ©ıG¦™ü¼1ŞdnÈ:Ä¢–¯Am”ıÊ¾‘*lıÁ¢Ï.e"J4B30¹Áe—ù­õÈÍ((Gq’à}$C¨ç?fhè¶ul‰¾ù:¸<á¸/u8ŸŸ{,mì†Æ>Œáî£ò…ûŸ›/,‘Ùt¥‡cOõ'%²ùQˆºÔsåjé%ÏÒ±’‚1¹lÁÎ_Ìÿ#à÷z¦“‘¬ÂÕˆ£÷<Œ)÷&OŠa*)FÖ.jé™À/ÇùÒQRÊŠ(e´r½ñ¨ ‡›o:ãîL7-ïœlÜ/1.¿ĞüaûşŒÇíœÌè’ş“kÜ&Œ<s'D_GºBÏ±şÖE’ÉÛ¹
-Ø30èJÅ ‹d—Õ8³	Ñe=Äc™vóÖÎ®Qı§Œ¶?£I›‰°ÕÕbNt„æõb^¦´±¶ö5M6×¹ú>nãĞEÅTTœ¬‚yÏÇ`N/îÍKAJ:7ÉEBƒl‡1è†8Ö¥È)ï’x’S!­ä“É¥U¸¹%_?wVÅí âú4´[Å«ºë` İĞ“(£ïa:¿û*î5ÒX×©dR‰kSÃ¬¸‹DİM":-…<î€Â|•@{ª@‰x ù>ûûì
-İ‡Ñ4‰£lt¡r `Œœ§;€Ü¿ª"'ô­ôÎnÛØ²ÑğšlhÜİC·cµ—ˆBÏlHÅÕ\âKK–›¾úë·o®ÿõÃÛ÷Ï_¼Ç‰…éŸä.4PÄ+.ô©ÿÑ‹^²¬ÓN\ı%&òµ¯¯Ñ„®ÓŞÔÏçIÖéÇm kÀÓ¯ãÏÔh!~=Â6‹	Hxy/W|Ñ%ğ~ïoGY,ŞÂÛ0yåÇ.bòœò÷nÓÀ·Àµ@³@R¢ˆ^„ONKEÖ9õ+»][ñâ˜Fm²o¼6#â¾šgÏXÇl3tµVµQ+-µdk=ŠAƒ–ö©^Ç 2·¥ÌĞb[ê¯N7/`,÷–0ôÀÂ ovçœ¢ Té´¸ÌZøpªÇ÷üG.ª[­Õ·Œ¡¤ªi1âÀ£‘:SÛdÓ½rLBäÑ îSh'{ÂÌAòx¸@;ı•×AP^ş\´~ïØ(Àı;’Sß”U*f_’Çİ„–+\>bÔÚÖÂ3sæö‚XlDšFÛ‚(/Á?‘Fõ@‚ê›ãš‹{5.Ÿ³Ö][bÇ$,O² #æ=ÌÁİœÈ›§Ó8£ó~ù¸sÑû@oúy)èº$›äL¡l'B»Ûfïâù•¶˜À—^æõ¸¨ú5ªÌ–¨ôf¸q##ú½f€Ò}Çè´ü®h¡øu&…V¯-T8û÷f+è•øLlt&›‰™‰Äe²•~›½TË‚ñµ2ã ÍÌRW»ùş™Iîf&I)gBD™h
-KÁıà?¾Iómà]®ÚŞº2U«ƒ_Ëb_B·iÁŠ™*ä¥^V9,\°mª^T÷Âæã˜TÃ½Ô›‘“€”% Ç-l{ÈT](sUpì…¤¥†;ÊL¥±ùIâ`ø.o"7&êİz^¹.à…]‰€]½\»§ÕşŒä¹055ûZÍünˆK0p£Ø²nü¬ÚGqEêÖÕœé¨Bóó¬ˆ(â%?…à)¬?ùıû¥€üXÉ§YeÒÎx4sJ¤+¿äPTJªE¶R€ã|ªñèÛ^ßÙ¼jÿ–äGAÇü™T*(ĞîîD½¦‹õù~‘\)Êm„"YîÖJ³KTÙ´2xaíê\âàë’X°œÃ+µö§Ê6{;ü˜Sm¤`L¥kñ‹Ÿıkà`.ĞmÉ¸§bPöZ¦Ğ{¦ÊÅæ¸ãü)xbçL6{f0}C”¢=æ/XòÊĞ¦>:"¢‡âWq7¨Å
-á…‘0HéO=Ì“=O¸w’†CÜİ¶YaG©:Û=«Â£àıôïb,ë'füã·«iaà·ÓÅPtÔ £¿‡WgOÉ[,Üi¸_Óù(Ìşb°;Lô÷^"ç¹Bó=”U·O÷6& ”M€ŒĞ0	Ó G}¯]ÍŠ¢À "gcï1¤¸Ó‚GòÅ°Õ+BàHªÎæ¿0õ˜˜Š­äæ¹ÛQ;û}è%Éw±(†şyÎ	G^¸Ä¨‹»ÉÎğÖ?È°/ñSöşLPqß–_ê²™?(^û4b}7Ø€ÎºÛ­-z*÷µ!“iŞ*®ë—vEvÏ>Úz^·t¨mûÉ™üÕ£2$2¥ÕœŸrVø´¿-&+C­ÛEkg+#2€áØşæƒ[•çóÌ;‘6ìf}¡ë$ÌIÁ›}RãğVõ(J¹…öìünÂ”ã¯œ÷ßÈÔ"Sk’~*ªß¨7sDT©¸x`õÚS˜¦³QÄfö¾$Õª5ÂUEò°İn´»ÃpÌÙºHğŠT¢À/AÅıAnT“ù7úµè×˜¨7œTïÆ#Y²ˆFè ‹=ª›î! 6UÁq‡®	]é>JC0){ËUdÖÎ˜-ñÍßp3û#“l;ÁåˆŸÀUq‚Ù$:SÉ’GñTE™,<gØ[é,óO­ı§7c¹¸yìB˜ã¯0Ôş+)œìŸ^<´¬$aŞw¹Î¹Nxä.çê\‹|Î¡h;S}.Ü`-ãY¼òQ8[ÑÒ -~\¤b·ÒÎŞótS´è {Şş{Ogj0ÆßÕØ”ãı"§«ŞQ§tHæ¤ğfÑ;5û]'“ ÂÜ‘,‹¦¡‰G¼sÀÀçhÂÜ‚5?‡Û\çºø8uRÁ[š½ä‡Äó<aø§5Ju—“ScİÓZ§Æ–âŸ‡xƒªÎB¤€*¿ÃtZ;„	Àúí›Óš[¢ì­8ñvºê´ÖU‡9hOw×qƒ;Ù7‡ë˜¨}÷L€Ëxx9+â$ÊsH³ÃOk}Ö¯±;Üğá!EÊPVV Íqw|8~ZÓi™h_TĞhß™kö§ó‡ uåÛ!Éü‡îQt;3ò ŸO¯`Ì9J:@ßV'#v…{á€Õ%Ö›ÄwW åAâÛ\he~İq­;¡îÏUƒü’C±ï§«ÆE>¾ÿvuç¸ëö—ôu‡Y0wæRÆ„Î®²eH‡XÜñö	É]bD²Ë{OûC@Òİ€„í{ ÿE
-µ»½ùÃæªP)¢è»ÒHu;ëÍ
-8W¤	 Z‡¡´fİCø«Õ‡¿’É°Ñaøß>ë´»{uW7®Ùd¤½óÙÉñ8êx‡c¯^±*0”_Y†ãXë:âşÈcØèê}ú¢8ú¼MV—r¶î8ê"T2wGq†¿ôXˆ\hç‚§æÑ9$é\^vÅûim‘„otñ¿çH'û¹Î²O;Táæìéòíi7 %IŸo1ĞÊw T8Ø%®VÜk“'ñP@4OïŞá¬ü†³€¹­¾ş•L®F-ÿÙ­®|ØÃ¥6jÛìÒÉ?£Õ•‡¶…Ñ¥÷úål®ßL†“á7àË èıññ¯Ù  GJ$qWİB«`_Õ¸&U÷7ŞñÁèI%´´§«›£&&.yvnQ¦=@ó+
-G:ïj0e¯ú¡
-L	@Á¸Ï2IÌ.ğnùğˆG™°	šÕ„xe¿c½üìV]š&tÁÄ7îò§õŠ#ı{ÎSû0²i¢û?¥e¢20~ºeRz±/HçâÔ£<­Š÷‘~÷   ÿÿ 9TØ
+}> = ({ students, classTypes, gyms, staff, isOwner, initialData, onSubmit, onCancel, onDelete }) => {
+  const [selectedClassIds, setSelectedClassIds] = useState<string[]>(initialData?.class_ids || []);
+  const [dayOfWeek, setDayOfWeek] = useState(initialData?.day_of_week ?? 1);
+  const [time, setTime] = useState(initialData?.time || '16:00');
+  const [label, setLabel] = useState(initialData?.label || '');
+  const [coachId, setCoachId] = useState(initialData?.coach_id || '');
+  const [color, setColor] = useState(initialData?.color || 'bg-[#1e4da1]');
+  const [athleteIds, setAthleteIds] = useState<string[]>(initialData?.athlete_ids || []);
+
+  const COLOR_OPTIONS = [
+    { value: 'bg-[#1e4da1]', name: 'Blue' },
+    { value: 'bg-[#0073E6]', name: 'JFLIPS Blue' },
+    { value: 'bg-[#4CA5FF]', name: 'JFLIPS Light Blue' },
+    { value: 'bg-[#062963]', name: 'JFLIPS Navy' },
+    { value: 'bg-[#FF8A00]', name: 'JFLIPS Orange' },
+    { value: 'bg-[#E42624]', name: 'JFLIPS Red' },
+    { value: 'bg-indigo-500', name: 'Indigo' },
+    { value: 'bg-emerald-500', name: 'Green' },
+    { value: 'bg-teal-500', name: 'Teal' },
+    { value: 'bg-rose-500', name: 'Ambient Red' },
+    { value: 'bg-amber-500', name: 'Ambient Orange' },
+    { value: 'bg-yellow-400', name: 'Yellow' },
+    { value: 'bg-purple-500', name: 'Purple' },
+    { value: 'bg-pink-500', name: 'Pink' },
+    { value: 'bg-slate-700', name: 'Dark' },
+  ];
+
+  const classOptions = useMemo(() => [
+    ...(classTypes || []).map(ct => ({ id: ct.id, name: ct.name, isGym: false, type: 'class', combinedId: `class-${ct.id}` })),
+    ...(gyms || []).map(g => ({ id: g.id, name: g.name, isGym: true, type: g.gym_type, combinedId: `gym-${g.id}` }))
+  ], [classTypes, gyms]);
+
+  const DAY_OPTIONS = [
+    { value: 0, label: 'Sunday' },
+    { value: 1, label: 'Monday' },
+    { value: 2, label: 'Tuesday' },
+    { value: 3, label: 'Wednesday' },
+    { value: 4, label: 'Thursday' },
+    { value: 5, label: 'Friday' },
+    { value: 6, label: 'Saturday' }
+  ];
+
+  const assignedCoachIds = useMemo(() => {
+    const ids = new Set<string>();
+    selectedClassIds.forEach(cid => {
+      const gym = gyms.find(g => g.id === cid);
+      if (gym) {
+        (gym.coach_ids || []).forEach(id => ids.add(id));
+        if (gym.parent_gym_id) {
+          const parent = gyms.find(p => p.id === gym.parent_gym_id);
+          (parent?.coach_ids || []).forEach(id => ids.add(id));
+        }
+      }
+    });
+    return Array.from(ids);
+  }, [selectedClassIds, gyms]);
+
+  const toggleClass = (id: string) => {
+    setSelectedClassIds(prev => prev.includes(id) ? prev.filter(cid => cid !== id) : [...prev, id]);
+  };
+
+  return (
+    <div className="space-y-4 pb-6">
+      <div className="space-y-1">
+        <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Class / Gym / Team (Select Multiple)</label>
+        <div className="space-y-1.5 mt-1 max-h-40 overflow-y-auto pr-1">
+          {classOptions.map((opt, idx) => (
+            <motion.button
+              whileTap={{ scale: 0.98 }}
+              key={opt.combinedId || `sched-opt-${idx}`}
+              onClick={() => toggleClass(opt.id)}
+              className={`w-full p-3 rounded-xl border flex items-center gap-2 text-left transition-all ${selectedClassIds.includes(opt.id) ? 'bg-blue-50 dark:bg-blue-900/20 border-[#1e4da1] text-[#1e4da1]' : 'bg-slate-50 dark:bg-slate-800/50 border-transparent text-slate-500'}`}
+            >
+              <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedClassIds.includes(opt.id) ? 'bg-[#1e4da1] border-[#1e4da1]' : 'border-slate-300'}`}>
+                {selectedClassIds.includes(opt.id) && <CheckCircle2 size={10} className="text-white" />}
+              </div>
+              {opt.isGym ? (opt.type === 'cheer' ? <Trophy size={10} className="opacity-50" /> : <Building2 size={10} className="opacity-50" />) : <User size={10} className="opacity-50" />}
+              <span className="text-[10px] font-black uppercase italic">{opt.name}</span>
+            </motion.button>
+          ))}
+        </div>
+      </div>
+      <div className="space-y-1">
+        <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Assigned Athletes (For Privates)</label>
+        <div className="space-y-1.5 mt-1 max-h-40 overflow-y-auto pr-1">
+          {(students || []).filter(s => !s.is_gym_member).map((s, idx) => (
+             <motion.button
+               whileTap={{ scale: 0.98 }}
+               key={`sched-ath-${s.id}-${idx}`}
+               onClick={() => setAthleteIds(prev => prev.includes(s.id) ? prev.filter(aid => aid !== s.id) : [...prev, s.id])}
+               className={`w-full p-3 rounded-xl border flex items-center gap-2 text-left transition-all ${athleteIds.includes(s.id) ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-500 text-indigo-500' : 'bg-slate-50 dark:bg-slate-800/50 border-transparent text-slate-500'}`}
+             >
+               <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${athleteIds.includes(s.id) ? 'bg-indigo-500 border-indigo-500' : 'border-slate-300'}`}>
+                 {athleteIds.includes(s.id) && <CheckCircle2 size={10} className="text-white" />}
+               </div>
+               <User size={10} className="opacity-50" />
+               <span className="text-[10px] font-black uppercase italic">{s.name}</span>
+             </motion.button>
+          ))}
+          {(!students || students.filter(s => !s.is_gym_member).length === 0) && <p className="text-[9px] text-slate-400 font-bold uppercase py-2 px-1">No students</p>}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Day</label>
+          <select value={dayOfWeek} onChange={e => setDayOfWeek(Number(e.target.value))} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none">
+            {DAY_OPTIONS.map((d, idx) => (
+              <option key={d.value || `day-${idx}`} value={d.value} className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Time</label>
+          <input type="time" value={time} onChange={e => setTime(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
+        </div>
+      </div>
+      <div className="space-y-1">
+        <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Label (Optional)</label>
+        <input placeholder="e.g. Tumbling â€” Tuesdays" value={label} onChange={e => setLabel(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
+      </div>
+      {staff && staff.length > 0 && (
+        <div className="space-y-1">
+          <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Assigned Coach (Optional)</label>
+          <select 
+            value={coachId} 
+            onChange={e => setCoachId(e.target.value)}
+            className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none"
+          >
+            <option value="">Default (Logged-in Coach / Owner)</option>
+            {staff.map((s: any, idx: number) => (
+              <option key={s.id || `sched-coach-${idx}`} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      <div className="space-y-1">
+        <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Color Display</label>
+        <div className="flex gap-2">
+          {COLOR_OPTIONS.map((c, idx) => (
+            <button
+              key={`color-opt-${c.value}-${idx}`}
+              onClick={() => setColor(c.value)}
+              className={`w-8 h-8 rounded-full ${c.value} ${color === c.value ? 'ring-2 ring-offset-2 ring-slate-800 dark:ring-white dark:ring-offset-slate-900' : 'opacity-70'}`}
+              title={c.name}
+              type="button"
+            />
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-col gap-2.5 mt-6">
+        <div className="flex gap-2">
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              if (selectedClassIds.length === 0) return alert('Select at least one class or gym');
+              let finalColor = color;
+              if (athleteIds.length > 0) {
+                finalColor += '|' + athleteIds.join(',');
+              }
+              onSubmit(selectedClassIds, dayOfWeek, time, label || undefined, finalColor, coachId || undefined);
+            }}
+            className="flex-[4] bg-[#1e4da1] dark:bg-blue-600 text-white py-4 rounded-xl font-black text-[10px] uppercase shadow-lg"
+          >
+            Save Schedule
+          </motion.button>
+          <motion.button whileTap={{ scale: 0.9 }} onClick={onCancel} className="flex-1 bg-slate-100 dark:bg-slate-800 text-[#94a3b8] rounded-xl flex items-center justify-center font-black text-[10px] uppercase">
+            Cancel
+          </motion.button>
+        </div>
+        {initialData && onDelete && (
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            type="button"
+            onClick={() => {
+              if (confirm("Are you sure you want to delete this schedule item?")) {
+                onDelete(initialData.id);
+              }
+            }}
+            className="w-full py-3.5 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 border border-red-200 dark:border-red-900/50 rounded-xl font-black text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all"
+          >
+            <Trash2 size={14} /> Delete Schedule
+          </motion.button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const ClassTypeForm: React.FC<any> = ({ students, gyms, staff, isOwner, initialData, onSubmit, onCancel }) => {
+  const [name, setName] = useState(initialData?.name || '');
+  const [price, setPrice] = useState(initialData?.price?.toString() || '');
+  const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>(initialData?.studentIds || []);
+  const [selectedCoachIds, setSelectedCoachIds] = useState<string[]>(initialData?.coach_ids || []);
+  const [allowSignup, setAllowSignup] = useState<boolean>(initialData?.allow_signup ?? true);
+  const [autoResetInvoice, setAutoResetInvoice] = useState<boolean>(initialData?.auto_reset_invoice !== false);
+
+  const combined = useMemo(() => [
+    ...(students || []).filter((s: any) => !s.is_gym_member).map((s: any, idx: number) => ({ ...s, isGym: false, combinedId: `student-${s.id || idx}` }))
+  ], [students]);
+
+  const toggleEntity = (id: string) => setSelectedEntityIds(prev => prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id]);
+  const toggleCoach = (id: string) => setSelectedCoachIds(prev => prev.includes(id) ? prev.filter(cid => cid !== id) : [...prev, id]);
+
+  return (
+    <div className="space-y-4 max-h-[70vh] overflow-y-auto no-scrollbar">
+      <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Class Name</label><input placeholder="NAME" value={name} onChange={e => setName(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
+      {/* Owner only. The existing price is still carried through on save, so a
+          coach editing a class cannot wipe it. */}
+      {isOwner && (
+        <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Price per session</label><input placeholder="PRICE" type="number" value={price} onChange={e => setPrice(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
+      )}
+
+      {isOwner && staff && staff.length > 0 && (
+        <div className="space-y-1">
+          <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Assigned Coaches (leave blank = owner default)</label>
+          <div className="flex flex-wrap gap-2 p-2 bg-slate-50 dark:bg-slate-800/50 rounded-xl min-h-[44px]">
+            {(staff || []).map((coach: any, idx: number) => (
+              <button key={`class-form-coach-${coach.id}-${idx}`} type="button" onClick={() => toggleCoach(coach.id)}
+                className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all flex items-center gap-1.5 ${selectedCoachIds.includes(coach.id) ? 'bg-[#1e4da1] text-white' : 'bg-white dark:bg-slate-700 text-slate-400 border border-slate-100 dark:border-slate-600'}`}>
+                {selectedCoachIds.includes(coach.id) ? <CheckCircle2 size={10} /> : <Plus size={10} />}
+                {coach.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="space-y-1">
+        <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Tumbling Athletes</label>
+        <div className="space-y-1.5 mt-1 max-h-40 overflow-y-auto pr-1">
+          {(combined || []).map((entity: any, idx: number) => (
+            <motion.button 
+              whileTap={{ scale: 0.98 }} 
+              key={`class-form-entity-${entity.combinedId}-${idx}`} 
+              onClick={() => toggleEntity(entity.id)} 
+              className={`w-full p-3 rounded-xl border flex items-center gap-2 text-left transition-all ${selectedEntityIds.includes(entity.id) ? 'bg-blue-50 dark:bg-blue-900/20 border-[#1e4da1] text-[#1e4da1]' : 'bg-slate-50 dark:bg-slate-800/50 border-transparent text-slate-500'}`}
+            >
+              <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedEntityIds.includes(entity.id) ? 'bg-[#1e4da1] border-[#1e4da1]' : 'border-slate-300'}`}>
+                {selectedEntityIds.includes(entity.id) && <CheckCircle2 size={10} className="text-white" />}
+              </div>
+              {entity.isGym ? (entity.gym_type === 'cheer' ? <Trophy size={10} className="opacity-50" /> : <Building2 size={10} className="opacity-50" />) : <User size={10} className="opacity-50" />}
+              <span className="text-[10px] font-black uppercase italic">{entity.name}</span>
+            </motion.button>
+          ))}
+          {(!combined || combined.length === 0) && <p className="text-[9px] text-slate-400 font-bold uppercase py-2">No data</p>}
+        </div>
+      </div>
+      <div className="flex gap-2 pt-2"><motion.button whileTap={{ scale: 0.95 }} onClick={() => onSubmit(name, parseFloat(price || '0'), selectedEntityIds, selectedCoachIds, allowSignup, true)} className="flex-[4] bg-[#1e4da1] dark:bg-blue-600 text-white py-4 rounded-xl font-black text-[10px] uppercase shadow-lg">Save</motion.button><motion.button whileTap={{ scale: 0.9 }} onClick={onCancel} className="flex-1 bg-slate-100 dark:bg-slate-800 text-[#94a3b8] rounded-xl flex items-center justify-center transition-transform"><X size={16} /></motion.button></div>
+    </div>
+  );
+};
+
+const AppSettingsModal: React.FC<any> = ({ state, toggleTheme, onLogout, onLinkGoogle, onClose, onShowRecovery }) => (
+  <Modal title="Settings" onClose={onClose}>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
+        <div className="flex items-center gap-3"><div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[#1e4da1] dark:text-blue-400">{state.theme === 'dark' ? <Moon size={16} /> : <Sun size={16} />}</div><span className="font-black uppercase text-[10px] tracking-widest text-[#161d2a] dark:text-slate-300">Dark Mode</span></div>
+        <button onClick={toggleTheme} className={`w-12 h-6 rounded-full p-1 transition-colors duration-300 ${state.theme === 'dark' ? 'bg-[#1e4da1]' : 'bg-slate-300'}`}><div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-300 ${state.theme === 'dark' ? 'translate-x-6' : 'translate-x-0'}`}></div></button>
+      </div>
+
+      <button type="button" onClick={() => { onShowRecovery(); onClose(); }} className="w-full flex items-center justify-between p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl transition-colors">
+        <div className="flex items-center gap-3">
+          <History size={18} className="text-[#1e4da1] dark:text-blue-400" />
+          <span className="font-black uppercase text-[10px] text-[#1e4da1] dark:text-blue-400">Recover Invoice Data</span>
+        </div>
+        <ArrowRight size={14} className="text-[#1e4da1] dark:text-blue-400 opacity-50" />
+      </button>
+
+      <div className="h-px bg-slate-100 dark:bg-slate-800 my-2"></div>
+      <button type="button" onClick={onLogout} className="w-full flex items-center justify-between p-4 bg-slate-100 dark:bg-slate-800/80 rounded-xl transition-colors"><div className="flex items-center gap-3"><LogOut size={18} className="text-slate-600 dark:text-slate-400" /><span className="font-black uppercase text-[10px] text-slate-600 dark:text-slate-400">Log Out</span></div><ArrowRight size={14} className="text-slate-400 opacity-50" /></button>
+    </div>
+  </Modal>
+);
+
+const NotificationsModal: React.FC<{
+  notifications: AppNotification[],
+  onClose: () => void,
+  onMarkRead: (id: string) => void,
+  onClear: () => void,
+  permission?: NotificationPermission,
+  onEnableAlerts?: () => void
+}> = ({ notifications, onClose, onMarkRead, onClear, permission, onEnableAlerts }) => {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="bg-white dark:bg-slate-800 w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-100 dark:border-slate-700"
+      >
+        <div className="p-6 border-b border-slate-50 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-[#1e4da1] dark:text-blue-400">
+              <Bell size={20} />
+            </div>
+            <div>
+              <h2 className="text-xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">Notifications</h2>
+              <p className="text-[8px] font-black text-[#94a3b8] uppercase tracking-widest">Recent Activity</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 bg-white dark:bg-slate-700 text-slate-400 rounded-xl shadow-sm border border-slate-100 dark:border-slate-600"><X size={18} /></button>
+        </div>
+
+        {permission !== 'granted' && onEnableAlerts && (
+          <div className="mx-4 mt-4 p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-900/40">
+            <p className="text-[9px] font-black text-amber-800 dark:text-amber-300 uppercase tracking-wider leading-relaxed">
+              {permission === 'denied'
+                ? 'Alerts are blocked in your browser settings. Reset the notification permission for this site to receive signup and session alerts.'
+                : 'Turn on device alerts to be notified when parents sign up, coaches request to join, and sessions get logged.'}
+            </p>
+            {permission !== 'denied' && (
+              <button
+                onClick={onEnableAlerts}
+                className="mt-3 w-full py-3 bg-[#1e4da1] dark:bg-blue-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
+              >
+                Enable Alerts <Bell size={12} />
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="max-h-[60vh] overflow-y-auto p-4 space-y-3 no-scrollbar">
+          {notifications.length === 0 ? (
+            <div className="py-12 flex flex-col items-center justify-center text-center">
+              <div className="w-16 h-16 bg-slate-50 dark:bg-slate-900/50 rounded-full flex items-center justify-center text-slate-200 dark:text-slate-700 mb-4">
+                <Bell size={32} />
+              </div>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">No new notifications</p>
+            </div>
+          ) : (
+            notifications.map((n, idx) => (
+              <motion.div 
+                key={n.id || `notif-${idx}`}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                className={`p-4 rounded-2xl border transition-all ${n.is_read ? 'bg-white dark:bg-slate-800 border-slate-50 dark:border-slate-700 opacity-60' : 'bg-blue-50/30 dark:bg-blue-900/10 border-blue-100 dark:border-blue-800 shadow-sm'}`}
+              >
+                <div className="flex justify-between items-start gap-3">
+                  <div className="flex-1">
+                    {(n.title || NOTIFICATION_TITLES[n.type]) && (
+                      <p className="text-[8px] font-black text-[#1e4da1] dark:text-blue-400 uppercase tracking-widest mb-1">
+                        {n.title || NOTIFICATION_TITLES[n.type]}
+                      </p>
+                    )}
+                    <p className={`text-[11px] font-bold leading-relaxed ${n.is_read ? 'text-slate-500 dark:text-slate-400' : 'text-slate-800 dark:text-slate-100'}`}>
+                      {n.message}
+                    </p>
+                    <p className="text-[8px] font-black text-slate-400 uppercase mt-2 tracking-wider">
+                      {new Date(n.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                  {!n.is_read && (
+                    <button 
+                      onClick={() => onMarkRead(n.id)}
+                      className="p-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-200 transition-colors"
+                    >
+                      <Check size={12} strokeWidth={3} />
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            ))
+          )}
+        </div>
+
+        {notifications.length > 0 && (
+          <div className="p-4 bg-slate-50/50 dark:bg-slate-800/50 border-t border-slate-50 dark:border-slate-700">
+            <button 
+              onClick={onClear}
+              className="w-full py-4 bg-white dark:bg-slate-800 text-red-500 dark:text-red-400 rounded-2xl text-[10px] font-black uppercase tracking-widest border border-slate-100 dark:border-slate-700 shadow-sm hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+            >
+              Clear All Notifications
+            </button>
+          </div>
+        )}
+      </motion.div>
+    </div>
+  );
+};
+const ArchiveModal: React.FC<any> = ({ state, archiveMonth, archiveYear, setArchiveMonth, setArchiveYear, onConfirm, onCancel }) => {
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [availableItems, setAvailableItems] = useState<{id: string, name: string, defaultSelected: boolean}[]>([]);
+
+  useEffect(() => {
+    const uniqueIds = Array.from(new Set((state.sessions || []).map((s: any) => s.classTypeId)));
+    const items = uniqueIds.map(id => {
+      const gym = state.gyms.find((g: any) => g.id === id);
+      const ct = state.classTypes.find((c: any) => c.id === id);
+      const name = gym ? gym.name : (ct ? ct.name : 'Unknown');
+      const autoReset = gym ? gym.auto_reset_invoice !== false : (ct ? ct.auto_reset_invoice !== false : true);
+      return { id: id as string, name: name as string, defaultSelected: autoReset as boolean };
+    });
+    setAvailableItems(items);
+    setSelectedIds(items.filter(i => i.defaultSelected).map(i => i.id as string));
+  }, [state.sessions, state.gyms, state.classTypes]);
+
+  const toggleSelection = (id: string) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  return (
+    <Modal title="Archive" onClose={onCancel}>
+      <div className="space-y-4">
+        <p className="text-slate-600 dark:text-slate-400 text-xs font-medium uppercase text-center">Export logs to history.</p>
+        <p className="text-[9px] font-black text-slate-400 uppercase text-center leading-relaxed">
+          This will archive the selected logs. 
+          Gyms already reset will not be affected.
+        </p>
+        
+        <div className="max-h-48 overflow-y-auto space-y-2 border border-slate-100 dark:border-slate-700 rounded-xl p-2">
+          {availableItems.length === 0 ? (
+            <p className="text-center text-xs text-slate-500 py-4">No active sessions to archive.</p>
+          ) : (
+            availableItems.map((item, idx) => (
+              <label key={`${item.id}-${idx}`} className="flex items-center gap-3 p-2 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={selectedIds.includes(item.id)}
+                  onChange={() => toggleSelection(item.id)}
+                  className="w-4 h-4 rounded border-slate-300 text-[#1e4da1] focus:ring-[#1e4da1]"
+                />
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{item.name}</span>
+              </label>
+            ))
+          )}
+        </div>
+
+        <div className="space-y-3 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800">
+          <p className="text-[10px] text-blue-700 dark:text-blue-300 font-bold tracking-wide">
+            Dates will be automatically assigned to the correct billing month.
+          </p>
+        </div>
+        <div className="flex gap-3 pt-2">
+          <motion.button whileTap={{ scale: 0.95 }} onClick={() => onConfirm(selectedIds)} className="flex-1 bg-[#1e4da1] dark:bg-blue-600 text-white py-3 rounded-xl font-black text-[10px] uppercase shadow-lg">Confirm</motion.button>
+          <button onClick={onCancel} className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-500 py-3 rounded-xl font-black text-[10px] uppercase">Cancel</button>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+const DatabaseSetupView: React.FC<{ message: string, onReload: () => void }> = ({ message, onReload }) => (
+  <div className="flex flex-col min-h-screen items-center justify-center p-8 bg-[#f8fafc] dark:bg-[#0f172a] text-center">
+    <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-full flex items-center justify-center mb-6"><Terminal size={32} /></div>
+    <h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase italic mb-2">{message}</h2>
+    <p className="text-sm text-slate-500 dark:text-slate-400 mb-8 max-w-xs">Tables missing. Check Supabase setup.</p>
+    <button onClick={onReload} className="mt-8 bg-[#1e4da1] text-white px-8 py-3 rounded-xl font-black text-xs uppercase flex items-center gap-2"><RefreshCw size={14} /> Reload</button>
+  </div>
+);
+
+interface StatisticsViewProps {
+  history: HistoryMonth[];
+  classTypes: ClassType[];
+  gyms: Gym[];
+  students: Student[];
+  onBack: () => void;
+}
+
+const StatisticsView: React.FC<StatisticsViewProps> = ({ history, classTypes, gyms, students, onBack }) => {
+  const validHistory = history || [];
+
+  // Sort chronologically
+  const sortedData = useMemo(() => {
+    return [...validHistory].sort((a, b) => {
+      if (a.year !== b.year) return a.year - b.year;
+      const MONTH_ORDER: Record<string, number> = {
+        'January': 0, 'February': 1, 'March': 2, 'April': 3, 'May': 4, 'June': 5,
+        'July': 6, 'August': 7, 'September': 8, 'October': 9, 'November': 10, 'December': 11,
+        'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'Jun': 5, 'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11
+      };
+      const aMonth = MONTH_ORDER[a.monthName] ?? 0;
+      const bMonth = MONTH_ORDER[b.monthName] ?? 0;
+      return aMonth - bMonth;
+    });
+  }, [validHistory]);
+
+  // Total Students directly queried from active state list of students
+  const totalStudents = students.length;
+
+  // Revenue totals
+  const totalRevenue = useMemo(() => {
+    return validHistory.reduce((acc: number, h) => {
+      const rev = typeof h.revenue === 'string' ? parseFloat(h.revenue) : Number(h.revenue || 0);
+      return acc + rev;
+    }, 0);
+  }, [validHistory]);
+
+  const avgMonthly = useMemo(() => {
+    return validHistory.length > 0 ? totalRevenue / validHistory.length : 0;
+  }, [validHistory, totalRevenue]);
+
+  // Dynamically build map of class ID -> Name from active properties and fallback snapshot data
+  const classTypeMap = useMemo(() => {
+    const map: Record<string, string> = {};
+
+    // 1. Populate from active class types
+    classTypes.forEach(ct => {
+      if (ct.id && ct.name) {
+        map[ct.id] = ct.name;
+      }
+    });
+
+    // 2. Populate from active gyms/teams
+    gyms.forEach(g => {
+      if (g.id && g.name) {
+        map[g.id] = g.name;
+      }
+    });
+
+    // 3. Fallback to snapshot files for deleted elements
+    validHistory.forEach(month => {
+      if (month.snapshot_data?.classTypes) {
+        month.snapshot_data.classTypes.forEach(ct => {
+          if (ct.id && ct.name && !map[ct.id]) {
+            map[ct.id] = ct.name;
+          }
+        });
+      }
+      if (month.snapshot_data?.gyms) {
+        month.snapshot_data.gyms.forEach(g => {
+          if (g.id && g.name && !map[g.id]) {
+            map[g.id] = g.name;
+          }
+        });
+      }
+    });
+
+    return map;
+  }, [validHistory, classTypes, gyms]);
+
+  const getClassName = useCallback((id: string) => {
+    if (classTypeMap[id]) return classTypeMap[id];
+    if (id === '1') return 'Private Session';
+    if (id === '2') return 'Group Class';
+    if (id === '3') return 'Tumbling Intensive';
+    return `Class ${id}`;
+  }, [classTypeMap]);
+
+  // Count sessions per class type
+  const sessionsByClass = useMemo(() => {
+    const map: Record<string, number> = {};
+    validHistory.forEach(month => {
+      if (month.sessions) {
+        month.sessions.forEach(session => {
+          const cid = session.classTypeId;
+          if (cid) {
+            map[cid] = (map[cid] || 0) + 1;
+          }
+        });
+      }
+    });
+    return map;
+  }, [validHistory]);
+
+  // Busiest class calculations
+  const busiestClass = useMemo(() => {
+    let bestId = '';
+    let maxSessions = 0;
+    Object.entries(sessionsByClass).forEach(([cid, count]) => {
+      if (count > maxSessions) {
+        maxSessions = count;
+        bestId = cid;
+      }
+    });
+    return {
+      name: bestId ? getClassName(bestId) : 'None',
+      count: maxSessions
+    };
+  }, [sessionsByClass, getClassName]);
+
+  // Format data for Recharts AreaChart (monthly revenue)
+  const areaChartData = useMemo(() => {
+    return sortedData.map(h => {
+      const rev = typeof h.revenue === 'string' ? parseFloat(h.revenue) : Number(h.revenue || 0);
+      return {
+        name: `${h.monthName.substring(0, 3)} ${h.year}`,
+        Revenue: rev
+      };
+    });
+  }, [sortedData]);
+
+  // Format data for Recharts BarChart (sessions per class type)
+  const barChartData = useMemo(() => {
+    return Object.entries(sessionsByClass).map(([classTypeId, count]) => ({
+      name: getClassName(classTypeId),
+      Sessions: count
+    }));
+  }, [sessionsByClass, getClassName]);
+
+  return (
+    <div className="space-y-6 mt-4 pb-20">
+      <button onClick={onBack} className="text-slate-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-1 hover:text-[#1e4da1]">&larr; Back</button>
+      <h2 className="text-xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">Analytics</h2>
+
+      {/* Stat Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Stat Card 1: Total Students */}
+        <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm flex items-center justify-between">
+          <div>
+            <p className="text-[#94a3b8] text-[9px] font-black uppercase tracking-wider mb-1">Total Students</p>
+            <h3 className="text-2xl font-black italic text-slate-800 dark:text-slate-100">{totalStudents}</h3>
+          </div>
+          <div className="w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center text-[#1e4da1] dark:text-blue-400">
+            <Users size={18} />
+          </div>
+        </div>
+
+        {/* Stat Card 2: Avg Monthly Revenue */}
+        <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm flex items-center justify-between">
+          <div>
+            <p className="text-[#94a3b8] text-[9px] font-black uppercase tracking-wider mb-1">Avg Monthly Rev</p>
+            <h3 className="text-2xl font-black italic text-emerald-600 dark:text-emerald-400">R{Math.round(avgMonthly)}</h3>
+          </div>
+          <div className="w-10 h-10 rounded-full bg-emerald-50 dark:bg-emerald-950/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+            <CreditCard size={18} />
+          </div>
+        </div>
+
+        {/* Stat Card 3: Busiest Class */}
+        <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm flex items-center justify-between">
+          <div>
+            <p className="text-[#94a3b8] text-[9px] font-black uppercase tracking-wider mb-1">Busiest Class</p>
+            <h3 className="text-lg font-black italic text-[#1e4da1] dark:text-blue-400 truncate max-w-[150px] md:max-w-[180px]">{busiestClass.name}</h3>
+            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold">{busiestClass.count} sessions</span>
+          </div>
+          <div className="w-10 h-10 rounded-full bg-orange-50 dark:bg-orange-950/30 flex items-center justify-center text-orange-500 dark:text-orange-400 flex-shrink-0">
+            <Zap size={18} />
+          </div>
+        </div>
+      </div>
+
+      {/* Charts List */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Chart 1: Revenue Trend */}
+        <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700">
+          <p className="text-[#94a3b8] text-[10px] font-black uppercase mb-4 tracking-widest">Monthly Revenue Trend</p>
+          {areaChartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <AreaChart data={areaChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#1e4da1" stopOpacity={0.4}/>
+                    <stop offset="95%" stopColor="#1e4da1" stopOpacity={0.0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" className="dark:stroke-slate-700" />
+                <XAxis 
+                  dataKey="name" 
+                  tickLine={false} 
+                  axisLine={false} 
+                  tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} 
+                />
+                <YAxis 
+                  tickLine={false} 
+                  axisLine={false} 
+                  tickFormatter={(v) => `R${v}`} 
+                  tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} 
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: '#1e293b', 
+                    borderRadius: '12px', 
+                    border: 'none', 
+                    color: '#fff',
+                    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' 
+                  }} 
+                  itemStyle={{ color: '#60a5fa', fontWeight: 'bold' }}
+                  labelStyle={{ color: '#94a3b8', fontSize: '10px', fontWeight: 'bold' }}
+                  formatter={(value) => [`R${value}`, 'Revenue']}
+                />
+                <Area type="monotone" dataKey="Revenue" stroke="#1e4da1" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[260px] flex items-center justify-center">
+              <p className="text-slate-400 text-[10px] font-black uppercase italic">No history data available</p>
+            </div>
+          )}
+        </div>
+
+        {/* Chart 2: Sessions per Class Type */}
+        <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700">
+          <p className="text-[#94a3b8] text-[10px] font-black uppercase mb-4 tracking-widest">Sessions by Class Type</p>
+          {barChartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={barChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" className="dark:stroke-slate-700" />
+                <XAxis 
+                  dataKey="name" 
+                  tickLine={false} 
+                  axisLine={false} 
+                  tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} 
+                />
+                <YAxis 
+                  tickLine={false} 
+                  axisLine={false} 
+                  tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} 
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: '#1e293b', 
+                    borderRadius: '12px', 
+                    border: 'none', 
+                    color: '#fff',
+                    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' 
+                  }} 
+                  itemStyle={{ color: '#38bdf8', fontWeight: 'bold' }}
+                  labelStyle={{ color: '#94a3b8', fontSize: '10px', fontWeight: 'bold' }}
+                  formatter={(value) => [value, 'Sessions']}
+                />
+                <Bar dataKey="Sessions" fill="#0284c7" radius={[6, 6, 0, 0]} maxBarSize={45}>
+                  {barChartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#1e4da1' : '#0ea5e9'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[260px] flex items-center justify-center">
+              <p className="text-slate-400 text-[10px] font-black uppercase italic">No session data available</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default App;
