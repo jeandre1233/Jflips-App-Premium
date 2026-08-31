@@ -21,6 +21,10 @@ async function startServer() {
 
   app.use(cors());
   app.use(express.json());
+  app.use((req, res, next) => {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+    next();
+  });
 
   // API Route for Google Sheets
   app.post('/api/signup', async (req, res) => {
