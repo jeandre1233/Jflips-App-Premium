@@ -101,6 +101,25 @@ import { QuickLogModal } from './src/components/QuickLogModal';
 import { addToQueue, getPendingItems, updateItemStatus, deleteSyncedItems } from './src/utils/offlineQueue';
 import { priceSessions, sumLines, billingMonthFor } from './src/utils/pricing';
 import type { PricingContext } from './src/utils/pricing';
+import {
+  computeMonthTotals,
+  mergeArchivedSessions,
+  groupSessionsByMonth,
+  monthKeyOf,
+  parseMonthKey,
+  toArchivedRow,
+  fromArchivedRow
+} from './src/utils/historyEngine';
+import {
+  resolveAllocation,
+  resolveBankDetails,
+  sanitiseAllocations,
+  sanitiseGroupDefaults,
+  hasBusinessAccount,
+  clientGroupFor,
+  CLIENT_GROUPS
+} from './src/utils/bankAccounts';
+import type { BankAllocation, ClientGroup, GroupDefaults, InvoiceAllocations } from './src/utils/bankAccounts';
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { SyncStatusBadge } from './src/components/SyncStatusBadge';
 import { sendWhatsAppAttendanceQuery, sendWhatsAppInvoiceReminder } from './src/utils/whatsapp';
@@ -935,6 +954,29 @@ const App: React.FC = () => {
           // the pricing engine treats undefined as "no discount".
           sibling_discount: ownerP.sibling_discount != null ? Number(ownerP.sibling_discount) : 0,
           default_group_rate: ownerP.default_group_rate != null ? Number(ownerP.default_group_rate) : 0,
+          // Which bank account each invoice prints. The database is the source
+          // of truth; localStorage is only a cache for an offline cold start,
+          // and is used ONLY when the database has nothing stored yet â€” reading
+          // it as a merge would let a stale local value outrank a newer choice
+          // made on another device.
+          invoice_bank_allocations: (() => {
+            const fromDb = sanitiseAllocations(ownerP.invoice_bank_allocations);
+            if (Object.keys(fromDb).length > 0) return fromDb;
+            try {
+              return sanitiseAllocations(
+                JSON.parse(localStorage.getItem(`jflips_invoice_bank_allocations_${user.id}`) || '{}')
+              );
+            } catch { return {}; }
+          })(),
+          bank_allocation_defaults: (() => {
+            const fromDb = sanitiseGroupDefaults(ownerP.bank_allocation_defaults);
+            if (Object.keys(fromDb).length > 0) return fromDb;
+            try {
+              return sanitiseGroupDefaults(
+                JSON.parse(localStorage.getItem(`jflips_bank_group_defaults_${user.id}`) || '{}')
+              );
+            } catch { return {}; }
+          })(),
           id: user.id
         };
 
@@ -1268,8 +1310,14 @@ const App: React.FC = () => {
           totalCoachPayout: Number(h.total_coach_payout ?? 0),
           netProfit: Number(h.net_profit ?? h.revenue ?? 0),
           sessionCount: Number(h.session_count ?? (h.sessions_json?.length || 0)),
+          // What the clients were invoiced. Falls back to the gross for a month
+          // archived before history_and_banking.sql added the column â€” those
+          // months read right again after a Recalculate.
+          invoicesTotal: Number(h.invoices_total ?? h.total_gross ?? h.revenue ?? 0),
+          invoiceCount: Number(h.invoice_count ?? 0),
+          recalculatedAt: h.recalculated_at || undefined,
           sessions: h.sessions_json || [],
-          snapshot_data: h.snapshot_json 
+          snapshot_data: h.snapshot_json
         })),
         payments: mappedPayments,
         schedules: (schedulesRes.data || []).map((sc: any) => {
@@ -1783,10 +1831,74 @@ const App: React.FC = () => {
     loadCloudData(true);
   };
 
+  /**
+   * Persist a banking choice to the database, then to state, then to the local
+   * cache â€” in that order, so a save that the database rejects never leaves the
+   * screen showing an account the invoice will not actually print.
+   *
+   * Called from two places: the Personal/Business toggle on a single invoice
+   * (`allocations`), and the three group defaults in the Management tab
+   * (`groupDefaults`).
+   */
+  const saveBankAllocations = useCallback(async (
+    next: { allocations?: InvoiceAllocations; groupDefaults?: GroupDefaults }
+  ): Promise<boolean> => {
+    if (!user) return false;
+    if (state.profile.role !== 'owner') return false;
+
+    const allocations = next.allocations
+      ? sanitiseAllocations(next.allocations)
+      : sanitiseAllocations(state.profile.invoice_bank_allocations);
+    const groupDefaults = next.groupDefaults
+      ? sanitiseGroupDefaults(next.groupDefaults)
+      : sanitiseGroupDefaults(state.profile.bank_allocation_defaults);
+
+    const payload: any = {
+      id: user.id,
+      invoice_bank_allocations: allocations,
+      bank_allocation_defaults: groupDefaults
+    };
+
+    let { error } = await supabase.from('owner_profiles').upsert(payload);
+
+    // A database that has not run history_and_banking.sql yet names the missing
+    // column. Keep the selection working locally rather than failing the click,
+    // and say once what needs running.
+    if (error) {
+      const missing = ['invoice_bank_allocations', 'bank_allocation_defaults']
+        .filter(col => error!.message.includes(col));
+      if (missing.length > 0) {
+        if (!localStorage.getItem('jflips_bank_alloc_migration_warned')) {
+          localStorage.setItem('jflips_bank_alloc_migration_warned', '1');
+          alert('Your payout account choice is saved on this device, but it will not follow you to another one until history_and_banking.sql has been run in the Supabase SQL Editor.');
+        }
+      } else {
+        alert('Could not save payout account: ' + error.message);
+        return false;
+      }
+    }
+
+    setState(prev => ({
+      ...prev,
+      profile: {
+        ...prev.profile,
+        invoice_bank_allocations: allocations,
+        bank_allocation_defaults: groupDefaults
+      }
+    }));
+
+    try {
+      localStorage.setItem(`jflips_invoice_bank_allocations_${user.id}`, JSON.stringify(allocations));
+      localStorage.setItem(`jflips_bank_group_defaults_${user.id}`, JSON.stringify(groupDefaults));
+    } catch { /* a full or blocked store must not fail the save */ }
+
+    return true;
+  }, [user, state.profile.role, state.profile.invoice_bank_allocations, state.profile.bank_allocation_defaults]);
+
   const handleUpdateProfile = async (profile: Profile) => {
     if (!user) return;
     const isOwner = state.profile.role === 'owner';
-    
+
     // Save business details in localStorage
     if (profile.bizBankName !== undefined) localStorage.setItem(`jflips_biz_bankName_${user.id}`, profile.bizBankName);
     if (profile.bizAccountNumber !== undefined) localStorage.setItem(`jflips_biz_accountNumber_${user.id}`, profile.bizAccountNumber);
@@ -1815,7 +1927,7 @@ const App: React.FC = () => {
       // Tolerate a database missing either newer column: drop whichever one the
       // error names and save the rest, rather than losing the whole profile edit.
       if (pErr) {
-        const missing = ['sibling_discount', 'default_group_rate']
+        const missing = ['sibling_discount', 'default_group_rate', 'invoice_bank_allocations', 'bank_allocation_defaults']
           .filter(col => pErr!.message.includes(col));
         if (missing.length > 0) {
           missing.forEach(col => delete ownerPayload[col]);
@@ -2046,11 +2158,30 @@ const App: React.FC = () => {
         const stale = (siblings || []).map((r: any) => r.id).filter((id: string) => !keep.has(id));
         if (stale.length > 0) {
           await supabase.from('sessions').delete().in('id', stale).eq('user_id', targetUserId);
+          // A swept-away row may already sit in an archived month, so history has
+          // to lose it too or the month keeps billing a session that no longer exists.
+          await syncHistoryForDeletedSessions(stale);
         }
       } catch (e) {
         console.error('Could not clean up replaced session rows:', e);
       }
     }
+
+    // If any row just written was already archived, replace its archived copy
+    // and reprice the month. This is what makes an edit to already-archived work
+    // show up in History instead of leaving the old number frozen in place.
+    await syncHistoryForEditedSessions(sessionsToUpsert.map(s => ({
+      id: s.id,
+      date: s.date,
+      classTypeId: s.class_type_id,
+      studentIds: s.student_ids || [],
+      hours_coached: s.hours_coached,
+      coach_id: s.coach_id,
+      is_competition: !!s.is_competition,
+      custom_event_name: s.custom_event_name || undefined,
+      covering_coach_name: s.covering_coach_name || undefined,
+      session_group_id: s.session_group_id || undefined
+    })));
 
     // Owner Notification â€” in-app bell + FCM push to the owner's device.
     if (!isOwner && targetUserId) {
@@ -2192,6 +2323,13 @@ const App: React.FC = () => {
 
     const { error } = await supabase.from('sessions').delete().in('id', ids).eq('user_id', isOwner ? user.id : state.profile.owner_id);
     if (error) alert("Delete failed: " + error.message);
+
+    // A month can be half-archived: resetting one client archives a shared class
+    // while the other families' share stays active. If any of these sessions had
+    // already reached history, drop them there too and recompute the month, so
+    // deleting a session can never leave revenue behind in an archived total.
+    await syncHistoryForDeletedSessions(ids);
+
     loadCloudData(true);
   };
 
@@ -2218,6 +2356,9 @@ const App: React.FC = () => {
     if (!user) return;
     if (!window.confirm("Delete history record?")) return;
     setIsSyncing(true);
+    // Empty the month's folder first. Leaving orphaned archived_sessions rows
+    // behind would let a later recalculate resurrect a month the owner deleted.
+    await supabase.from('archived_sessions').delete().eq('history_id', id).eq('user_id', user.id);
     const { error = null } = await supabase.from('history').delete().eq('id', id).eq('user_id', user.id);
     if (error) {
       alert("Delete failed: " + (error as any).message);
@@ -2226,6 +2367,377 @@ const App: React.FC = () => {
     }
     loadCloudData(true);
   };
+
+  /**
+   * The pricing context. History and the live invoices must be priced by the
+   * same engine with the same inputs, or the two will disagree â€” which is what
+   * this whole rework is here to prevent.
+   */
+  const buildPricingContext = useCallback((): PricingContext => ({
+    gyms: state.gyms || [],
+    classTypes: state.classTypes || [],
+    students: state.students || [],
+    staff: state.staff || [],
+    profile: { id: state.profile.id, pay_rate: state.profile.pay_rate, name: state.profile.name },
+    siblingDiscount: state.profile.sibling_discount
+  }), [state.gyms, state.classTypes, state.students, state.staff, state.profile]);
+
+  /**
+   * The pricing context for re-pricing an ARCHIVED month.
+   *
+   * Current data wins, so an edit to an archived session prices against the
+   * rates in force now â€” that is the behaviour the History tab is meant to
+   * reflect. The month's own snapshot fills the gaps: an athlete or a gym that
+   * has since been DELETED is still in there, so recalculating a month cannot
+   * quietly zero out work done by someone who has left. Without this fallback,
+   * removing an old athlete would silently shrink every month they appear in.
+   */
+  const buildArchivePricingContext = useCallback((snapshot: any): PricingContext => {
+    const live = buildPricingContext();
+    if (!snapshot) return live;
+
+    const fillGaps = <T extends { id?: string }>(current: T[], archived: any): T[] => {
+      if (!Array.isArray(archived) || archived.length === 0) return current;
+      const seen = new Set((current || []).map(e => e?.id).filter(Boolean));
+      const missing = archived.filter((e: any) => e?.id && !seen.has(e.id));
+      return missing.length > 0 ? [...(current || []), ...missing] : current;
+    };
+
+    return {
+      ...live,
+      gyms: fillGaps(live.gyms, snapshot.gyms),
+      classTypes: fillGaps(live.classTypes, snapshot.classTypes),
+      students: fillGaps(live.students, snapshot.students),
+      staff: fillGaps(live.staff || [], snapshot.staff)
+    };
+  }, [buildPricingContext]);
+
+  /**
+   * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   * THE ONE PLACE HISTORY IS WRITTEN
+   * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   * Files `incoming` sessions into their billing months and rewrites each
+   * affected month from scratch.
+   *
+   * The rules that make this correct, and that the two old accumulating
+   * versions of this code broke:
+   *
+   *   1. A month's session set is a MERGE BY SESSION ID, never a concat. That
+   *      is what stops a class shared between two families â€” archived once per
+   *      family â€” from being counted twice.
+   *   2. Every money column is DERIVED from that merged set by re-pricing it,
+   *      and written as an absolute value. No `existing + new` anywhere. So the
+   *      same archive run twice lands on the same numbers, and an edited or
+   *      deleted session is fixed by recomputing rather than by unwinding.
+   *   3. Each session is also written to `archived_sessions` â€” a real row per
+   *      session, keyed on the original session id. That is the redundancy: a
+   *      month can be rebuilt from the folder even if its JSON blob is lost.
+   *
+   * Pass `removeIds` to drop sessions out of a month (a deletion) while
+   * recomputing it in the same pass.
+   */
+  const writeHistoryMonths = useCallback(async (
+    incoming: AttendanceSession[],
+    opts: { removeIds?: string[]; touchMonthKeys?: string[]; mode?: 'union' | 'replace' } = {}
+  ): Promise<void> => {
+    if (!user) return;
+    const isOwner = state.profile.role === 'owner';
+    const ownerId = isOwner ? user.id : state.profile.owner_id;
+    if (!ownerId) return;
+
+    const ctx = buildPricingContext();
+    const removeIds = new Set(opts.removeIds || []);
+
+    // Every month this call has to rewrite: the ones the incoming sessions file
+    // into, plus any the caller names explicitly (the month a deleted session
+    // used to sit in).
+    const byMonth = groupSessionsByMonth(
+      (incoming || []).filter(s => !removeIds.has(s.id)),
+      ctx
+    );
+    (opts.touchMonthKeys || []).forEach(key => {
+      if (byMonth.has(key)) return;
+      const parsed = parseMonthKey(key);
+      if (parsed) byMonth.set(key, { monthName: parsed.monthName, year: parsed.year, sessions: [] });
+    });
+
+    if (byMonth.size === 0) return;
+
+    for (const [monthKey, group] of Array.from(byMonth.entries())) {
+      const { data: existingRows } = await supabase.from('history')
+        .select('*')
+        .eq('month_name', group.monthName)
+        .eq('year', group.year)
+        .eq('user_id', ownerId);
+
+      const existingRow = existingRows && existingRows.length > 0 ? existingRows[0] : null;
+      const historyId = existingRow?.id
+        || (crypto.randomUUID ? crypto.randomUUID() : `uid_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+
+      // â”€â”€ Rebuild the month's session set â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // Prefer the folder, which is a real table and survives a lost blob. Fall
+      // back to sessions_json on a database that has not run the migration.
+      let stored: AttendanceSession[] = [];
+      const { data: folderRows, error: folderErr } = await supabase.from('archived_sessions')
+        .select('*')
+        .eq('user_id', ownerId)
+        .eq('month_key', monthKey);
+
+      if (!folderErr && folderRows && folderRows.length > 0) {
+        stored = folderRows.map(fromArchivedRow);
+      } else if (existingRow) {
+        stored = (existingRow.sessions_json || []) as AttendanceSession[];
+      }
+
+      const merged = mergeArchivedSessions(stored, group.sessions, opts.mode || 'union')
+        .filter(s => !removeIds.has(s.id));
+
+      // â”€â”€ Derive every total from that set â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // Priced against current data, topped up from the month's own snapshot so
+      // an athlete or gym deleted since the archive still prices correctly.
+      const totals = computeMonthTotals(merged, buildArchivePricingContext(existingRow?.snapshot_json));
+
+      // A month with nothing left in it is not a month. Remove the row and its
+      // folder rather than leaving a zeroed shell in the History tab.
+      if (merged.length === 0) {
+        if (existingRow) {
+          await supabase.from('archived_sessions').delete().eq('user_id', ownerId).eq('month_key', monthKey);
+          await supabase.from('history').delete().eq('id', existingRow.id).eq('user_id', ownerId);
+        }
+        continue;
+      }
+
+      // The snapshot is CUMULATIVE. Overwriting it with current state would
+      // throw away the record of anyone since deleted, and the next recalculate
+      // would then have no way to price their sessions â€” so anything in the old
+      // snapshot that no longer exists live is carried forward.
+      const archiveCtx = buildArchivePricingContext(existingRow?.snapshot_json);
+      const snapshot_data = {
+        students: archiveCtx.students,
+        gyms: archiveCtx.gyms,
+        staff: archiveCtx.staff,
+        classTypes: archiveCtx.classTypes,
+        payments: state.payments || []
+      };
+
+      const row: any = {
+        id: historyId,
+        user_id: ownerId,
+        month_name: group.monthName,
+        year: group.year,
+        sessions_json: merged,
+        session_count: totals.sessionCount,
+        revenue: totals.totalGross,
+        total_gross: totals.totalGross,
+        tumbling_gross: totals.tumblingGross,
+        tumbling_coach_pay: totals.tumblingCoachPay,
+        tumbling_net: totals.tumblingNet,
+        schools_gross: totals.schoolsGross,
+        schools_coach_pay: totals.schoolsCoachPay,
+        gyms_gross: totals.gymsGross,
+        gyms_net: totals.gymsNet,
+        total_coach_payout: totals.totalCoachPayout,
+        net_profit: totals.netProfit,
+        invoices_total: totals.invoicesTotal,
+        invoice_count: totals.invoiceCount,
+        recorded_at: existingRow?.recorded_at || new Date().toISOString(),
+        recalculated_at: new Date().toISOString(),
+        snapshot_json: snapshot_data
+      };
+
+      let writeErr: any = null;
+      if (existingRow) {
+        const { id, user_id, ...updates } = row;
+        writeErr = (await supabase.from('history').update(updates).eq('id', existingRow.id).eq('user_id', ownerId)).error;
+      } else {
+        writeErr = (await supabase.from('history').insert(row)).error;
+      }
+
+      // Tolerate a database missing the newer columns so the archive itself
+      // still lands â€” the month is simply written without the invoice total.
+      if (writeErr) {
+        const optional = ['invoices_total', 'invoice_count', 'recalculated_at'];
+        if (optional.some(c => writeErr.message?.includes(c))) {
+          optional.forEach(c => delete row[c]);
+          if (existingRow) {
+            const { id, user_id, ...updates } = row;
+            writeErr = (await supabase.from('history').update(updates).eq('id', existingRow.id).eq('user_id', ownerId)).error;
+          } else {
+            writeErr = (await supabase.from('history').insert(row)).error;
+          }
+        }
+      }
+      if (writeErr) { console.error('History write failed for ' + monthKey, writeErr); continue; }
+
+      // â”€â”€ Keep the folder in step â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      // Upserting on the original session id is what makes re-archiving a
+      // no-op instead of a duplicate.
+      if (removeIds.size > 0) {
+        await supabase.from('archived_sessions')
+          .delete()
+          .eq('user_id', ownerId)
+          .in('id', Array.from(removeIds));
+      }
+      const folderPayload = merged.map(s => toArchivedRow(s, ownerId, historyId, group.monthName, group.year));
+      if (folderPayload.length > 0) {
+        const { error: upErr } = await supabase.from('archived_sessions')
+          .upsert(folderPayload, { onConflict: 'id' });
+        if (upErr) {
+          // Missing table just means history_and_banking.sql has not been run.
+          // sessions_json above is still authoritative, so this is not fatal.
+          console.warn('archived_sessions unavailable â€” run history_and_banking.sql for full redundancy', upErr.message);
+        }
+      }
+    }
+  }, [user, state.profile.role, state.profile.owner_id, state.payments, buildPricingContext, buildArchivePricingContext]);
+
+  /**
+   * REDUNDANCY, DELETION SIDE
+   * Any of these session ids that already reached history is removed from its
+   * month's folder and the month is recomputed without it.
+   *
+   * A month is often only half archived â€” resetting one client archives a class
+   * shared with other families while their share stays active â€” so a session
+   * being deleted from `sessions` can easily also exist in history. Without
+   * this, the deleted work stayed in the archived total forever, which is one of
+   * the ways the History tab drifted away from reality.
+   */
+  const syncHistoryForDeletedSessions = useCallback(async (ids: string[]) => {
+    if (!user || !ids || ids.length === 0) return;
+    const isOwner = state.profile.role === 'owner';
+    const ownerId = isOwner ? user.id : state.profile.owner_id;
+    if (!ownerId) return;
+
+    const { data: hits, error } = await supabase.from('archived_sessions')
+      .select('id, month_key, month_name, year')
+      .eq('user_id', ownerId)
+      .in('id', ids);
+
+    // No folder table yet â€” fall back to the JSON blobs so the totals still
+    // heal on a database that has not run history_and_banking.sql.
+    if (error) {
+      const affected = (state.history || []).filter(h =>
+        (h.sessions || []).some(s => ids.includes(s.id))
+      );
+      for (const h of affected) {
+        const remaining = (h.sessions || []).filter(s => !ids.includes(s.id));
+        await writeHistoryMonths(remaining, {
+          removeIds: ids,
+          touchMonthKeys: [monthKeyOf(h.monthName, h.year)],
+          mode: 'replace'
+        });
+      }
+      return;
+    }
+
+    if (!hits || hits.length === 0) return;
+
+    const monthKeys = Array.from(new Set(hits.map(r => r.month_key)));
+    for (const monthKey of monthKeys) {
+      const { data: rows } = await supabase.from('archived_sessions')
+        .select('*')
+        .eq('user_id', ownerId)
+        .eq('month_key', monthKey);
+
+      const remaining = (rows || [])
+        .filter(r => !ids.includes(r.id))
+        .map(fromArchivedRow);
+
+      await writeHistoryMonths(remaining, {
+        removeIds: ids,
+        touchMonthKeys: [monthKey],
+        mode: 'replace'
+      });
+    }
+  }, [user, state.profile.role, state.profile.owner_id, state.history, writeHistoryMonths]);
+
+  /**
+   * REDUNDANCY, EDIT SIDE
+   * If an edited session had already been archived, its archived copy is
+   * replaced with the new version and the month is repriced. 'replace' rather
+   * than 'union' because an edit that takes an athlete OFF a session has to be
+   * able to remove them from history too.
+   */
+  const syncHistoryForEditedSessions = useCallback(async (edited: AttendanceSession[]) => {
+    if (!user || !edited || edited.length === 0) return;
+    const isOwner = state.profile.role === 'owner';
+    const ownerId = isOwner ? user.id : state.profile.owner_id;
+    if (!ownerId) return;
+
+    const ids = edited.map(s => s.id).filter(Boolean);
+    if (ids.length === 0) return;
+
+    const { data: hits, error } = await supabase.from('archived_sessions')
+      .select('id, month_key')
+      .eq('user_id', ownerId)
+      .in('id', ids);
+
+    // Only touch history for sessions that are actually in it. An ordinary edit
+    // to live, un-archived work must not create a history month out of nothing.
+    let archivedIds: Set<string>;
+    if (error) {
+      archivedIds = new Set(
+        (state.history || []).flatMap(h => (h.sessions || []).map(s => s.id))
+      );
+    } else {
+      archivedIds = new Set((hits || []).map(r => r.id));
+    }
+
+    const toSync = edited.filter(s => archivedIds.has(s.id));
+    if (toSync.length === 0) return;
+
+    await writeHistoryMonths(toSync, { mode: 'replace' });
+  }, [user, state.profile.role, state.profile.owner_id, state.history, writeHistoryMonths]);
+
+  /**
+   * Rebuild one archived month, or every archived month, from its folder.
+   *
+   * This is the redundancy the owner can reach: if a session was edited or
+   * deleted while the app was offline, or a month was archived by an older
+   * version of the app that accumulated its totals, this recomputes the truth
+   * from the sessions themselves.
+   */
+  const recalculateHistory = useCallback(async (historyId?: string) => {
+    if (!user) return;
+    if (state.profile.role !== 'owner') return;
+    setIsSyncing(true);
+    try {
+      const targets = historyId
+        ? (state.history || []).filter(h => h.id === historyId)
+        : (state.history || []);
+
+      if (targets.length === 0) {
+        alert('There is no archived month to recalculate yet.');
+        return;
+      }
+
+      for (const month of targets) {
+        const monthKey = monthKeyOf(month.monthName, month.year);
+        const { data: folderRows } = await supabase.from('archived_sessions')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('month_key', monthKey);
+
+        // The folder is preferred; sessions_json is the fallback for a month
+        // archived before the migration ran.
+        const sessions: AttendanceSession[] = (folderRows && folderRows.length > 0)
+          ? folderRows.map(fromArchivedRow)
+          : (month.sessions || []);
+
+        if (sessions.length === 0) continue;
+        await writeHistoryMonths(sessions, { touchMonthKeys: [monthKey] });
+      }
+
+      await loadCloudData(true);
+      alert(targets.length === 1
+        ? `${targets[0].monthName} ${targets[0].year} recalculated from its archived sessions.`
+        : `${targets.length} archived months recalculated from their archived sessions.`);
+    } catch (err: any) {
+      alert('Recalculate failed: ' + (err?.message || err));
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [user, state.profile.role, state.history, writeHistoryMonths, loadCloudData]);
 
   const resetMonth = async (selectedIds: string[]) => {
     if (!user) return; if (state.sessions.length === 0 || selectedIds.length === 0) { setIsResetConfirming(false); return; }
@@ -2239,30 +2751,14 @@ const App: React.FC = () => {
         return;
       }
 
-      const snapshot_data = {
-        students: state.students || [],
-        gyms: state.gyms || [],
-        staff: state.staff || [],
-        classTypes: state.classTypes || [],
-        payments: state.payments || []
-      };
-
       const now = new Date();
       const dueDateStr = new Date(now.getFullYear(), now.getMonth() + 1, 3).toISOString().split('T')[0];
 
       // 1. Price every session once, through the shared engine, then group by
-      //    billing month. All four call sites now use the same arithmetic.
-      const pricingContext: PricingContext = {
-        gyms: state.gyms || [],
-        classTypes: state.classTypes || [],
-        students: state.students || [],
-        staff: state.staff || [],
-        profile: { id: state.profile.id, pay_rate: state.profile.pay_rate, name: state.profile.name },
-        siblingDiscount: state.profile.sibling_discount
-      };
+      //    billing month. All call sites now use the same arithmetic.
+      const pricingContext: PricingContext = buildPricingContext();
       const { clientLines, coachLines } = priceSessions(sessionsToReset, pricingContext);
 
-      const globalRevByMonth = new Map<string, { monthName: string, year: number, revenue: number }>();
       const familyRevByMonth = new Map<string, { monthLabel: string, famId: string, revenue: number, snapAddress: string, snapPhone: string, currentLabel: string }>();
       const coachRevByMonth = new Map<string, { monthLabel: string, coachId: string, revenue: number, currentLabel: string }>();
 
@@ -2288,14 +2784,12 @@ const App: React.FC = () => {
         return { currentLabel, snapAddress, snapPhone };
       };
 
-      // -- Global revenue + per-client invoices --
+      // -- Per-client invoices --
+      //    The month's own revenue is no longer tallied here. It is derived from
+      //    the archived sessions by writeHistoryMonths, so a second tally kept
+      //    in this function could only ever be a way for the two to disagree.
       clientLines.forEach(line => {
-        const { monthName, year, key } = monthKeyFor(line);
-
-        if (!globalRevByMonth.has(key)) {
-          globalRevByMonth.set(key, { monthName, year, revenue: 0 });
-        }
-        globalRevByMonth.get(key)!.revenue += line.amount;
+        const { key } = monthKeyFor(line);
 
         if (line.amount <= 0) return;
         const famKey = `${line.billToId}_${key}`;
@@ -2324,82 +2818,14 @@ const App: React.FC = () => {
         coachRevByMonth.get(coachKey)!.revenue += line.amount;
       });
 
-      // Which billing month each raw session row landed in, so the history
-      // snapshot files sessions under the same month their money went to.
-      const sessionMonthKey = new Map<string, string>();
-      [...clientLines, ...coachLines].forEach(l => {
-        if (!sessionMonthKey.has(l.sessionId)) sessionMonthKey.set(l.sessionId, l.billingMonthKey);
-      });
-
-      // 2. Global History DB Insert/Update with Multi-Stream Columns
-      for (const [monthLabelKey, data] of Array.from(globalRevByMonth.entries())) {
-        const { data: existingHist } = await supabase.from('history').select('*').eq('month_name', data.monthName).eq('year', data.year).eq('user_id', user.id);
-
-        const monthSessions = sessionsToReset.filter(sess =>
-          (sessionMonthKey.get(sess.id) || billingMonthFor(sess.date).key) === monthLabelKey
-        );
-
-        const monthClientLines = clientLines.filter(l => l.billingMonthKey === monthLabelKey);
-        const monthCoachLines = coachLines.filter(l => l.billingMonthKey === monthLabelKey);
-
-        const mTumGross = sumLines(monthClientLines.filter(l => l.kind === 'class'));
-        const mTumCoachPay = sumLines(monthCoachLines.filter(l => l.orgId === null && l.coachId !== state.profile.id));
-        const mTumNet = Number((mTumGross - mTumCoachPay).toFixed(2));
-
-        const mSchGross = sumLines(monthClientLines.filter(l => l.kind === 'cheer'));
-        const mSchCoachPay = sumLines(monthCoachLines.filter(l => l.orgId !== null));
-
-        const mGymGross = sumLines(monthClientLines.filter(l => l.kind === 'gym'));
-        const mGymNet = mGymGross;
-
-        const mTotalGross = Number((mTumGross + mSchGross + mGymGross).toFixed(2));
-        const mTotalCoachPayout = Number((mTumCoachPay + mSchCoachPay).toFixed(2));
-        const mNetProfit = Number((mTumNet + mGymNet).toFixed(2));
-
-        if (existingHist && existingHist.length > 0) {
-          const currentSessions = existingHist[0].sessions_json || [];
-          const updatedSessions = [...currentSessions, ...monthSessions];
-          await supabase.from('history').update({
-            revenue: Number(existingHist[0].revenue || 0) + mTotalGross,
-            total_gross: Number(existingHist[0].total_gross || existingHist[0].revenue || 0) + mTotalGross,
-            tumbling_gross: Number(existingHist[0].tumbling_gross || 0) + mTumGross,
-            tumbling_coach_pay: Number(existingHist[0].tumbling_coach_pay || 0) + mTumCoachPay,
-            tumbling_net: Number(existingHist[0].tumbling_net || 0) + mTumNet,
-            schools_gross: Number(existingHist[0].schools_gross || 0) + mSchGross,
-            schools_coach_pay: Number(existingHist[0].schools_coach_pay || 0) + mSchCoachPay,
-            gyms_gross: Number(existingHist[0].gyms_gross || 0) + mGymGross,
-            gyms_net: Number(existingHist[0].gyms_net || 0) + mGymNet,
-            total_coach_payout: Number(existingHist[0].total_coach_payout || 0) + mTotalCoachPayout,
-            net_profit: Number(existingHist[0].net_profit || 0) + mNetProfit,
-            session_count: Number(existingHist[0].session_count || currentSessions.length) + monthSessions.length,
-            sessions_json: updatedSessions,
-            recorded_at: new Date().toISOString(),
-            snapshot_json: snapshot_data
-          }).eq('id', existingHist[0].id);
-        } else {
-          await supabase.from('history').insert({
-            id: crypto.randomUUID ? crypto.randomUUID() : `uid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-            month_name: data.monthName,
-            year: data.year,
-            sessions_json: monthSessions,
-            revenue: mTotalGross,
-            total_gross: mTotalGross,
-            tumbling_gross: mTumGross,
-            tumbling_coach_pay: mTumCoachPay,
-            tumbling_net: mTumNet,
-            schools_gross: mSchGross,
-            schools_coach_pay: mSchCoachPay,
-            gyms_gross: mGymGross,
-            gyms_net: mGymNet,
-            total_coach_payout: mTotalCoachPayout,
-            net_profit: mNetProfit,
-            session_count: monthSessions.length,
-            recorded_at: new Date().toISOString(),
-            user_id: user.id,
-            snapshot_json: snapshot_data
-          });
-        }
-      }
+      // 2. History â€” written by the ONE derived writer.
+      //    Everything the old block here did by hand (per-stream sums, then
+      //    `existing + new` updates and a blind session concatenation) now
+      //    happens inside writeHistoryMonths, which merges by session id and
+      //    recomputes every total from the merged set. That is what makes
+      //    archiving idempotent: a class already archived for one family cannot
+      //    be counted a second time when the rest of the month is archived.
+      await writeHistoryMonths(sessionsToReset);
 
       // 3. Family Payments
       for (const data of Array.from(familyRevByMonth.values())) {
@@ -2422,12 +2848,23 @@ const App: React.FC = () => {
       }
 
       // 4. Coach Payments
+      //    These writes used to discard their error. On a database without the
+      //    `is_expense` column every one of them failed and nothing said so, so
+      //    coach payout rows simply went missing and net profit read too high.
+      //    The retry keeps the payout recorded on such a database instead of
+      //    losing it, and the warning names the file that fixes it properly.
+      let expenseColumnMissing = false;
       for (const data of Array.from(coachRevByMonth.values())) {
         const { data: existingCoachPay } = await supabase.from('payments').select('*').eq('invoice_id', data.monthLabel).eq('family_id', data.coachId).eq('user_id', user.id);
-        if (existingCoachPay && existingCoachPay.length > 0) {
-          await supabase.from('payments').update({ amount_due: Number(existingCoachPay[0].amount_due || 0) + data.revenue, is_expense: true }).eq('id', existingCoachPay[0].id);
-        } else {
-          await supabase.from('payments').insert({
+
+        const writeCoachPay = async (withExpenseFlag: boolean) => {
+          const flag = withExpenseFlag ? { is_expense: true } : {};
+          if (existingCoachPay && existingCoachPay.length > 0) {
+            return (await supabase.from('payments')
+              .update({ amount_due: Number(existingCoachPay[0].amount_due || 0) + data.revenue, ...flag })
+              .eq('id', existingCoachPay[0].id)).error;
+          }
+          return (await supabase.from('payments').insert({
             id: crypto.randomUUID ? crypto.randomUUID() : `uid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
             invoice_id: data.monthLabel,
             family_id: data.coachId,
@@ -2435,9 +2872,20 @@ const App: React.FC = () => {
             amount_due: data.revenue,
             due_date: dueDateStr,
             user_id: user.id,
-            is_expense: true
-          });
+            ...flag
+          })).error;
+        };
+
+        let payErr = await writeCoachPay(true);
+        if (payErr && payErr.message?.includes('is_expense')) {
+          expenseColumnMissing = true;
+          payErr = await writeCoachPay(false);
         }
+        if (payErr) console.error('Coach payout row failed for ' + data.currentLabel, payErr);
+      }
+
+      if (expenseColumnMissing) {
+        alert("Coach payouts were recorded, but they can't be told apart from client invoices until history_and_banking.sql is run in your Supabase SQL Editor. Until then, History will count them as income.");
       }
 
       // 5. Delete active pay if migrating? For simplicity, we just delete the 'Active' ones if we are resetting globally.
@@ -2464,29 +2912,36 @@ const App: React.FC = () => {
       if (isSheetsSyncEnabled && googleTokenVal) {
         console.log('Automated Google Sheets finance syncing triggered...');
         try {
-          // Construct the updated history list conforming to HistoryMonth
-          const updatedHistory: HistoryMonth[] = [...(state.history || [])];
-          for (const [_, data] of Array.from(globalRevByMonth.entries())) {
-            const index = updatedHistory.findIndex(h => h.monthName === data.monthName && h.year === data.year);
-            const histItem: HistoryMonth = {
-              id: `hist_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-              monthName: data.monthName,
-              year: data.year,
-              revenue: data.revenue,
-              snapshot_data: snapshot_data,
-              sessions: [],
-              recordedAt: new Date().toISOString()
-            };
-            if (index >= 0) {
-              updatedHistory[index] = {
-                ...updatedHistory[index],
-                revenue: Number(updatedHistory[index].revenue || 0) + data.revenue,
-                snapshot_data: snapshot_data
-              };
-            } else {
-              updatedHistory.push(histItem);
-            }
-          }
+          // Read history back from the database rather than predicting it here.
+          // This block used to rebuild the list locally with `existing + new`
+          // arithmetic, so the spreadsheet could disagree with the app about the
+          // same month. The archive has already written the derived truth.
+          const { data: freshHist } = await supabase.from('history')
+            .select('*')
+            .eq('user_id', user.id);
+
+          const updatedHistory: HistoryMonth[] = (freshHist || []).map((h: any) => ({
+            id: h.id,
+            monthName: h.month_name,
+            year: h.year,
+            revenue: Number(h.total_gross ?? h.revenue ?? 0),
+            tumblingGross: Number(h.tumbling_gross ?? 0),
+            tumblingCoachPay: Number(h.tumbling_coach_pay ?? 0),
+            tumblingNet: Number(h.tumbling_net ?? 0),
+            schoolsGross: Number(h.schools_gross ?? 0),
+            schoolsCoachPay: Number(h.schools_coach_pay ?? 0),
+            gymsGross: Number(h.gyms_gross ?? 0),
+            gymsNet: Number(h.gyms_net ?? 0),
+            totalGross: Number(h.total_gross ?? h.revenue ?? 0),
+            totalCoachPayout: Number(h.total_coach_payout ?? 0),
+            netProfit: Number(h.net_profit ?? 0),
+            sessionCount: Number(h.session_count ?? 0),
+            invoicesTotal: Number(h.invoices_total ?? h.total_gross ?? h.revenue ?? 0),
+            invoiceCount: Number(h.invoice_count ?? 0),
+            sessions: h.sessions_json || [],
+            snapshot_data: h.snapshot_json,
+            recordedAt: h.recorded_at
+          }));
 
           await syncFinancesToGoogleSheet(
             [], // sessions are cleared on reset
@@ -2623,28 +3078,13 @@ const App: React.FC = () => {
     });
     await createInvoiceSnapshot(`Pre-Reset Backup â€” ${timestamp}`);
 
-    const snapshot_data = {
-      students: state.students || [],
-      gyms: state.gyms || [],
-      staff: state.staff || [],
-      classTypes: state.classTypes || [],
-      payments: state.payments || []
-    };
-
     // Revenue for THIS client only, grouped by billing month. Priced by the
     // shared engine, so a reset can never disagree with the invoice the user was
     // just looking at â€” and a class shared with other families now archives only
     // this family's share instead of the whole session's revenue.
     const revenueByMonth = new Map<string, { monthName: string, year: number, revenue: number }>();
 
-    const { clientLines: resetClientLines, coachLines: resetCoachLines } = priceSessions(sessionsToReset, {
-      gyms: state.gyms || [],
-      classTypes: state.classTypes || [],
-      students: state.students || [],
-      staff: state.staff || [],
-      profile: { id: state.profile.id, pay_rate: state.profile.pay_rate, name: state.profile.name },
-      siblingDiscount: state.profile.sibling_discount
-    });
+    const { clientLines: resetClientLines } = priceSessions(sessionsToReset, buildPricingContext());
 
     const familyLines = resetClientLines.filter(line => line.billToId === familyId);
 
@@ -2655,11 +3095,6 @@ const App: React.FC = () => {
         revenueByMonth.set(key, { monthName: line.billingMonthName, year: line.billingYear, revenue: 0 });
       }
       revenueByMonth.get(key)!.revenue += line.amount;
-    });
-
-    const resetSessionMonthKey = new Map<string, string>();
-    familyLines.forEach(l => {
-      if (!resetSessionMonthKey.has(l.sessionId)) resetSessionMonthKey.set(l.sessionId, l.billingMonthKey);
     });
 
     const now = new Date();
@@ -2700,101 +3135,21 @@ const App: React.FC = () => {
         });
       }
 
-      // 2. Handle History Record with Stream Separation
-      const monthFamilyLines = familyLines.filter(l => l.billingMonthKey === monthLabelFull);
-      const isCheer = monthFamilyLines.some(l => l.kind === 'cheer');
-      const isGym = monthFamilyLines.some(l => l.kind === 'gym');
-      const isClass = monthFamilyLines.some(l => l.kind === 'class');
-
-      let sTumGross = 0;
-      let sTumCoachPay = 0;
-      let sSchGross = 0;
-      let sSchCoachPay = 0;
-      let sGymGross = 0;
-      let sGymNet = 0;
-
-      if (isClass) {
-        sTumGross = sumLines(monthFamilyLines);
-        const sessionIds = new Set(monthFamilyLines.map(l => l.sessionId));
-        const matchedCoachLines = resetCoachLines.filter(cl => sessionIds.has(cl.sessionId) && cl.orgId === null && cl.coachId !== state.profile.id);
-        sTumCoachPay = sumLines(matchedCoachLines);
-      } else if (isCheer) {
-        sSchGross = sumLines(monthFamilyLines);
-        const matchedCoachLines = resetCoachLines.filter(cl => cl.orgId === familyId);
-        sSchCoachPay = sumLines(matchedCoachLines);
-      } else if (isGym) {
-        sGymGross = sumLines(monthFamilyLines);
-        sGymNet = sGymGross;
-      }
-
-      const sTumNet = Number((sTumGross - sTumCoachPay).toFixed(2));
-      const sTotalGross = Number((sTumGross + sSchGross + sGymGross).toFixed(2));
-      const sTotalCoachPayout = Number((sTumCoachPay + sSchCoachPay).toFixed(2));
-      const sNetProfit = Number((sTumNet + sGymNet).toFixed(2));
-
-      const { data: existingHist } = await supabase.from('history')
-        .select('*')
-        .eq('month_name', data.monthName)
-        .eq('year', data.year)
-        .eq('user_id', user.id);
-
-      const monthSessions = sessionsToReset.filter(sess =>
-        (resetSessionMonthKey.get(sess.id) || billingMonthFor(sess.date).key) === monthLabelFull
-      );
-
-      if (existingHist && existingHist.length > 0) {
-        const hist = existingHist[0];
-        const updatedRevenue = Number(hist.revenue || 0) + sTotalGross;
-        const currentSessions = hist.sessions_json || [];
-        const updatedSessions = [...currentSessions, ...monthSessions];
-        
-        await supabase.from('history').update({
-          revenue: updatedRevenue,
-          total_gross: Number(hist.total_gross || hist.revenue || 0) + sTotalGross,
-          tumbling_gross: Number(hist.tumbling_gross || 0) + sTumGross,
-          tumbling_coach_pay: Number(hist.tumbling_coach_pay || 0) + sTumCoachPay,
-          tumbling_net: Number(hist.tumbling_net || 0) + sTumNet,
-          schools_gross: Number(hist.schools_gross || 0) + sSchGross,
-          schools_coach_pay: Number(hist.schools_coach_pay || 0) + sSchCoachPay,
-          gyms_gross: Number(hist.gyms_gross || 0) + sGymGross,
-          gyms_net: Number(hist.gyms_net || 0) + sGymNet,
-          total_coach_payout: Number(hist.total_coach_payout || 0) + sTotalCoachPayout,
-          net_profit: Number(hist.net_profit || 0) + sNetProfit,
-          session_count: Number(hist.session_count || currentSessions.length) + monthSessions.length,
-          sessions_json: updatedSessions,
-          recorded_at: new Date().toISOString(),
-          snapshot_json: snapshot_data
-        }).eq('id', hist.id);
-      } else {
-        await supabase.from('history').insert({
-          id: crypto.randomUUID ? crypto.randomUUID() : `uid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-          month_name: data.monthName,
-          year: data.year,
-          sessions_json: monthSessions,
-          revenue: sTotalGross,
-          total_gross: sTotalGross,
-          tumbling_gross: sTumGross,
-          tumbling_coach_pay: sTumCoachPay,
-          tumbling_net: sTumNet,
-          schools_gross: sSchGross,
-          schools_coach_pay: sSchCoachPay,
-          gyms_gross: sGymGross,
-          gyms_net: sGymNet,
-          total_coach_payout: sTotalCoachPayout,
-          net_profit: sNetProfit,
-          session_count: monthSessions.length,
-          recorded_at: new Date().toISOString(),
-          user_id: user.id,
-          snapshot_json: snapshot_data
-        });
-      }
+      // 2. History is NOT written here.
+      //    It used to be, with per-stream sums built by an `if / else if` chain
+      //    that silently dropped every stream but the first (so a school that
+      //    also ran classes lost its class revenue), then applied as
+      //    `existing + new`. Both problems are gone: history is written once,
+      //    below, by the derived writer.
     }
 
-    // 3. Retire the billed work for THIS client only.
-    //    A class session shared with other families must NOT be deleted outright
-    //    or those families lose their billing â€” we strip this family's athletes
-    //    from the row and keep it. Rows left with nobody on them are deleted.
-    const familyStudentIds = new Set(
+    // 2. History â€” one derived write for every month this reset touched.
+    //    A class shared with other families is archived as THIS family's slice
+    //    of the roster, so the month never counts revenue for a family that has
+    //    not been billed yet. The slices union back into the whole session as
+    //    each remaining family is reset, and merging by session id means doing
+    //    this twice changes nothing.
+    const familyAthleteIds = new Set(
       (state.students || [])
         .filter(st => {
           const famId = st.groupKey || st.id;
@@ -2803,6 +3158,22 @@ const App: React.FC = () => {
         })
         .map(st => st.id)
     );
+
+    const familySlices = sessionsToReset.map(sess => {
+      // A gym or school session is billed wholly to that entity â€” there is no
+      // roster to slice, so it archives as logged.
+      if ((state.gyms || []).some(g => g.id === sess.classTypeId)) return sess;
+      const mine = (sess.studentIds || []).filter(sid => familyAthleteIds.has(sid));
+      return mine.length > 0 ? { ...sess, studentIds: mine } : null;
+    }).filter(Boolean) as AttendanceSession[];
+
+    await writeHistoryMonths(familySlices);
+
+    // 3. Retire the billed work for THIS client only.
+    //    A class session shared with other families must NOT be deleted outright
+    //    or those families lose their billing â€” we strip this family's athletes
+    //    from the row and keep it. Rows left with nobody on them are deleted.
+    const familyStudentIds = familyAthleteIds;
 
     const idsToDelete: string[] = [];
     const rowsToTrim: { id: string, student_ids: string[] }[] = [];
@@ -3074,8 +3445,10 @@ const App: React.FC = () => {
       {activeView === View.REGISTER && <RegisterView state={state} onSave={handleLogSession} onCancel={() => handleViewChange(View.LOG_SESSION)} initialSession={editingSession} />}
       {activeView === View.TEAM_ATTENDANCE && <TeamAttendanceView state={state} onSave={handleLogSession} initialTeamIds={initialTeamIds} initialDate={initialDate} initialCoachId={initialCoachId} initialSession={editingSession} gymType="cheer" />}
       {activeView === View.GYM_ATTENDANCE && <TeamAttendanceView state={state} onSave={handleLogSession} initialTeamIds={initialTeamIds} initialDate={initialDate} initialCoachId={initialCoachId} initialSession={editingSession} gymType="tumbling" />}
+      {/* onSaveAllocations is owner-only â€” a coach has no business account of
+          their own to point client invoices at, so they never see that tab. */}
       {activeView === View.TEAM_MANAGEMENT && (
-        <TeamManagementView 
+        <TeamManagementView
           state={state} 
           onRemoveStudent={removeStudent} 
           onUpdateSubTeams={handleUpdateStudentSubTeams}
@@ -3097,14 +3470,17 @@ const App: React.FC = () => {
           }}
           onUpdateOrgCoaches={handleUpdateOrgCoaches}
           onRefresh={() => loadCloudData(true)}
+          onSaveAllocations={isOwner ? saveBankAllocations : undefined}
         />
       )}
-      {activeView === View.INVOICES && <InvoicesView state={state} user={user} onUpdatePayment={handleUpdatePayment} onResetInvoice={resetSingleInvoice} onShowRecovery={() => setShowRecoveryModal(true)} />}
+      {activeView === View.INVOICES && <InvoicesView state={state} user={user} onUpdatePayment={handleUpdatePayment} onResetInvoice={resetSingleInvoice} onShowRecovery={() => setShowRecoveryModal(true)} onSaveAllocations={saveBankAllocations} />}
       {activeView === View.HISTORY && isOwner && (
         <HistoryView 
           state={state} 
           onShowRecovery={() => setShowRecoveryModal(true)}
           onRestoreSnapshot={restoreInvoiceSnapshot}
+          onRecalculate={recalculateHistory}
+          isRecalculating={isSyncing}
         />
       )}
       {activeView === View.ROSTER && (
@@ -5564,7 +5940,215 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
   );
 });
 
-const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onUpdateCompetition, onDeleteCompetition, onAddAthlete, onUpdateStudentName, onAddSubTeam, onBulkImport, onUpdateOrgCoaches, onRefresh }: { 
+/**
+ * PAYOUT ACCOUNTS
+ * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ * Sets which bank account prints on each of the three client groups' invoices,
+ * and lists every client so a single one can be pointed the other way.
+ *
+ * The defaults exist because setting the account one invoice at a time is what
+ * made the old behaviour so easy to lose: a client with no saved choice fell
+ * through to 'personal', and there was no way to say "all my schools pay the
+ * business". Now a group default covers every client in it, and a per-client
+ * override is only for the exception.
+ */
+const PayoutAccountsPanel: React.FC<{
+  state: AppState;
+  onSaveAllocations: (next: { allocations?: InvoiceAllocations; groupDefaults?: GroupDefaults }) => Promise<boolean>;
+}> = ({ state, onSaveAllocations }) => {
+  const [saving, setSaving] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+
+  const allocations = useMemo(
+    () => sanitiseAllocations(state.profile.invoice_bank_allocations),
+    [state.profile.invoice_bank_allocations]
+  );
+  const groupDefaults = useMemo(
+    () => sanitiseGroupDefaults(state.profile.bank_allocation_defaults),
+    [state.profile.bank_allocation_defaults]
+  );
+
+  const businessReady = hasBusinessAccount(state.profile);
+
+  /** Every billable client, tagged with the group it belongs to. */
+  const clients = useMemo(() => {
+    const out: Array<{ id: string; name: string; group: ClientGroup }> = [];
+
+    // Schools and external gyms. Sub-teams are skipped â€” they are billed through
+    // their parent, so giving them their own account setting would be a lie.
+    (state.gyms || []).forEach(g => {
+      if (g.parent_gym_id) return;
+      out.push({ id: g.id, name: g.name || 'Organisation', group: clientGroupFor(g.id, state.gyms || []) });
+    });
+
+    // Tumbling families: one entry per family, named by its athletes.
+    const families = new Map<string, string[]>();
+    (state.students || []).forEach(s => {
+      if (s.is_gym_member) return;
+      const famId = s.groupKey || s.id;
+      const list = families.get(famId) || [];
+      list.push(s.name);
+      families.set(famId, list);
+    });
+    families.forEach((names, famId) => {
+      out.push({ id: famId, name: names.join(' & '), group: 'tumbling' });
+    });
+
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }, [state.gyms, state.students]);
+
+  const filteredClients = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return q ? clients.filter(c => c.name.toLowerCase().includes(q)) : clients;
+  }, [clients, search]);
+
+  const setGroupDefault = async (group: ClientGroup, allocation: BankAllocation) => {
+    setSaving(`group:${group}`);
+    await onSaveAllocations({ groupDefaults: { ...groupDefaults, [group]: allocation } });
+    setSaving(null);
+  };
+
+  const setClientOverride = async (clientId: string, allocation: BankAllocation | null) => {
+    setSaving(`client:${clientId}`);
+    const next = { ...allocations };
+    if (allocation === null) delete next[clientId];
+    else next[clientId] = allocation;
+    await onSaveAllocations({ allocations: next });
+    setSaving(null);
+  };
+
+  const Toggle: React.FC<{
+    value: BankAllocation;
+    onPick: (v: BankAllocation) => void;
+    busy?: boolean;
+    small?: boolean;
+  }> = ({ value, onPick, busy, small }) => (
+    <div className={`flex bg-slate-100 dark:bg-slate-900 p-1 rounded-2xl gap-1 ${busy ? 'opacity-50 pointer-events-none' : ''}`}>
+      {(['personal', 'business'] as BankAllocation[]).map(opt => (
+        <button
+          key={opt}
+          onClick={() => onPick(opt)}
+          className={`flex-1 flex items-center justify-center text-center rounded-xl font-black uppercase tracking-widest transition-all duration-300 ${small ? 'px-3 py-1.5 text-[8px]' : 'px-5 py-3 text-[9px]'} ${value === opt ? 'bg-[#1e4da1] text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'}`}
+        >
+          {opt === 'personal' ? 'Personal' : 'Business'}
+        </button>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm space-y-2">
+        <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase italic tracking-wider">Default Payout Accounts</h3>
+        <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase leading-relaxed tracking-wider">
+          Which of your accounts prints on each group's invoices. Saved to your account,
+          so it follows you to every device â€” a client keeps its own setting only if you
+          change it individually below.
+        </p>
+        {!businessReady && (
+          <p className="text-[9px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider pt-1">
+            No business account saved yet. Add its bank name and number in Settings, or
+            invoices set to Business will still print your personal account.
+          </p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {CLIENT_GROUPS.map(group => {
+          const current = groupDefaults[group.key] || 'personal';
+          const overrideCount = clients.filter(
+            c => c.group === group.key && allocations[c.id]
+          ).length;
+
+          return (
+            <div key={group.key} className="bg-white dark:bg-slate-800 p-5 rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+              <div className="space-y-1">
+                <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase italic tracking-wider">{group.label}</h4>
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{group.blurb}</p>
+                <p className="text-[9px] font-bold text-slate-300 dark:text-slate-600 uppercase tracking-wider">
+                  {clients.filter(c => c.group === group.key).length} clients
+                  {overrideCount > 0 && ` Â· ${overrideCount} set individually`}
+                </p>
+              </div>
+              <Toggle
+                value={current}
+                busy={saving === `group:${group.key}`}
+                onPick={v => setGroupDefault(group.key, v)}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase italic tracking-wider">Per-Client Exceptions</h3>
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">
+              Only for a client that should not follow its group.
+            </p>
+          </div>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="SEARCH CLIENTS"
+            className="w-full sm:w-56 p-3 bg-slate-50 dark:bg-slate-900/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200"
+          />
+        </div>
+
+        <div className="space-y-2 max-h-[50vh] overflow-y-auto no-scrollbar pr-1">
+          {filteredClients.length === 0 && (
+            <p className="text-center text-[10px] font-black uppercase text-slate-400 py-8">
+              {clients.length === 0 ? 'No clients yet' : 'No client matches that search'}
+            </p>
+          )}
+
+          {filteredClients.map(client => {
+            const override = allocations[client.id];
+            const effective = override || groupDefaults[client.group] || 'personal';
+            const groupLabel = CLIENT_GROUPS.find(g => g.key === client.group)?.label || '';
+
+            return (
+              <div
+                key={client.id}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800"
+              >
+                <div className="min-w-0 space-y-0.5">
+                  <p className="text-[11px] font-black uppercase italic text-slate-800 dark:text-slate-100 truncate">{client.name}</p>
+                  <p className="text-[8px] font-black uppercase tracking-widest text-slate-400">
+                    {groupLabel}
+                    {override
+                      ? ` Â· Set to ${override}`
+                      : ` Â· Following group (${effective})`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Toggle
+                    small
+                    value={effective}
+                    busy={saving === `client:${client.id}`}
+                    onPick={v => setClientOverride(client.id, v)}
+                  />
+                  {override && (
+                    <button
+                      onClick={() => setClientOverride(client.id, null)}
+                      title="Follow the group default again"
+                      className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-slate-600"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onUpdateCompetition, onDeleteCompetition, onAddAthlete, onUpdateStudentName, onAddSubTeam, onBulkImport, onUpdateOrgCoaches, onRefresh, onSaveAllocations }: {
   state: AppState, 
   onRemoveStudent: (studentId: string) => void,
   onUpdateSubTeams: (studentId: string, subTeamIds: string[]) => void,
@@ -5575,9 +6159,11 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
   onAddSubTeam: (parentGymId: string) => void,
   onBulkImport: (parentGymId: string) => void,
   onUpdateOrgCoaches?: (orgId: string, coachIds: string[], coachRates: Record<string, number>) => void,
-  onRefresh?: () => void
+  onRefresh?: () => void,
+  /** Saves the payout-account defaults and per-client overrides to the database. */
+  onSaveAllocations?: (next: { allocations?: InvoiceAllocations; groupDefaults?: GroupDefaults }) => Promise<boolean>
 }) => {
-  const [activeTab, setActiveTab] = useState<'roster' | 'competitions' | 'registrations'>('roster');
+  const [activeTab, setActiveTab] = useState<'roster' | 'competitions' | 'registrations' | 'payouts'>('roster');
   const [subTab, setSubTab] = useState<'roster' | 'attendance'>('roster');
   const [selectedMainId, setSelectedMainId] = useState<string | null>(null);
   const [selectedSubId, setSelectedSubId] = useState<string | null>(null);
@@ -6088,7 +6674,20 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
           Registrations
           {activeTab === 'registrations' && <motion.div layoutId="tm-tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#1e4da1] dark:bg-blue-400" />}
         </button>
+        {onSaveAllocations && (
+          <button
+            onClick={() => setActiveTab('payouts')}
+            className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative ${activeTab === 'payouts' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}
+          >
+            Payout Accounts
+            {activeTab === 'payouts' && <motion.div layoutId="tm-tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#1e4da1] dark:bg-blue-400" />}
+          </button>
+        )}
       </div>
+
+      {activeTab === 'payouts' && onSaveAllocations && (
+        <PayoutAccountsPanel state={state} onSaveAllocations={onSaveAllocations} />
+      )}
 
       {activeTab === 'roster' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -7719,16 +8318,22 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
   );
 });
 
-const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetInvoice, onShowRecovery }: { state: AppState, user: any, monthLabel?: string, onUpdatePayment: (p: Partial<Payment>) => void, onResetInvoice: (id: string, label: string) => void, onShowRecovery: () => void }) => {
+const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetInvoice, onShowRecovery, onSaveAllocations }: { state: AppState, user: any, monthLabel?: string, onUpdatePayment: (p: Partial<Payment>) => void, onResetInvoice: (id: string, label: string) => void, onShowRecovery: () => void, onSaveAllocations?: (next: { allocations?: InvoiceAllocations; groupDefaults?: GroupDefaults }) => Promise<boolean> }) => {
   const [sel, setSel] = useState<string | null>(null);
-  const [allocations, setAllocations] = useState<Record<string, 'personal' | 'business'>>(() => {
-    try {
-      const saved = localStorage.getItem(`jflips_invoice_bank_allocations_${user?.id || 'default'}`);
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
+  // The saved choices come from the profile, which is loaded from the database.
+  // They used to be read straight out of localStorage here â€” under a key built
+  // from `user?.id || 'default'`, which on a cold start is the WRONG key,
+  // because `user` is still null when a useState initialiser runs. The app then
+  // wrote to the real key and read from the fallback one, so every business
+  // selection appeared to revert to personal on the next load.
+  const allocations = useMemo(
+    () => sanitiseAllocations(state.profile.invoice_bank_allocations),
+    [state.profile.invoice_bank_allocations]
+  );
+  const groupDefaults = useMemo(
+    () => sanitiseGroupDefaults(state.profile.bank_allocation_defaults),
+    [state.profile.bank_allocation_defaults]
+  );
   const [isGenerating, setIsGenerating] = useState(false);
   const [invoiceFilter, setInvoiceFilter] = useState<'all' | 'athletes' | 'teams' | 'gyms' | 'staff'>('all');
   const [scale, setScale] = useState(1);
@@ -8115,13 +8720,25 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
     [groupedInvoices, sel]
   );
 
-  const bankAllocation = selectedGroup ? (allocations[selectedGroup.family_id] || 'personal') : 'personal';
+  // Three levels: this invoice's own choice, then its group's default from the
+  // Management tab, then personal.
+  const resolved = useMemo(
+    () => resolveAllocation(selectedGroup?.family_id, state.gyms || [], allocations, groupDefaults),
+    [selectedGroup, state.gyms, allocations, groupDefaults]
+  );
+  const bankAllocation = resolved.allocation;
 
-  const handleToggleBankAllocation = (type: 'personal' | 'business') => {
-    if (!selectedGroup) return;
-    const next = { ...allocations, [selectedGroup.family_id]: type };
-    setAllocations(next);
-    localStorage.setItem(`jflips_invoice_bank_allocations_${user?.id || 'default'}`, JSON.stringify(next));
+  const handleToggleBankAllocation = (type: BankAllocation) => {
+    if (!selectedGroup || !onSaveAllocations) return;
+    onSaveAllocations({ allocations: { ...allocations, [selectedGroup.family_id]: type } });
+  };
+
+  /** Drop this invoice's override so it follows its group's default again. */
+  const handleFollowGroupDefault = () => {
+    if (!selectedGroup || !onSaveAllocations) return;
+    const next = { ...allocations };
+    delete next[selectedGroup.family_id];
+    onSaveAllocations({ allocations: next });
   };
 
   const athleteSessions = useMemo(() => {
@@ -8397,7 +9014,29 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
               <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase italic tracking-wider">Payout Account</h3>
               <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase leading-relaxed tracking-wider">
                 Select which of your bank accounts should display on this client's invoice PDF/PNG.
+                This choice is saved to your account, not just this device.
               </p>
+              {/* Saying WHERE the choice came from is what makes the group
+                  defaults understandable â€” otherwise an invoice silently
+                  showing the business account looks like a bug. */}
+              {resolved.source === 'group' && (
+                <p className="text-[9px] font-black text-[#1e4da1] dark:text-blue-400 uppercase tracking-wider">
+                  Following your {CLIENT_GROUPS.find(g => g.key === resolved.group)?.label} default
+                </p>
+              )}
+              {resolved.source === 'invoice' && (
+                <button
+                  onClick={handleFollowGroupDefault}
+                  className="text-[9px] font-black text-slate-400 hover:text-[#1e4da1] dark:hover:text-blue-400 uppercase tracking-wider underline decoration-dotted"
+                >
+                  Set just for this client â€” follow group default instead
+                </button>
+              )}
+              {bankAllocation === 'business' && !hasBusinessAccount(state.profile) && (
+                <p className="text-[9px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider">
+                  No business account saved yet â€” add it under Settings or this prints your personal one.
+                </p>
+              )}
             </div>
             <div className="flex w-full md:w-auto bg-slate-100 dark:bg-slate-900 p-1 rounded-2xl gap-1">
               <button 
@@ -8617,21 +9256,12 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                                 // coach invoice used to print the owner's bank.
                                 const bankTarget = coachTargetFor(selectedGroup);
                                 const coach: any = bankTarget ? state.staff.find(s => s.id === bankTarget.coachId) : null;
-                                const coachBank = coach?.bankName ?? coach?.bank_name;
-                                const coachAcc = coach?.accountNumber ?? coach?.account_number;
-                                const hasCoachBank = !!(coachBank && coachAcc);
 
-                                let bankName = hasCoachBank ? coachBank : state.profile.bankName;
-                                let accountNumber = hasCoachBank ? coachAcc : state.profile.accountNumber;
-                                let branchCode = hasCoachBank ? (coach?.branchCode ?? coach?.branch_code) : state.profile.branchCode;
-                                let accountType = hasCoachBank ? (coach?.accountType ?? coach?.account_type) : state.profile.accountType;
-
-                                if (!hasCoachBank && bankAllocation === 'business') {
-                                  bankName = state.profile.bizBankName || state.profile.bankName;
-                                  accountNumber = state.profile.bizAccountNumber || state.profile.accountNumber;
-                                  branchCode = state.profile.bizBranchCode || state.profile.branchCode;
-                                  accountType = state.profile.bizAccountType || state.profile.accountType;
-                                }
+                                // One resolver for the whole app, so the PDF, the
+                                // PNG and the on-screen invoice can never print
+                                // three different accounts.
+                                const { bankName, accountNumber, branchCode, accountType } =
+                                  resolveBankDetails(state.profile, bankAllocation, coach);
 
                                 return [
                                   ['Bank', bankName],
@@ -9058,13 +9688,13 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
                             {siblingSearch ? 'No athlete by that name' : 'No other tumbling athletes yet'}
                           </p>
                         ) : (
-                          siblingCandidates.map((s: Student) => {
+                          siblingCandidates.map((s: Student, sIdx: number) => {
                             const family = s.groupKey
                               ? (otherStudents as Student[]).filter(o => o.groupKey === s.groupKey && o.id !== s.id)
                               : [];
                             return (
                               <button
-                                key={s.id}
+                                key={`sib-cand-${s.id || "s"}-${sIdx}`}
                                 type="button"
                                 onClick={() => setLinkedSiblingId(s.id)}
                                 className="w-full flex items-center gap-2.5 p-2.5 bg-slate-50 dark:bg-slate-800/40 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-xl text-left transition-colors"
@@ -9759,732 +10389,45 @@ const ScheduleForm: React.FC<{
   onSubmit: (classIds: string[], dayOfWeek: number, time: string, label?: string, color?: string, coachId?: string) => void,
   onCancel: () => void,
   onDelete?: (id: string) => void
-}> = ({ students, classTypes, gyms, staff, isOwner, initialData, onSubmit, onCancel, onDelete }) => {
-  const [selectedClassIds, setSelectedClassIds] = useState<string[]>(initialData?.class_ids || []);
-  const [dayOfWeek, setDayOfWeek] = useState(initialData?.day_of_week ?? 1);
-  const [time, setTime] = useState(initialData?.time || '16:00');
-  const [label, setLabel] = useState(initialData?.label || '');
-  const [coachId, setCoachId] = useState(initialData?.coach_id || '');
-  const [color, setColor] = useState(initialData?.color || 'bg-[#1e4da1]');
-  const [athleteIds, setAthleteIds] = useState<string[]>(initialData?.athlete_ids || []);
-
-  const COLOR_OPTIONS = [
-    { value: 'bg-[#1e4da1]', name: 'Blue' },
-    { value: 'bg-[#0073E6]', name: 'JFLIPS Blue' },
-    { value: 'bg-[#4CA5FF]', name: 'JFLIPS Light Blue' },
-    { value: 'bg-[#062963]', name: 'JFLIPS Navy' },
-    { value: 'bg-[#FF8A00]', name: 'JFLIPS Orange' },
-    { value: 'bg-[#E42624]', name: 'JFLIPS Red' },
-    { value: 'bg-indigo-500', name: 'Indigo' },
-    { value: 'bg-emerald-500', name: 'Green' },
-    { value: 'bg-teal-500', name: 'Teal' },
-    { value: 'bg-rose-500', name: 'Ambient Red' },
-    { value: 'bg-amber-500', name: 'Ambient Orange' },
-    { value: 'bg-yellow-400', name: 'Yellow' },
-    { value: 'bg-purple-500', name: 'Purple' },
-    { value: 'bg-pink-500', name: 'Pink' },
-    { value: 'bg-slate-700', name: 'Dark' },
-  ];
-
-  const classOptions = useMemo(() => [
-    ...(classTypes || []).map(ct => ({ id: ct.id, name: ct.name, isGym: false, type: 'class', combinedId: `class-${ct.id}` })),
-    ...(gyms || []).map(g => ({ id: g.id, name: g.name, isGym: true, type: g.gym_type, combinedId: `gym-${g.id}` }))
-  ], [classTypes, gyms]);
-
-  const DAY_OPTIONS = [
-    { value: 0, label: 'Sunday' },
-    { value: 1, label: 'Monday' },
-    { value: 2, label: 'Tuesday' },
-    { value: 3, label: 'Wednesday' },
-    { value: 4, label: 'Thursday' },
-    { value: 5, label: 'Friday' },
-    { value: 6, label: 'Saturday' }
-  ];
-
-  const assignedCoachIds = useMemo(() => {
-    const ids = new Set<string>();
-    selectedClassIds.forEach(cid => {
-      const gym = gyms.find(g => g.id === cid);
-      if (gym) {
-        (gym.coach_ids || []).forEach(id => ids.add(id));
-        if (gym.parent_gym_id) {
-          const parent = gyms.find(p => p.id === gym.parent_gym_id);
-          (parent?.coach_ids || []).forEach(id => ids.add(id));
-        }
-      }
-    });
-    return Array.from(ids);
-  }, [selectedClassIds, gyms]);
-
-  const toggleClass = (id: string) => {
-    setSelectedClassIds(prev => prev.includes(id) ? prev.filter(cid => cid !== id) : [...prev, id]);
-  };
-
-  return (
-    <div className="space-y-4 pb-6">
-      <div className="space-y-1">
-        <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Class / Gym / Team (Select Multiple)</label>
-        <div className="space-y-1.5 mt-1 max-h-40 overflow-y-auto pr-1">
-          {classOptions.map((opt, idx) => (
-            <motion.button
-              whileTap={{ scale: 0.98 }}
-              key={opt.combinedId || `sched-opt-${idx}`}
-              onClick={() => toggleClass(opt.id)}
-              className={`w-full p-3 rounded-xl border flex items-center gap-2 text-left transition-all ${selectedClassIds.includes(opt.id) ? 'bg-blue-50 dark:bg-blue-900/20 border-[#1e4da1] text-[#1e4da1]' : 'bg-slate-50 dark:bg-slate-800/50 border-transparent text-slate-500'}`}
-            >
-              <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedClassIds.includes(opt.id) ? 'bg-[#1e4da1] border-[#1e4da1]' : 'border-slate-300'}`}>
-                {selectedClassIds.includes(opt.id) && <CheckCircle2 size={10} className="text-white" />}
-              </div>
-              {opt.isGym ? (opt.type === 'cheer' ? <Trophy size={10} className="opacity-50" /> : <Building2 size={10} className="opacity-50" />) : <User size={10} className="opacity-50" />}
-              <span className="text-[10px] font-black uppercase italic">{opt.name}</span>
-            </motion.button>
-          ))}
-        </div>
-      </div>
-      <div className="space-y-1">
-        <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Assigned Athletes (For Privates)</label>
-        <div className="space-y-1.5 mt-1 max-h-40 overflow-y-auto pr-1">
-          {(students || []).filter(s => !s.is_gym_member).map((s, idx) => (
-             <motion.button
-               whileTap={{ scale: 0.98 }}
-               key={`sched-ath-${s.id}-${idx}`}
-               onClick={() => setAthleteIds(prev => prev.includes(s.id) ? prev.filter(aid => aid !== s.id) : [...prev, s.id])}
-               className={`w-full p-3 rounded-xl border flex items-center gap-2 text-left transition-all ${athleteIds.includes(s.id) ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-500 text-indigo-500' : 'bg-slate-50 dark:bg-slate-800/50 border-transparent text-slate-500'}`}
-             >
-               <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${athleteIds.includes(s.id) ? 'bg-indigo-500 border-indigo-500' : 'border-slate-300'}`}>
-                 {athleteIds.includes(s.id) && <CheckCircle2 size={10} className="text-white" />}
-               </div>
-               <User size={10} className="opacity-50" />
-               <span className="text-[10px] font-black uppercase italic">{s.name}</span>
-             </motion.button>
-          ))}
-          {(!students || students.filter(s => !s.is_gym_member).length === 0) && <p className="text-[9px] text-slate-400 font-bold uppercase py-2 px-1">No students</p>}
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Day</label>
-          <select value={dayOfWeek} onChange={e => setDayOfWeek(Number(e.target.value))} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none">
-            {DAY_OPTIONS.map((d, idx) => (
-              <option key={d.value || `day-${idx}`} value={d.value} className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 font-bold">
-                {d.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="space-y-1">
-          <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Time</label>
-          <input type="time" value={time} onChange={e => setTime(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
-        </div>
-      </div>
-      <div className="space-y-1">
-        <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Label (Optional)</label>
-        <input placeholder="e.g. Tumbling â€” Tuesdays" value={label} onChange={e => setLabel(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
-      </div>
-      {staff && staff.length > 0 && (
-        <div className="space-y-1">
-          <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Assigned Coach (Optional)</label>
-          <select 
-            value={coachId} 
-            onChange={e => setCoachId(e.target.value)}
-            className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none"
-          >
-            <option value="">Default (Logged-in Coach / Owner)</option>
-            {staff.map((s: any, idx: number) => (
-              <option key={s.id || `sched-coach-${idx}`} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-        </div>
-      )}
-      <div className="space-y-1">
-        <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Color Display</label>
-        <div className="flex gap-2">
-          {COLOR_OPTIONS.map((c, idx) => (
-            <button
-              key={`color-opt-${c.value}-${idx}`}
-              onClick={() => setColor(c.value)}
-              className={`w-8 h-8 rounded-full ${c.value} ${color === c.value ? 'ring-2 ring-offset-2 ring-slate-800 dark:ring-white dark:ring-offset-slate-900' : 'opacity-70'}`}
-              title={c.name}
-              type="button"
-            />
-          ))}
-        </div>
-      </div>
-      <div className="flex flex-col gap-2.5 mt-6">
-        <div className="flex gap-2">
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            onClick={() => {
-              if (selectedClassIds.length === 0) return alert('Select at least one class or gym');
-              let finalColor = color;
-              if (athleteIds.length > 0) {
-                finalColor += '|' + athleteIds.join(',');
-              }
-              onSubmit(selectedClassIds, dayOfWeek, time, label || undefined, finalColor, coachId || undefined);
-            }}
-            className="flex-[4] bg-[#1e4da1] dark:bg-blue-600 text-white py-4 rounded-xl font-black text-[10px] uppercase shadow-lg"
-          >
-            Save Schedule
-          </motion.button>
-          <motion.button whileTap={{ scale: 0.9 }} onClick={onCancel} className="flex-1 bg-slate-100 dark:bg-slate-800 text-[#94a3b8] rounded-xl flex items-center justify-center font-black text-[10px] uppercase">
-            Cancel
-          </motion.button>
-        </div>
-        {initialData && onDelete && (
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            type="button"
-            onClick={() => {
-              if (confirm("Are you sure you want to delete this schedule item?")) {
-                onDelete(initialData.id);
-              }
-            }}
-            className="w-full py-3.5 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 border border-red-200 dark:border-red-900/50 rounded-xl font-black text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all"
-          >
-            <Trash2 size={14} /> Delete Schedule
-          </motion.button>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const ClassTypeForm: React.FC<any> = ({ students, gyms, staff, isOwner, initialData, onSubmit, onCancel }) => {
-  const [name, setName] = useState(initialData?.name || '');
-  const [price, setPrice] = useState(initialData?.price?.toString() || '');
-  const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>(initialData?.studentIds || []);
-  const [selectedCoachIds, setSelectedCoachIds] = useState<string[]>(initialData?.coach_ids || []);
-  const [allowSignup, setAllowSignup] = useState<boolean>(initialData?.allow_signup ?? true);
-  const [autoResetInvoice, setAutoResetInvoice] = useState<boolean>(initialData?.auto_reset_invoice !== false);
-
-  const combined = useMemo(() => [
-    ...(students || []).filter((s: any) => !s.is_gym_member).map((s: any, idx: number) => ({ ...s, isGym: false, combinedId: `student-${s.id || idx}` }))
-  ], [students]);
-
-  const toggleEntity = (id: string) => setSelectedEntityIds(prev => prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id]);
-  const toggleCoach = (id: string) => setSelectedCoachIds(prev => prev.includes(id) ? prev.filter(cid => cid !== id) : [...prev, id]);
-
-  return (
-    <div className="space-y-4 max-h-[70vh] overflow-y-auto no-scrollbar">
-      <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Class Name</label><input placeholder="NAME" value={name} onChange={e => setName(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
-      {/* Owner only. The existing price is still carried through on save, so a
-          coach editing a class cannot wipe it. */}
-      {isOwner && (
-        <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Price per session</label><input placeholder="PRICE" type="number" value={price} onChange={e => setPrice(e.target.value)} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
-      )}
-
-      {isOwner && staff && staff.length > 0 && (
-        <div className="space-y-1">
-          <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Assigned Coaches (leave blank = owner default)</label>
-          <div className="flex flex-wrap gap-2 p-2 bg-slate-50 dark:bg-slate-800/50 rounded-xl min-h-[44px]">
-            {(staff || []).map((coach: any, idx: number) => (
-              <button key={`class-form-coach-${coach.id}-${idx}`} type="button" onClick={() => toggleCoach(coach.id)}
-                className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all flex items-center gap-1.5 ${selectedCoachIds.includes(coach.id) ? 'bg-[#1e4da1] text-white' : 'bg-white dark:bg-slate-700 text-slate-400 border border-slate-100 dark:border-slate-600'}`}>
-                {selectedCoachIds.includes(coach.id) ? <CheckCircle2 size={10} /> : <Plus size={10} />}
-                {coach.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      <div className="space-y-1">
-        <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Tumbling Athletes</label>
-        <div className="space-y-1.5 mt-1 max-h-40 overflow-y-auto pr-1">
-          {(combined || []).map((entity: any, idx: number) => (
-            <motion.button 
-              whileTap={{ scale: 0.98 }} 
-              key={`class-form-entity-${entity.combinedId}-${idx}`} 
-              onClick={() => toggleEntity(entity.id)} 
-              className={`w-full p-3 rounded-xl border flex items-center gap-2 text-left transition-all ${selectedEntityIds.includes(entity.id) ? 'bg-blue-50 dark:bg-blue-900/20 border-[#1e4da1] text-[#1e4da1]' : 'bg-slate-50 dark:bg-slate-800/50 border-transparent text-slate-500'}`}
-            >
-              <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${selectedEntityIds.includes(entity.id) ? 'bg-[#1e4da1] border-[#1e4da1]' : 'border-slate-300'}`}>
-                {selectedEntityIds.includes(entity.id) && <CheckCircle2 size={10} className="text-white" />}
-              </div>
-              {entity.isGym ? (entity.gym_type === 'cheer' ? <Trophy size={10} className="opacity-50" /> : <Building2 size={10} className="opacity-50" />) : <User size={10} className="opacity-50" />}
-              <span className="text-[10px] font-black uppercase italic">{entity.name}</span>
-            </motion.button>
-          ))}
-          {(!combined || combined.length === 0) && <p className="text-[9px] text-slate-400 font-bold uppercase py-2">No data</p>}
-        </div>
-      </div>
-      <div className="flex gap-2 pt-2"><motion.button whileTap={{ scale: 0.95 }} onClick={() => onSubmit(name, parseFloat(price || '0'), selectedEntityIds, selectedCoachIds, allowSignup, true)} className="flex-[4] bg-[#1e4da1] dark:bg-blue-600 text-white py-4 rounded-xl font-black text-[10px] uppercase shadow-lg">Save</motion.button><motion.button whileTap={{ scale: 0.9 }} onClick={onCancel} className="flex-1 bg-slate-100 dark:bg-slate-800 text-[#94a3b8] rounded-xl flex items-center justify-center transition-transform"><X size={16} /></motion.button></div>
-    </div>
-  );
-};
-
-const AppSettingsModal: React.FC<any> = ({ state, toggleTheme, onLogout, onLinkGoogle, onClose, onShowRecovery }) => (
-  <Modal title="Settings" onClose={onClose}>
-    <div className="space-y-4">
-      <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
-        <div className="flex items-center gap-3"><div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[#1e4da1] dark:text-blue-400">{state.theme === 'dark' ? <Moon size={16} /> : <Sun size={16} />}</div><span className="font-black uppercase text-[10px] tracking-widest text-[#161d2a] dark:text-slate-300">Dark Mode</span></div>
-        <button onClick={toggleTheme} className={`w-12 h-6 rounded-full p-1 transition-colors duration-300 ${state.theme === 'dark' ? 'bg-[#1e4da1]' : 'bg-slate-300'}`}><div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-300 ${state.theme === 'dark' ? 'translate-x-6' : 'translate-x-0'}`}></div></button>
-      </div>
-
-      <button type="button" onClick={() => { onShowRecovery(); onClose(); }} className="w-full flex items-center justify-between p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl transition-colors">
-        <div className="flex items-center gap-3">
-          <History size={18} className="text-[#1e4da1] dark:text-blue-400" />
-          <span className="font-black uppercase text-[10px] text-[#1e4da1] dark:text-blue-400">Recover Invoice Data</span>
-        </div>
-        <ArrowRight size={14} className="text-[#1e4da1] dark:text-blue-400 opacity-50" />
-      </button>
-
-      <div className="h-px bg-slate-100 dark:bg-slate-800 my-2"></div>
-      <button type="button" onClick={onLogout} className="w-full flex items-center justify-between p-4 bg-slate-100 dark:bg-slate-800/80 rounded-xl transition-colors"><div className="flex items-center gap-3"><LogOut size={18} className="text-slate-600 dark:text-slate-400" /><span className="font-black uppercase text-[10px] text-slate-600 dark:text-slate-400">Log Out</span></div><ArrowRight size={14} className="text-slate-400 opacity-50" /></button>
-    </div>
-  </Modal>
-);
-
-const NotificationsModal: React.FC<{
-  notifications: AppNotification[],
-  onClose: () => void,
-  onMarkRead: (id: string) => void,
-  onClear: () => void,
-  permission?: NotificationPermission,
-  onEnableAlerts?: () => void
-}> = ({ notifications, onClose, onMarkRead, onClear, permission, onEnableAlerts }) => {
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="bg-white dark:bg-slate-800 w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-100 dark:border-slate-700"
-      >
-        <div className="p-6 border-b border-slate-50 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-[#1e4da1] dark:text-blue-400">
-              <Bell size={20} />
-            </div>
-            <div>
-              <h2 className="text-xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">Notifications</h2>
-              <p className="text-[8px] font-black text-[#94a3b8] uppercase tracking-widest">Recent Activity</p>
-            </div>
-          </div>
-          <button onClick={onClose} className="p-2 bg-white dark:bg-slate-700 text-slate-400 rounded-xl shadow-sm border border-slate-100 dark:border-slate-600"><X size={18} /></button>
-        </div>
-
-        {permission !== 'granted' && onEnableAlerts && (
-          <div className="mx-4 mt-4 p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-900/40">
-            <p className="text-[9px] font-black text-amber-800 dark:text-amber-300 uppercase tracking-wider leading-relaxed">
-              {permission === 'denied'
-                ? 'Alerts are blocked in your browser settings. Reset the notification permission for this site to receive signup and session alerts.'
-                : 'Turn on device alerts to be notified when parents sign up, coaches request to join, and sessions get logged.'}
-            </p>
-            {permission !== 'denied' && (
-              <button
-                onClick={onEnableAlerts}
-                className="mt-3 w-full py-3 bg-[#1e4da1] dark:bg-blue-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
-              >
-                Enable Alerts <Bell size={12} />
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="max-h-[60vh] overflow-y-auto p-4 space-y-3 no-scrollbar">
-          {notifications.length === 0 ? (
-            <div className="py-12 flex flex-col items-center justify-center text-center">
-              <div className="w-16 h-16 bg-slate-50 dark:bg-slate-900/50 rounded-full flex items-center justify-center text-slate-200 dark:text-slate-700 mb-4">
-                <Bell size={32} />
-              </div>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">No new notifications</p>
-            </div>
-          ) : (
-            notifications.map((n, idx) => (
-              <motion.div 
-                key={n.id || `notif-${idx}`}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                className={`p-4 rounded-2xl border transition-all ${n.is_read ? 'bg-white dark:bg-slate-800 border-slate-50 dark:border-slate-700 opacity-60' : 'bg-blue-50/30 dark:bg-blue-900/10 border-blue-100 dark:border-blue-800 shadow-sm'}`}
-              >
-                <div className="flex justify-between items-start gap-3">
-                  <div className="flex-1">
-                    {(n.title || NOTIFICATION_TITLES[n.type]) && (
-                      <p className="text-[8px] font-black text-[#1e4da1] dark:text-blue-400 uppercase tracking-widest mb-1">
-                        {n.title || NOTIFICATION_TITLES[n.type]}
-                      </p>
-                    )}
-                    <p className={`text-[11px] font-bold leading-relaxed ${n.is_read ? 'text-slate-500 dark:text-slate-400' : 'text-slate-800 dark:text-slate-100'}`}>
-                      {n.message}
-                    </p>
-                    <p className="text-[8px] font-black text-slate-400 uppercase mt-2 tracking-wider">
-                      {new Date(n.created_at).toLocaleString()}
-                    </p>
-                  </div>
-                  {!n.is_read && (
-                    <button 
-                      onClick={() => onMarkRead(n.id)}
-                      className="p-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-200 transition-colors"
-                    >
-                      <Check size={12} strokeWidth={3} />
-                    </button>
-                  )}
-                </div>
-              </motion.div>
-            ))
-          )}
-        </div>
-
-        {notifications.length > 0 && (
-          <div className="p-4 bg-slate-50/50 dark:bg-slate-800/50 border-t border-slate-50 dark:border-slate-700">
-            <button 
-              onClick={onClear}
-              className="w-full py-4 bg-white dark:bg-slate-800 text-red-500 dark:text-red-400 rounded-2xl text-[10px] font-black uppercase tracking-widest border border-slate-100 dark:border-slate-700 shadow-sm hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-            >
-              Clear All Notifications
-            </button>
-          </div>
-        )}
-      </motion.div>
-    </div>
-  );
-};
-const ArchiveModal: React.FC<any> = ({ state, archiveMonth, archiveYear, setArchiveMonth, setArchiveYear, onConfirm, onCancel }) => {
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [availableItems, setAvailableItems] = useState<{id: string, name: string, defaultSelected: boolean}[]>([]);
-
-  useEffect(() => {
-    const uniqueIds = Array.from(new Set((state.sessions || []).map((s: any) => s.classTypeId)));
-    const items = uniqueIds.map(id => {
-      const gym = state.gyms.find((g: any) => g.id === id);
-      const ct = state.classTypes.find((c: any) => c.id === id);
-      const name = gym ? gym.name : (ct ? ct.name : 'Unknown');
-      const autoReset = gym ? gym.auto_reset_invoice !== false : (ct ? ct.auto_reset_invoice !== false : true);
-      return { id: id as string, name: name as string, defaultSelected: autoReset as boolean };
-    });
-    setAvailableItems(items);
-    setSelectedIds(items.filter(i => i.defaultSelected).map(i => i.id as string));
-  }, [state.sessions, state.gyms, state.classTypes]);
-
-  const toggleSelection = (id: string) => {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
-  };
-
-  return (
-    <Modal title="Archive" onClose={onCancel}>
-      <div className="space-y-4">
-        <p className="text-slate-600 dark:text-slate-400 text-xs font-medium uppercase text-center">Export logs to history.</p>
-        <p className="text-[9px] font-black text-slate-400 uppercase text-center leading-relaxed">
-          This will archive the selected logs. 
-          Gyms already reset will not be affected.
-        </p>
-        
-        <div className="max-h-48 overflow-y-auto space-y-2 border border-slate-100 dark:border-slate-700 rounded-xl p-2">
-          {availableItems.length === 0 ? (
-            <p className="text-center text-xs text-slate-500 py-4">No active sessions to archive.</p>
-          ) : (
-            availableItems.map((item, idx) => (
-              <label key={`${item.id}-${idx}`} className="flex items-center gap-3 p-2 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={selectedIds.includes(item.id)}
-                  onChange={() => toggleSelection(item.id)}
-                  className="w-4 h-4 rounded border-slate-300 text-[#1e4da1] focus:ring-[#1e4da1]"
-                />
-                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{item.name}</span>
-              </label>
-            ))
-          )}
-        </div>
-
-        <div className="space-y-3 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800">
-          <p className="text-[10px] text-blue-700 dark:text-blue-300 font-bold tracking-wide">
-            Dates will be automatically assigned to the correct billing month.
-          </p>
-        </div>
-        <div className="flex gap-3 pt-2">
-          <motion.button whileTap={{ scale: 0.95 }} onClick={() => onConfirm(selectedIds)} className="flex-1 bg-[#1e4da1] dark:bg-blue-600 text-white py-3 rounded-xl font-black text-[10px] uppercase shadow-lg">Confirm</motion.button>
-          <button onClick={onCancel} className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-500 py-3 rounded-xl font-black text-[10px] uppercase">Cancel</button>
-        </div>
-      </div>
-    </Modal>
-  );
-};
-
-const DatabaseSetupView: React.FC<{ message: string, onReload: () => void }> = ({ message, onReload }) => (
-  <div className="flex flex-col min-h-screen items-center justify-center p-8 bg-[#f8fafc] dark:bg-[#0f172a] text-center">
-    <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-full flex items-center justify-center mb-6"><Terminal size={32} /></div>
-    <h2 className="text-2xl font-black text-slate-900 dark:text-white uppercase italic mb-2">{message}</h2>
-    <p className="text-sm text-slate-500 dark:text-slate-400 mb-8 max-w-xs">Tables missing. Check Supabase setup.</p>
-    <button onClick={onReload} className="mt-8 bg-[#1e4da1] text-white px-8 py-3 rounded-xl font-black text-xs uppercase flex items-center gap-2"><RefreshCw size={14} /> Reload</button>
-  </div>
-);
-
-interface StatisticsViewProps {
-  history: HistoryMonth[];
-  classTypes: ClassType[];
-  gyms: Gym[];
-  students: Student[];
-  onBack: () => void;
-}
-
-const StatisticsView: React.FC<StatisticsViewProps> = ({ history, classTypes, gyms, students, onBack }) => {
-  const validHistory = history || [];
-
-  // Sort chronologically
-  const sortedData = useMemo(() => {
-    return [...validHistory].sort((a, b) => {
-      if (a.year !== b.year) return a.year - b.year;
-      const MONTH_ORDER: Record<string, number> = {
-        'January': 0, 'February': 1, 'March': 2, 'April': 3, 'May': 4, 'June': 5,
-        'July': 6, 'August': 7, 'September': 8, 'October': 9, 'November': 10, 'December': 11,
-        'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'Jun': 5, 'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11
-      };
-      const aMonth = MONTH_ORDER[a.monthName] ?? 0;
-      const bMonth = MONTH_ORDER[b.monthName] ?? 0;
-      return aMonth - bMonth;
-    });
-  }, [validHistory]);
-
-  // Total Students directly queried from active state list of students
-  const totalStudents = students.length;
-
-  // Revenue totals
-  const totalRevenue = useMemo(() => {
-    return validHistory.reduce((acc: number, h) => {
-      const rev = typeof h.revenue === 'string' ? parseFloat(h.revenue) : Number(h.revenue || 0);
-      return acc + rev;
-    }, 0);
-  }, [validHistory]);
-
-  const avgMonthly = useMemo(() => {
-    return validHistory.length > 0 ? totalRevenue / validHistory.length : 0;
-  }, [validHistory, totalRevenue]);
-
-  // Dynamically build map of class ID -> Name from active properties and fallback snapshot data
-  const classTypeMap = useMemo(() => {
-    const map: Record<string, string> = {};
-
-    // 1. Populate from active class types
-    classTypes.forEach(ct => {
-      if (ct.id && ct.name) {
-        map[ct.id] = ct.name;
-      }
-    });
-
-    // 2. Populate from active gyms/teams
-    gyms.forEach(g => {
-      if (g.id && g.name) {
-        map[g.id] = g.name;
-      }
-    });
-
-    // 3. Fallback to snapshot files for deleted elements
-    validHistory.forEach(month => {
-      if (month.snapshot_data?.classTypes) {
-        month.snapshot_data.classTypes.forEach(ct => {
-          if (ct.id && ct.name && !map[ct.id]) {
-            map[ct.id] = ct.name;
-          }
-        });
-      }
-      if (month.snapshot_data?.gyms) {
-        month.snapshot_data.gyms.forEach(g => {
-          if (g.id && g.name && !map[g.id]) {
-            map[g.id] = g.name;
-          }
-        });
-      }
-    });
-
-    return map;
-  }, [validHistory, classTypes, gyms]);
-
-  const getClassName = useCallback((id: string) => {
-    if (classTypeMap[id]) return classTypeMap[id];
-    if (id === '1') return 'Private Session';
-    if (id === '2') return 'Group Class';
-    if (id === '3') return 'Tumbling Intensive';
-    return `Class ${id}`;
-  }, [classTypeMap]);
-
-  // Count sessions per class type
-  const sessionsByClass = useMemo(() => {
-    const map: Record<string, number> = {};
-    validHistory.forEach(month => {
-      if (month.sessions) {
-        month.sessions.forEach(session => {
-          const cid = session.classTypeId;
-          if (cid) {
-            map[cid] = (map[cid] || 0) + 1;
-          }
-        });
-      }
-    });
-    return map;
-  }, [validHistory]);
-
-  // Busiest class calculations
-  const busiestClass = useMemo(() => {
-    let bestId = '';
-    let maxSessions = 0;
-    Object.entries(sessionsByClass).forEach(([cid, count]) => {
-      if (count > maxSessions) {
-        maxSessions = count;
-        bestId = cid;
-      }
-    });
-    return {
-      name: bestId ? getClassName(bestId) : 'None',
-      count: maxSessions
-    };
-  }, [sessionsByClass, getClassName]);
-
-  // Format data for Recharts AreaChart (monthly revenue)
-  const areaChartData = useMemo(() => {
-    return sortedData.map(h => {
-      const rev = typeof h.revenue === 'string' ? parseFloat(h.revenue) : Number(h.revenue || 0);
-      return {
-        name: `${h.monthName.substring(0, 3)} ${h.year}`,
-        Revenue: rev
-      };
-    });
-  }, [sortedData]);
-
-  // Format data for Recharts BarChart (sessions per class type)
-  const barChartData = useMemo(() => {
-    return Object.entries(sessionsByClass).map(([classTypeId, count]) => ({
-      name: getClassName(classTypeId),
-      Sessions: count
-    }));
-  }, [sessionsByClass, getClassName]);
-
-  return (
-    <div className="space-y-6 mt-4 pb-20">
-      <button onClick={onBack} className="text-slate-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-1 hover:text-[#1e4da1]">&larr; Back</button>
-      <h2 className="text-xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">Analytics</h2>
-
-      {/* Stat Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Stat Card 1: Total Students */}
-        <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-[#94a3b8] text-[9px] font-black uppercase tracking-wider mb-1">Total Students</p>
-            <h3 className="text-2xl font-black italic text-slate-800 dark:text-slate-100">{totalStudents}</h3>
-          </div>
-          <div className="w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center text-[#1e4da1] dark:text-blue-400">
-            <Users size={18} />
-          </div>
-        </div>
-
-        {/* Stat Card 2: Avg Monthly Revenue */}
-        <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-[#94a3b8] text-[9px] font-black uppercase tracking-wider mb-1">Avg Monthly Rev</p>
-            <h3 className="text-2xl font-black italic text-emerald-600 dark:text-emerald-400">R{Math.round(avgMonthly)}</h3>
-          </div>
-          <div className="w-10 h-10 rounded-full bg-emerald-50 dark:bg-emerald-950/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-            <CreditCard size={18} />
-          </div>
-        </div>
-
-        {/* Stat Card 3: Busiest Class */}
-        <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-[#94a3b8] text-[9px] font-black uppercase tracking-wider mb-1">Busiest Class</p>
-            <h3 className="text-lg font-black italic text-[#1e4da1] dark:text-blue-400 truncate max-w-[150px] md:max-w-[180px]">{busiestClass.name}</h3>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold">{busiestClass.count} sessions</span>
-          </div>
-          <div className="w-10 h-10 rounded-full bg-orange-50 dark:bg-orange-950/30 flex items-center justify-center text-orange-500 dark:text-orange-400 flex-shrink-0">
-            <Zap size={18} />
-          </div>
-        </div>
-      </div>
-
-      {/* Charts List */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Chart 1: Revenue Trend */}
-        <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700">
-          <p className="text-[#94a3b8] text-[10px] font-black uppercase mb-4 tracking-widest">Monthly Revenue Trend</p>
-          {areaChartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={areaChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#1e4da1" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#1e4da1" stopOpacity={0.0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" className="dark:stroke-slate-700" />
-                <XAxis 
-                  dataKey="name" 
-                  tickLine={false} 
-                  axisLine={false} 
-                  tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} 
-                />
-                <YAxis 
-                  tickLine={false} 
-                  axisLine={false} 
-                  tickFormatter={(v) => `R${v}`} 
-                  tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} 
-                />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#1e293b', 
-                    borderRadius: '12px', 
-                    border: 'none', 
-                    color: '#fff',
-                    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' 
-                  }} 
-                  itemStyle={{ color: '#60a5fa', fontWeight: 'bold' }}
-                  labelStyle={{ color: '#94a3b8', fontSize: '10px', fontWeight: 'bold' }}
-                  formatter={(value) => [`R${value}`, 'Revenue']}
-                />
-                <Area type="monotone" dataKey="Revenue" stroke="#1e4da1" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-[260px] flex items-center justify-center">
-              <p className="text-slate-400 text-[10px] font-black uppercase italic">No history data available</p>
-            </div>
-          )}
-        </div>
-
-        {/* Chart 2: Sessions per Class Type */}
-        <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700">
-          <p className="text-[#94a3b8] text-[10px] font-black uppercase mb-4 tracking-widest">Sessions by Class Type</p>
-          {barChartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={barChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" className="dark:stroke-slate-700" />
-                <XAxis 
-                  dataKey="name" 
-                  tickLine={false} 
-                  axisLine={false} 
-                  tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} 
-                />
-                <YAxis 
-                  tickLine={false} 
-                  axisLine={false} 
-                  tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} 
-                />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#1e293b', 
-                    borderRadius: '12px', 
-                    border: 'none', 
-                    color: '#fff',
-                    boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' 
-                  }} 
-                  itemStyle={{ color: '#38bdf8', fontWeight: 'bold' }}
-                  labelStyle={{ color: '#94a3b8', fontSize: '10px', fontWeight: 'bold' }}
-                  formatter={(value) => [value, 'Sessions']}
-                />
-                <Bar dataKey="Sessions" fill="#0284c7" radius={[6, 6, 0, 0]} maxBarSize={45}>
-                  {barChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#1e4da1' : '#0ea5e9'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-[260px] flex items-center justify-center">
-              <p className="text-slate-400 text-[10px] font-black uppercase italic">No session data available</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export default App;
+}> = ({ students, classTypes, gyms, staff, isOwner, initialData, onSubmit, onCancel, onDelete }) =>xœì=ívÛ6–ÿû¨ÚÉ;’¬ÛqTÛ9®“t=›¯{·3ëã“P"$qB‘’²­Õèœ}ˆ}Â}’½÷ ”ä4ítf›&$\\ ÷[}ÅØ(ÒŒİ¤<ä£Œû¡—¦—~Úd)Ï®¬Â[vÊ)¿Ê¼ŒŸ¤YD“›Û³FYà…Ï½Ì{ÖaİŸ²¿ıİÜî}Wôá{Ë·ã9ÿDÀŸ«7ª	|ˆÇî¡{öŒuu`Y0ãçªA`5Ä¤Ş=t:uBèyH ^áS5ªH@Œö£ØM/}‚p!«aPe˜˜0N$xÚ>Sûá¤uóM—ø^÷Ö€åeÓg\­ßyşºËÊÉÆÆÚå /Ş¾zûşÃÛw×—oß\°øÂØŠİyá‚,”š,òfXú=|¬³uÓU¹ÓyÒq¤UşãËW—ï®Ø¦6ç‡/_–Û¼
+&ÓlcËÎQïéQ¿Üòw·¬jóòåñy§Snó6ñ¢IeO/zG½ƒr«÷Üw7	"?˜Ä­C Ï¼Í%•¹ëóO¼Ğ7üp¹ëgÜÍÊ×Pâ®›Ä)7ëÏ†²jô½Ù'î6›&jÉÃ0¾oèíşLeîúóE2-ÜŞQYEı údÕ†wİ4¶h=Ñ+?÷UùVc’noçY o‚¥^óYÜhì±Ó3Éív»AÕ®—s®8©=óæQ†µ+ø6ÊÚ¯ºƒ|h² ıa9°±¦ğ–À… j£æ5âş%4ÿH…­oWgı‘­÷öšyÿ“åÌèy¢u<Ñú˜İfÉ"ïuÒ ğÙêŠ¡ÛIŞ+ÎPÄX>ä&ÃîéñüüÏÕ²£Ód$aa¤W‹d~y‘ºE•×±»J¯¨r½à©³N¿¨ó#÷£ŠZ¤é"qW:,*½Lg•#m\^¶HD%‹ `Ò‚	L­T e¢ZPQ9 ï¿gW<“bü¬A
+€1[ƒ·Çqò€6F ur@
+,€Â…jA 	
+ÁEe§§§šH¨Œc†ô´—`ôk´œĞT¢;øĞö|ŞörP9°öÜK@@|@ƒ
+h…Ÿ¨` 8G°s…bÊw†øôìó°\¥ÿ»–_‹±ó$ñ–íqÏ UJßÖM—Uâ‚,LBN``dF±†ÚB;¬®Æ<áw4vø·D£páóQfÏDÙ83¨…Æ¾†Â
+vò +“ûÂ[Jr4êõÄî„l{òà´–Î½o-[l>lÕÎä|TUëæ5 °–´ZÈZ7Çó‡[6£¬5½Ñ'&J¿yzàõ‡Ç·l1Ÿódä¥œÍB„'fiŸ\‚¿AaÍXCL{½³ äşŞÉ>õ¥õ]…_ûÍ²V—Í¼‡Öt‹ïx2Fı³ly‹,†i4\¬Kz’¡xá$>Ğj5´ºĞñ,ÆŠíá"ËâÈøÄØı4ùµ7?]­X:òByí§Çl½¶*~âËÓôÒ.ä-RíÇt4å~>€Ü…ş×í†qt£O§+!24:C¤cöìÅ$­>Ş·Æ‹0dóVŸ%1`èë!dÃ8ñyÂÆ!`AÆgik%oŞê‰åù¨”|àğ[€ùvUD9ÉJd€lQëAJ‚†f>¨ÚzÚéì÷:²÷Â¤Tä¢,L¦+n†(8 ‡9BPÊ£ZuêöTYÓdÎÕÊ'Šf®rªş²H³`¼T¯»OM1n{"ÄÈE¡G_ŒÃFHx{o¿ÿ=;¹˜òÑ§‹ …¼ÇÒà¿`˜İÎºÄÀ@Å¯±ı3›”Nöa’ìŞ‰ŒÉª€QwhIà®5ó¤å'×I<Ÿ.İÆÀ»A¶„eÂNaÔ'ß/‚ĞiY¥Ù EßÉ¿§0ë;T.	È%*‹°nÇ’a…Ğ
+28°vFãF›j}²@Ìy9Ù7ä„şqOcQcFÍ—_N ŸKÃ„I'2e—à~¾K‚; ºôç¾4:²Bk—¢xû9%¥?ãè{·‘V	çÍÒywñ,ä³”Æà,ƒ4NÑ
+®’Ê¶X6ò
+¥¶Ëjİjİ“j]TÑ;–Ü–DüÏ*ã‹@CwÃ§Í%³,1å{áúŠÎ4Wøg’ğ%ÿÅeüÎSã˜…GHw¶¡£/!Öİr}w™Zjøù25­–¨»ŠT”)_ëBE=o‘,!&Ù”ôVGÌë¼<†§8î`iÅˆâĞ×4_SÍPØ½‰sNöçgŸ#û'àv2ü«5ŠÃ #Óök;dCÖ~!uñÜ[–4.º0ÙÉ#>]åà5ÊÆ)‡NW\ÊÆ<Üx³ÀÉoğvæ%µ©5¬¦d.ĞØV)¡I<'¡é”/²LïVG\@Ó¶ëA3äÍHÔ©™ô¸Ò"B-ù•j‰Ää^½â‹a’Áó”+•|îÄwc` Ä¿:ñ€-ÏBi$]DkÛÑQï²±'p6[˜œ|J«~æ&ê_˜0q{ÀE™A4_dëÀP§¦&_\ô‰€lšüU¤!m¶#í§°†ğ½Ğa+ŠÙŸ0>
+äÉi·'mv¬ƒ°ÿıïÿa2—æK#HÒ±6Ôá¯}qŒÕX¥™7£F¡¥hÎXË^Ém~ŠFnZÀB´‚@®“Ü[›ËË&ƒ¥…3šı
+±$ô5-OŠt15Ğ‹|ì-ÂŒ5^Å“	 Drr÷ÙÛûL·Dä!›ó¢%©‘‹H7nW'hjÁ#Z‘’N!÷E³¯~²lÏëş’‘BÚ}¤ MÊ6ˆğäŞ˜§±¿)æ}Tís:’Â;¤MZ«I•½cØNí 7FN>°ºcpRM'¥èi^(š/Mğ?0Ú¦"ıÇĞ¥z³l*ÆEñ.[ä†¹+Êìâp¶Xd!
+AaöGR¾b2kÆ·ı*;~wõF¡y,V\"6˜ÈÔ±!€àÚÑk©WÖLà¶H)Zgú2^=$Y£.Cá^ÆBî¥CÁEã`°æàÀÔİü®" Ì¿ Uà¿v-DDó+­´WÂ™éàşpÊê«³?0­ñ_â jÔ›eTÊ|pµÎ‚¬4M¦¥Œˆ„<É~ŒAò¦†nU’J1jX¬+õ‘ËÍÁ-3B°F|úH…*oÌ—Z ÀT5º‚)dV:õüø¾NªuÈ•wÇÙŠíEÈÙ[éêšZA”0ğ‚áÕY¸.¿[èÖ®Ó—°ä±>úmÑ‘mÓcy"Å]¦Àò0VZbÚSqôœ#Yš¶Õ—`ìj¶Ëâh$³Fí<ál/Xº÷†²bæ´³i²T’Íğ³Ú‹%Õ@õÌv`s€Í‚Õ¡,®e«ÒD¸¯›\øúô°³ß—dïG†¿‰%™bÔW5É	Ë(}ªõTp?ôr:,Ên2óÜ¼—%ğôZ°S,OFAØçÓï:ñÒik;Xã¶…$»ÇpsaC4?ÂBâö­ÌÉR)/ãd6`ï¹7ÊÚ//NÀZ<ÃæUc›ÑMák`ºÙğPPI3Ãø$8­sÒ•	f"]Œ $êT5¬VÎt›'ÁH´~‡OÕÍ©â³v_Ñö80P	–R/"01–vÂb^ºKŞ›œ¤KWÊb®‘dz†™)wJ‹´òô¤=LzºÇk1Y{Å»yÇ ì#;kkH©:&Ib}‘Åï9€½Œîb5ÿçVá.ı@“	¶ùˆF´A™Jz’ƒÚ»ŞU±¹#½M{<U®Ğ
+§vş”‘·${•»6Ø7åZ
+“ÂË‘´!Ê‘µá"º6R±³“nIØ0²GÈyÜˆ‡"Ë/›7òÕÎ)#bŸïæIçnz[Úë‹âV:Jâ0zÉ.y%_4(Ñ‚zsşúEl"Å´@ ¿ÚP“cÚÿd€Q„Ë6»rÆĞqÑ„‘ŒehVd`;ò’$ ®Í¦€Òd
+-X
+v(H‹˜yšÚ"9Æ¸O:#/ŠâŒİs´NÚì_ö•[I]³sTë-8i6Ç½*¦ g7­û»÷—°ğÂ–b%'š'Pÿ„ &…c9~ıHL: Uî4>Ø‹	y_ÕœaÉÊ0À}âÍ¥I‡ÿ?fEfA„íà coø4Ä4jÉ¶â‘]ƒvÒe“Ñ#Jêƒ9—Gìè_#ÍÀô9*’¿bÊü”mË¹F,işĞê£‰™jÔá„i››n’4“ÜYSË{’ª©ĞF9Š¥Ì§ÂËV¹ Z8JOÚ¶·^MÿÁödõÒ£í©S®ÚdùJïÂEj–WA®®+8v²_vóËÑXs_íïŠÍwoTÎĞÏ›$”›š:óq²Âvâ>+jb-@u^]³Ä»`Xñ åsj\¼9¬›rLÄÈv³_"‘37l.(0ú-™s—éù²	›{üù’:U'*¯S¾«ƒ"ÿÒ;åˆj†'¥#éâK=ù„#Ê5òÁ…ÿÜ<£bO„Í3„·S°ùĞˆ6™–ÇùE	¸8å/ÃØËÂÁ O§¾×dÎàˆ1Â&õ(Ç²©XşÆìíµÿG	ÊkrŸQ…Á*ÿI±ÖÑšü	kpÛ‚“çóùÏĞKL_Ç¾VÄ'ÿ¦Tvà"YÄÑ«x.=Ñ§â>RP2ŒSz¸šÆ÷ïùM„¥ŒQ¢f?¡äcMõ^S-i~ñAŠÖÊFe\¢z*‡<»ç<z¬¯·m+²¤¯û°0VE{',wEà:©ä
+¹ßÙ$­ù˜ÄfeâÚµ3\4!ø}:2ù—£ñ °¾Z˜ekA6%Y¼Õû5¢øi–ãzÔõ{ŞmÉî#²xš“up)³mÃY²hÎˆA®-“¡ÛƒÙ>2mpst.¢Õ”ù‹Ä£w@Í…ªù2ÏNÆ2*M—Ü+2ğ‘‚)9y{wÄ¨	!òĞ:"Ìô‰šXFË[‘ü•9¿×•ÅØ½ïçâãÚZÙ™!7™§š¬,-âç0¨î ıkfq’Û@Çel#—™‰ŸÁ+ÛùXN7“;ì9™
+¦ec³Ëy’À:Ñ™ûb·ë1cÎ\ñ‚ˆ*äï´5Ø¦gdó˜ÍfòS
+ç'Ø”ö·ÑØî²0}»È6SØ(	BIOŸID›á^3ÄëndRX°&M˜%_Ï“}Ròg_íå–Æ0LÆÁˆDZÉÖÀ½ËH¯0@ËDors‹ç¶¥¤0!Œ€|Qü†ĞüAiË¥¨sr/±›ÂTÎ
+=?8¾Ë?ˆÖ/"oòsLìIŸéP¾ZK3É€a	)ìš
+‹¦ÖoÓ®mçnÜÊà•æzuØ!tn·' l=¯ÈÊ79üÛYaZIs»Î‹ÜpDYİPXËM% ²µ„/
+fĞ¡Ñ¦›·éR£+¾,F$ÿc8ê¾5ós¾éµ>»U:¶‡ª¦ïƒHØ= ùxG"V­hæ`nÈVCèaL±V¶¤2ÖN3R÷+ìTS“}†ö+·ó©vüµÍDUóİÛÉƒÙ®æìÀ÷í$’J=
+ÎZn|)üqâˆœL{%yær¿ézø_Ù8ÅÑ—£†@;ÙŸöJı:b;‡j-û™, Œ¦²àØã›'£\`ÛÏÊÑ2É¸Çvâk
+³°fÙ×]ØãuI£h)ÒÆ
+ÙI;áõ	èê/¾¡2C–Ú™d¥Ïp'<Ã´¨R³veN>¢@&R™£ŸzBœê•màÃMß•1#›>ó€(ë”ieN¢ÁH]+á¡ª¢Ä]ú<
+‚GLc)¢	>†œN/ÁM¾xô‰4æÀÁ€ù@!>éÉ·å¬0pU•¨©<a"³åè\TšnÄƒ;Îd†ŒùjGXäÒ¦í2Zt‡L‚ôÌ|~‡V±¨Šğ†ªo@ô~Š £Sê€a,j$·.ş×9¨1ÃTØ¦ŞwÊ&0Î´ëk‹ß,,‘¥œN›5Vt$æ¬©“ñ¦ÁoŸi€»‡Òtswû.¢áÎï–•W³ğ.ËÅ(™$/]Şw{%y_¹İ¶a·­ØTwp¿H9r¦À @P±¦¾;!†Vİ°úŒÀ0ÆŞ7êYÜÌí13~«ÏeUYÖáG¨Ã6º¬äÌ-®”DqæÆÖ•¨$fC-:§¡¨­nß½º.í]–’©G·4Òú&¦K™"SooS£¸‡a.£¹â´m8>ê2¡ÕÚ“ŒÔ! \yOA•İı0`hª•/B¨2º,S[ı1’lu(´]ió1ÂÀŒUê»ÄÊ·<Ê/!T¸%û³›ƒµlT­ûÎ-ÇÉ•ºLh·‘f^’9-êjPÖöxñgÕˆÚGRxóöúòååÅ9súp}yıêÅÕMD—³Üî¹ôIŞãî&ç†°OµØÎ®ÂŸÆ°ÛÊ¤'±·™QıqdÆ”F»ú(£!İb¼(,+È¦YswÚ6Õ¢¨â vÅıj^f`Qx“RşÈ–ï¼.8ËD^¼fV®İ
+%ãsLñÚ#˜0§?xÙ^;‹_Åè£«ïGáï¾›{ûºXƒJj>q'|¨?¥]KdiDî\*ñÇpuºâ´ÄF·`3¬–s‹¶£“Ÿ“ ¨ËaD'^UË"24‹(Í’øÿ1ğ³)(Q‡•íœv’øã˜·âİ/4—Ş¤ëÇÒnuá¨9m£Rê¢+–r°Kè#Ï6ÙM½Øî—›¾ï˜{IõñNíØÍA•ÏœoúŠ9®#7ºšİšâ`äG±4İ8Ñ£&¬tÌ§·•€m¢¡)s>4ã½–‰å8W²Ú«ˆĞÚÇ–ÛØÉh
+îãÖ-lOÕ‹²işög
+ÈâyãkQ * =ˆƒ`›NŞ¨ûJõùë”É„è]¢…!0Š(«"Ö­îŠUo2ùVõ?`ò¼È:ï:@/Æc¨à¸Åtà‹»NµË4åµ¦†ØÌe=¹O;!’Š›ÆñøÓ¥¿§nï”÷¤âxp8ª'j]}ªè±¸i´1)úÉïDÕNÑÉ“.YŞ4GE F• è”İd
+öŞgJà ägêN`´ş=úÅ÷QİjŸí1€l:¨£ßR/?G„äv¸@†ã¥q¦Zi‰H
+\¡–¤¼‰¡«VK$Ù …,¾j4/>©,İåÚ¶zD#¿éXï·¶´ÖÔ(¡YZZÇ± Ñ…¹¶ßçú˜#9éG_ãj$ÀHcæ¿ˆü¢mot'Ûa)nÜd†'=ã~°˜Ù;‹*Ôğâa'£ØÚTì–·«oç`¦ÓU/zÛµ¼Æá=„‘¢›‚ŒJæ‚m]Ÿÿ€l{!Ú™KFL$Zã)˜!pÉ>î·5FÒ–¸ÑÁq)f¤¦÷H½¬âJW^˜aK€©¼zÔVÛrwæDDobæá¶/â09ÅmË¸/ÇC,I ßoˆ‰ˆDv‘‘ıí
++›g'¶oaÑéÜ`1?«øØ4ÒG‹$“Ö<œ´üÚ#‡é,RFh“ã‡š«
+}äşéJ³4"FêôNŠ³Kzny.»6¶5ŒR#]šÙIË¶ÿ?G‹T\’–‡ŸáÎÏ­ŠÍ=qˆ!Jú«_}u sÚİ©ıG¦™ü¼1ŞdnÈ:Ä¢–¯Am”ıÊ¾‘*lıÁ¢Ï.e"J4B30¹Áe—ù­õÈÍ((Gq’à}$C¨ç?fhè¶ul‰¾ù:¸<á¸/u8ŸŸ{,mì†Æ>Œáî£ò…ûŸ›/,‘Ùt¥‡cOõ'%²ùQˆºÔsåjé%ÏÒ±’‚1¹lÁÎ_Ìÿ#à÷z¦“‘¬ÂÕˆ£÷<Œ)÷&OŠa*)FÖ.jé™À/ÇùÒQRÊŠ(e´r½ñ¨ ‡›o:ãîL7-ïœlÜ/1.¿ĞüaûşŒÇíœÌè’ş“kÜ&Œ<s'D_GºBÏ±şÖE’ÉÛ¹
+Ø30èJÅ ‹d—Õ8³	Ñe=Äc™vóÖÎ®Qı§Œ¶?£I›‰°ÕÕbNt„æõb^¦´±¶ö5M6×¹ú>nãĞEÅTTœ¬‚yÏÇ`N/îÍKAJ:7ÉEBƒl‡1è†8Ö¥È)ï’x’S!­ä“É¥U¸¹%_?wVÅí âú4´[Å«ºë` İĞ“(£ïa:¿û*î5ÒX×©dR‰kSÃ¬¸‹DİM":-…<î€Â|•@{ª@‰x ù>ûûì
+İ‡Ñ4‰£lt¡r `Œœ§;€Ü¿ª"'ô­ôÎnÛØ²ÑğšlhÜİC·cµ—ˆBÏlHÅÕ\âKK–›¾úë·o®ÿõÃÛ÷Ï_¼Ç‰…éŸä.4PÄ+.ô©ÿÑ‹^²¬ÓN\ı%&òµ¯¯Ñ„®ÓŞÔÏçIÖéÇm kÀÓ¯ãÏÔh!~=Â6‹	Hxy/W|Ñ%ğ~ïoGY,ŞÂÛ0yåÇ.bòœò÷nÓÀ·Àµ@³@R¢ˆ^„ONKEÖ9õ+»][ñâ˜Fm²o¼6#â¾šgÏXÇl3tµVµQ+-µdk=ŠAƒ–ö©^Ç 2·¥ÌĞb[ê¯N7/`,÷–0ôÀÂ ovçœ¢ Té´¸ÌZøpªÇ÷üG.ª[­Õ·Œ¡¤ªi1âÀ£‘:SÛdÓ½rLBäÑ îSh'{ÂÌAòx¸@;ı•×AP^ş\´~ïØ(Àı;’Sß”U*f_’Çİ„–+\>bÔÚÖÂ3sæö‚XlDšFÛ‚(/Á?‘Fõ@‚ê›ãš‹{5.Ÿ³Ö][bÇ$,O² #æ=ÌÁİœÈ›§Ó8£ó~ù¸sÑû@oúy)èº$›äL¡l'B»Ûfïâù•¶˜À—^æõ¸¨ú5ªÌ–¨ôf¸q##ú½f€Ò}Çè´ü®h¡øu&…V¯-T8û÷f+è•øLlt&›‰™‰Äe²•~›½TË‚ñµ2ã ÍÌRW»ùş™Iîf&I)gBD™h
+KÁıà?¾Iómà]®ÚŞº2U«ƒ_Ëb_B·iÁŠ™*ä¥^V9,\°mª^T÷Âæã˜TÃ½Ô›‘“€”% Ç-l{ÈT](sUpì…¤¥†;ÊL¥±ùIâ`ø.o"7&êİz^¹.à…]‰€]½\»§ÕşŒä¹055ûZÍünˆK0p£Ø²nü¬ÚGqEêÖÕœé¨Bóó¬ˆ(â%?…à)¬?ùıû¥€üXÉ§YeÒÎx4sJ¤+¿äPTJªE¶R€ã|ªñèÛ^ßÙ¼jÿ–äGAÇü™T*(ĞîîD½¦‹õù~‘\)Êm„"YîÖJ³KTÙ´2xaíê\âàë’X°œÃ+µö§Ê6{;ü˜Sm¤`L¥kñ‹Ÿıkà`.ĞmÉ¸§bPöZ¦Ğ{¦ÊÅæ¸ãü)xbçL6{f0}C”¢=æ/XòÊĞ¦>:"¢‡âWq7¨Å
+á…‘0HéO=Ì“=O¸w’†CÜİ¶YaG©:Û=«Â£àıôïb,ë'füã·«iaà·ÓÅPtÔ £¿‡WgOÉ[,Üi¸_Óù(Ìşb°;Lô÷^"ç¹Bó=”U·O÷6& ”M€ŒĞ0	Ó G}¯]ÍŠ¢À "gcï1¤¸Ó‚GòÅ°Õ+BàHªÎæ¿0õ˜˜Š­äæ¹ÛQ;û}è%Éw±(†şyÎ	G^¸Ä¨‹»ÉÎğÖ?È°/ñSöşLPqß–_ê²™?(^û4b}7Ø€ÎºÛ­-z*÷µ!“iŞ*®ë—vEvÏ>Úz^·t¨mûÉ™üÕ£2$2¥ÕœŸrVø´¿-&+C­ÛEkg+#2€áØşæƒ[•çóÌ;‘6ìf}¡ë$ÌIÁ›}RãğVõ(J¹…öìünÂ”ã¯œ÷ßÈÔ"Sk’~*ªß¨7sDT©¸x`õÚS˜¦³QÄfö¾$Õª5ÂUEò°İn´»ÃpÌÙºHğŠT¢À/AÅıAnT“ù7úµè×˜¨7œTïÆ#Y²ˆFè ‹=ª›î! 6UÁq‡®	]é>JC0){ËUdÖÎ˜-ñÍßp3û#“l;ÁåˆŸÀUq‚Ù$:SÉ’GñTE™,<gØ[é,óO­ı§7c¹¸yìB˜ã¯0Ôş+)œìŸ^<´¬$aŞw¹Î¹Nxä.çê\‹|Î¡h;S}.Ü`-ãY¼òQ8[ÑÒ -~\¤b·ÒÎŞótS´è {Şş{Ogj0ÆßÕØ”ãı"§«ŞQ§tHæ¤ğfÑ;5û]'“ ÂÜ‘,‹¦¡‰G¼sÀÀçhÂÜ‚5?‡Û\çºø8uRÁ[š½ä‡Äó<aø§5Ju—“ScİÓZ§Æ–âŸ‡xƒªÎB¤€*¿ÃtZ;„	Àúí›Óš[¢ì­8ñvºê´ÖU‡9hOw×qƒ;Ù7‡ë˜¨}÷L€Ëxx9+â$ÊsH³ÃOk}Ö¯±;Üğá!EÊPVV Íqw|8~ZÓi™h_TĞhß™kö§ó‡ uåÛ!Éü‡îQt;3ò ŸO¯`Ì9J:@ßV'#v…{á€Õ%Ö›ÄwW åAâÛ\he~İq­;¡îÏUƒü’C±ï§«ÆE>¾ÿvuç¸ëö—ôu‡Y0wæRÆ„Î®²eH‡XÜñö	É]bD²Ë{OûC@Òİ€„í{ ÿE
+µ»½ùÃæªP)¢è»ÒHu;ëÍ
+8W¤	 Z‡¡´fİCø«Õ‡¿’É°Ñaøß>ë´»{uW7®Ùd¤½óÙÉñ8êx‡c¯^±*0”_Y†ãXë:âşÈcØèê}ú¢8ú¼MV—r¶î8ê"T2wGq†¿ôXˆ\hç‚§æÑ9$é\^vÅûim‘„otñ¿çH'û¹Î²O;Táæìéòíi7 %IŸo1ĞÊw T8Ø%®VÜk“'ñP@4OïŞá¬ü†³€¹­¾ş•L®F-ÿÙ­®|ØÃ¥6jÛìÒÉ?£Õ•‡¶…Ñ¥÷úål®ßL†“á7àË èıññ¯Ù  GJ$qWİB«`_Õ¸&U÷7ŞñÁèI%´´§«›£&&.yvnQ¦=@ó+
+G:ïj0e¯ú¡
+L	@Á¸Ï2IÌ.ğnùğˆG™°	šÕ„xe¿c½üìV]š&tÁÄ7îò§õŠ#ı{ÎSû0²i¢û?¥e¢20~ºeRz±/HçâÔ£<­Š÷‘~÷   ÿÿ 9TØ

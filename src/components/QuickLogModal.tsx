@@ -177,7 +177,7 @@ export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, d
         </label>
         <div className="space-y-2">
           {classOptions.map((opt, idx) => (
-             <div key={idx} className="flex items-center gap-2">
+             <div key={`quick-opt-${opt.id || idx}-${idx}`} className="flex items-center gap-2">
                 {'isGym' in opt && opt.isGym ? ((opt as Gym).gym_type === 'cheer' ? <Trophy size={14} className="text-blue-500" /> : <Building2 size={14} className="text-blue-500" />) : <User size={14} className="text-indigo-500" />}
                 <span className="font-black text-sm uppercase italic dark:text-slate-200">{opt.name}</span>
              </div>
@@ -195,13 +195,13 @@ export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, d
           </span>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          {coachOptions.map((cOption) => {
+          {coachOptions.map((cOption, cIdx) => {
             const isSelected = selectedCoachIds.includes(cOption.id);
             return (
               <motion.button
                 whileTap={{ scale: 0.97 }}
                 type="button"
-                key={`quick-coach-${cOption.id}`}
+                key={`quick-coach-${cOption.id || 'c'}-${cIdx}`}
                 onClick={() => toggleCoach(cOption.id)}
                 className={`p-3 rounded-xl border text-left flex items-center justify-between gap-2 transition-all ${
                   isSelected

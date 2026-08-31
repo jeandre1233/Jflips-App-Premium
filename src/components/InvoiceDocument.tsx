@@ -204,7 +204,7 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({
         </View>
 
         {sessions.map((session, index) => (
-          <View key={index} style={index % 2 === 1 ? styles.tableRowAlternate : styles.tableRow} wrap={false}>
+          <View key={`inv-sess-${session.id || index}-${index}`} style={index % 2 === 1 ? styles.tableRowAlternate : styles.tableRow} wrap={false}>
             <View style={styles.colDate}>
               <Text style={styles.cellText}>{new Date(session.date).toLocaleDateString()}</Text>
             </View>

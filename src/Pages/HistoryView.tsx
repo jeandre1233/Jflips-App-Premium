@@ -13,6 +13,7 @@ import {
   Layers,
   Sparkles,
   ShieldAlert,
+  RefreshCw,
   ArrowUpRight,
   Clock,
   Building,
@@ -27,12 +28,21 @@ interface HistoryViewProps {
   state: AppState;
   onShowRecovery?: () => void;
   onRestoreSnapshot?: (snapshot: any) => void;
+  /**
+   * Rebuild a month (or every month) from its archived sessions. This is the
+   * owner's route to the redundancy: a month archived by an older version of the
+   * app, or edited while offline, reads right again after this runs.
+   */
+  onRecalculate?: (historyId?: string) => void;
+  isRecalculating?: boolean;
 }
 
 export const HistoryView: React.FC<HistoryViewProps> = ({
   state,
   onShowRecovery,
-  onRestoreSnapshot
+  onRestoreSnapshot,
+  onRecalculate,
+  isRecalculating
 }) => {
   const [selectedMonth, setSelectedMonth] = useState<HistoryMonth | null>(null);
   const [expandedMonthId, setExpandedMonthId] = useState<string | null>(null);
@@ -55,6 +65,58 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       return mB - mA;
     });
   }, [state.history]);
+
+  /**
+   * WHAT THE CLIENTS WERE ACTUALLY INVOICED, cross-checked two ways.
+   *
+   * `stored` is the figure the archive derived from the month's sessions.
+   * `fromPayments` re-adds the archived payment rows for the same month — a
+   * second, independent record of the same money. When the two disagree the
+   * month is showing a warning rather than quietly picking one, because a
+   * mismatch is the signal that the month needs recalculating.
+   *
+   * Coach payouts are excluded: they are an expense, not something invoiced.
+   */
+  const invoiceTotals = useMemo(() => {
+    const paidByMonth = new Map<string, { total: number; count: number }>();
+    (state.payments || []).forEach(p => {
+      if (p.is_expense) return;
+      const key = p.invoice_id;
+      if (!key || key === 'Active') return;
+      const entry = paidByMonth.get(key) || { total: 0, count: 0 };
+      entry.total += Number(p.amount_due || 0);
+      entry.count += 1;
+      paidByMonth.set(key, entry);
+    });
+
+    const byHistoryId = new Map<string, {
+      stored: number;
+      fromPayments: number;
+      invoiceCount: number;
+      mismatch: boolean;
+    }>();
+
+    historyRecords.forEach(h => {
+      const key = `${h.monthName} ${h.year}`;
+      const pay = paidByMonth.get(key);
+      const stored = Number(h.invoicesTotal ?? h.totalGross ?? h.revenue ?? 0);
+      const fromPayments = pay ? Math.round(pay.total * 100) / 100 : 0;
+      byHistoryId.set(h.id, {
+        stored,
+        fromPayments,
+        invoiceCount: Number(h.invoiceCount ?? pay?.count ?? 0),
+        // A cent of float drift is not a mismatch; a rand is.
+        mismatch: !!pay && Math.abs(stored - fromPayments) >= 1
+      });
+    });
+
+    const grandTotal = historyRecords.reduce(
+      (acc, h) => acc + (byHistoryId.get(h.id)?.stored || 0), 0
+    );
+    const anyMismatch = Array.from(byHistoryId.values()).some(v => v.mismatch);
+
+    return { byHistoryId, grandTotal, anyMismatch };
+  }, [historyRecords, state.payments]);
 
   // Overall Financial Totals
   const overallTotals = useMemo(() => {
@@ -259,6 +321,18 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             </button>
           )}
 
+          {onRecalculate && historyRecords.length > 0 && (
+            <button
+              onClick={() => onRecalculate()}
+              disabled={isRecalculating}
+              className="flex items-center gap-2 px-4 py-2.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/30 rounded-xl text-xs font-black uppercase tracking-wider transition-all disabled:opacity-50"
+              title="Rebuild every archived month from the sessions stored in it"
+            >
+              <RefreshCw size={14} className={isRecalculating ? 'animate-spin' : ''} />
+              {isRecalculating ? 'Recalculating' : 'Recalculate All'}
+            </button>
+          )}
+
           {onShowRecovery && (
             <button
               onClick={onShowRecovery}
@@ -267,6 +341,33 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               <Layers size={14} />
               Recovery & Snapshots
             </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Invoices archived: the headline figure ────────────────────────── */}
+      <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+          <div className="space-y-1">
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+              All Invoices Archived
+            </span>
+            <div className="text-4xl font-[1000] tracking-tight text-[#1e4da1] dark:text-blue-400 tabular-nums">
+              R {invoiceTotals.grandTotal.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+              {historyRecords.length} archived {historyRecords.length === 1 ? 'month' : 'months'} · {overallTotals.sessions} classes logged
+            </p>
+          </div>
+
+          {invoiceTotals.anyMismatch && (
+            <div className="flex items-start gap-2.5 px-4 py-3 rounded-2xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40 max-w-sm">
+              <ShieldAlert size={16} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-[10px] font-bold text-amber-700 dark:text-amber-300 leading-relaxed uppercase tracking-wide">
+                A month's stored total does not match its invoice records — usually a
+                session edited or deleted after it was archived. Recalculate to fix it.
+              </p>
+            </div>
           )}
         </div>
       </div>
@@ -500,7 +601,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           </div>
         ) : (
           <div className="space-y-3">
-            {filteredHistory.map((m) => {
+            {filteredHistory.map((m, mIdx) => {
               const totalGross = Number(m.totalGross ?? m.revenue ?? 0);
               const totalCoachPay = Number(m.totalCoachPayout ?? 0);
               const netProfit = Number(m.netProfit ?? (totalGross - totalCoachPay));
@@ -512,12 +613,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               const gGross = Number(m.gymsGross ?? 0);
               const gNet = Number(m.gymsNet ?? gGross);
               const sessionCount = Number(m.sessionCount ?? (m.sessions?.length || 0));
+              const inv = invoiceTotals.byHistoryId.get(m.id);
 
               const isExpanded = expandedMonthId === m.id;
 
               return (
                 <div
-                  key={m.id}
+                  key={`hist-card-${m.id || `${m.year}-${m.monthName}`}-${mIdx}`}
                   className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden transition-all hover:border-slate-300 dark:hover:border-slate-700"
                 >
                   {/* Card Header & Primary Stats */}
@@ -542,11 +644,31 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">
                           Archived on {m.recordedAt ? new Date(m.recordedAt).toLocaleDateString('en-ZA', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Cycle Reset'}
                         </p>
+                        {inv?.mismatch && (
+                          <p className="text-[9px] font-black uppercase tracking-wider mt-1 text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                            <ShieldAlert size={11} />
+                            Invoice records say R {inv.fromPayments.toFixed(2)} — recalculate
+                          </p>
+                        )}
                       </div>
                     </div>
 
                     {/* Financial Pill Highlights */}
                     <div className="flex flex-wrap items-center gap-3 md:gap-6">
+                      <div className="text-left md:text-right">
+                        <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">
+                          Invoices Totalled
+                        </span>
+                        <span className="text-sm font-[1000] text-[#1e4da1] dark:text-blue-400">
+                          R {(inv?.stored ?? totalGross).toFixed(2)}
+                        </span>
+                        {!!inv?.invoiceCount && (
+                          <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider">
+                            {inv.invoiceCount} {inv.invoiceCount === 1 ? 'invoice' : 'invoices'}
+                          </span>
+                        )}
+                      </div>
+
                       <div className="text-left md:text-right">
                         <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Gross Invoiced</span>
                         <span className="text-sm font-[1000] text-slate-900 dark:text-white">
@@ -652,10 +774,24 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                               <Layers size={12} />
                               View Session Archive ({sessionCount})
                             </button>
+
+                            {onRecalculate && (
+                              <button
+                                onClick={() => onRecalculate(m.id)}
+                                disabled={isRecalculating}
+                                title="Reprice this month from the sessions archived in it"
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 text-[10px] font-black uppercase tracking-wider transition-all disabled:opacity-50"
+                              >
+                                <RefreshCw size={12} className={isRecalculating ? 'animate-spin' : ''} />
+                                Recalculate
+                              </button>
+                            )}
                           </div>
 
                           <div className="text-[10px] font-mono text-slate-400">
-                            ID: {m.id}
+                            {m.recalculatedAt
+                              ? `Recalculated ${new Date(m.recalculatedAt).toLocaleDateString('en-ZA', { month: 'short', day: 'numeric' })}`
+                              : `ID: ${m.id}`}
                           </div>
                         </div>
                       </motion.div>
@@ -716,7 +852,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
                     return (
                       <div
-                        key={sess.id || idx}
+                        key={`hist-modal-sess-${sess.id || 's'}-${idx}`}
                         className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs"
                       >
                         <div className="space-y-0.5">

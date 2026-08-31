@@ -119,6 +119,16 @@ export interface HistoryMonth {
   totalCoachPayout?: number;
   netProfit?: number;
   sessionCount?: number;
+  /**
+   * What the clients were actually invoiced for this month — the History tab's
+   * headline figure. Derived from the archived sessions, never accumulated, so
+   * it stays right when a session is edited, deleted or archived twice.
+   */
+  invoicesTotal?: number;
+  /** How many separate client invoices `invoicesTotal` is made of. */
+  invoiceCount?: number;
+  /** Last time this month was rebuilt from its archived sessions. */
+  recalculatedAt?: string;
   recordedAt: string;
   snapshot_data?: {
     students: Student[];
@@ -205,6 +215,17 @@ export interface Profile {
    * changing it never moves an athlete who already exists. 0 disables it.
    */
   default_group_rate?: number;
+  /**
+   * Which bank account prints on ONE client's invoice: `{ "<family_id>":
+   * "business" }`. Lives in the database — it used to be localStorage only,
+   * which is why the selection kept reverting to the personal account.
+   */
+  invoice_bank_allocations?: Record<string, 'personal' | 'business'>;
+  /**
+   * The account a client follows when no explicit choice was made for them,
+   * per client group: `{ schools, gyms, tumbling }`. Set in the Management tab.
+   */
+  bank_allocation_defaults?: Partial<Record<'schools' | 'gyms' | 'tumbling', 'personal' | 'business'>>;
 }
 
 export type NotificationType =

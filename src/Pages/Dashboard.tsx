@@ -301,7 +301,7 @@ export const CalendarView = memo(({ sessions, classTypes, gyms, month, year, sch
                     : `${session.studentIds?.length || 0} Athlete Entries`;
 
                   return (
-                    <div key={session.id || `sel-sess-${idx}`} className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 relative overflow-hidden">
+                    <div key={`dash-sel-sess-${session.id || 's'}-${idx}`} className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 relative overflow-hidden">
                       <div className={`absolute top-0 bottom-0 left-0 w-1.5 ${sched?.color || 'bg-[#1e4da1]'}`}></div>
                       <div className="w-8 h-8 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center text-[#1e4da1] dark:text-blue-400 shrink-0 shadow-sm ml-2">
                         {gym ? <Building2 size={14} /> : ((session.studentIds?.length || 0) > 0 ? <Users size={14} /> : <User size={14} />)}
@@ -339,7 +339,7 @@ export const CalendarView = memo(({ sessions, classTypes, gyms, month, year, sch
                   const isSchedulePast = schedCheckDate < schedToday;
 
                   return (
-                     <div key={schedule.id || `sel-sched-${idx}`} className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 relative overflow-hidden opacity-70">
+                     <div key={`dash-sel-sched-${schedule.id || 'sc'}-${idx}`} className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800 relative overflow-hidden opacity-70">
                         <div className={`absolute top-0 bottom-0 left-0 w-1.5 ${schedule.color || 'bg-[#1e4da1]'}`}></div>
                         <div className="w-8 h-8 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center shrink-0 shadow-sm ml-2 text-slate-400">
                           <Clock size={14} />
