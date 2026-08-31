@@ -28,6 +28,9 @@
     "noEmit": true
   },
   "exclude": [
+    "dist",
+    "node_modules",
+    "android",
     "supabase/functions"
   ]
 }
