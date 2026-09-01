@@ -929,7 +929,7 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                 <img src={profileForm.logo} alt="Logo" className="w-16 h-16 rounded-2xl object-cover border-2 shadow-sm" />
               ) : (
                 <div className="w-16 h-16 bg-[#1e4da1] rounded-2xl flex items-center justify-center text-white italic font-black text-xl">
-                  {isOwner ? 'JF' : (profileForm.businessName?.substring(0, 2).toUpperCase() || 'C')}
+                  {isOwner ? 'JF' : ((profileForm.name || profileForm.businessName || 'Coach')?.substring(0, 2).toUpperCase())}
                 </div>
               )}
               <div>
@@ -962,7 +962,12 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                 <>
                   <div className="space-y-1">
                     <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Coach Name</label>
-                    <input placeholder="NAME" value={profileForm.businessName} onChange={e => setProfileForm({ ...profileForm, businessName: e.target.value })} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
+                    <input 
+                      placeholder="NAME" 
+                      value={profileForm.name ?? profileForm.businessName ?? ''} 
+                      onChange={e => setProfileForm({ ...profileForm, name: e.target.value, businessName: e.target.value })} 
+                      className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" 
+                    />
                   </div>
                   <div className="space-y-1">
                     <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Username (Login Handle)</label>
@@ -985,11 +990,30 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
               
               <div className="space-y-3">
                 <p className="text-[9px] font-black uppercase tracking-widest text-[#1e4da1] dark:text-blue-400 mt-2">Personal Bank Account</p>
-                <input placeholder="PERSONAL BANK" value={profileForm.bankName} onChange={e => setProfileForm({ ...profileForm, bankName: e.target.value })} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
-                <input placeholder="PERSONAL ACC NUMBER" value={profileForm.accountNumber} onChange={e => setProfileForm({ ...profileForm, accountNumber: e.target.value })} className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
+                <input 
+                  placeholder="PERSONAL BANK" 
+                  value={profileForm.bankName || ''} 
+                  onChange={e => setProfileForm({ ...profileForm, bankName: e.target.value })} 
+                  className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" 
+                />
+                <input 
+                  placeholder="PERSONAL ACC NUMBER" 
+                  value={profileForm.accountNumber || ''} 
+                  onChange={e => setProfileForm({ ...profileForm, accountNumber: e.target.value })} 
+                  className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" 
+                />
                 <div className="grid grid-cols-2 gap-3">
-                  <input placeholder="BRANCH" value={profileForm.branchCode} onChange={e => setProfileForm({ ...profileForm, branchCode: e.target.value })} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" />
-                  <select value={profileForm.accountType} onChange={e => setProfileForm({ ...profileForm, accountType: e.target.value })} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none">
+                  <input 
+                    placeholder="BRANCH" 
+                    value={profileForm.branchCode || ''} 
+                    onChange={e => setProfileForm({ ...profileForm, branchCode: e.target.value })} 
+                    className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" 
+                  />
+                  <select 
+                    value={profileForm.accountType || 'Current'} 
+                    onChange={e => setProfileForm({ ...profileForm, accountType: e.target.value })} 
+                    className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200 appearance-none"
+                  >
                     <option value="Current" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Current</option>
                     <option value="Savings" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Savings</option>
                     <option value="Transact" className="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100">Transact</option>

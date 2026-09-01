@@ -1059,39 +1059,60 @@ const App: React.FC = () => {
 
           mappedProfile = {
             ...INITIAL_PROFILE,
+            id: user.id,
             name: staffP.name || undefined,
             username: staffP.username || undefined,
-            businessName: coachOwnerP?.business_name || INITIAL_PROFILE.businessName,
+            businessName: staffP.name || coachOwnerP?.business_name || INITIAL_PROFILE.businessName,
             logo: coachOwnerP?.logo || INITIAL_PROFILE.logo,
+            bankName: staffP.bank_name || '',
+            accountNumber: staffP.account_number || '',
+            branchCode: staffP.branch_code || '',
+            accountType: staffP.account_type || 'Current',
             role: 'coach',
             owner_id: staffP.owner_id,
             pay_rate: staffP.pay_rate,
             email: staffP.email || user.email,
             can_view_tumbling: canViewTumbling,
             can_view_school_gyms: staffP.can_view_school_gyms ?? false,
-            assigned_cheer_org_ids: assignedCheerOrgIds,
-            id: user.id
+            assigned_cheer_org_ids: assignedCheerOrgIds
           };
 
           // Load the coach's colleagues so they can pick who coached WITH them,
-          // exactly as the owner can. Name and id ONLY — deliberately no pay
-          // rates or banking details, since a coach must not see what their
-          // colleagues earn.
+          // exactly as the owner can. Include the current coach with their details.
           const { data: siblingStaff } = await supabase
             .from('staff_profiles')
-            .select('id, name, status')
+            .select('id, name, username, status, bank_name, account_number, branch_code, account_type')
             .eq('owner_id', staffP.owner_id)
             .eq('status', 'approved');
 
-          if (siblingStaff) {
-            staffList = siblingStaff.map((s: any) => ({
+          const meStaff: StaffProfile = {
+            id: user.id,
+            ownerId: staffP.owner_id,
+            name: staffP.name || 'Me',
+            email: staffP.email || user.email,
+            username: staffP.username || undefined,
+            payRate: staffP.pay_rate,
+            bankName: staffP.bank_name || '',
+            accountNumber: staffP.account_number || '',
+            branchCode: staffP.branch_code || '',
+            accountType: staffP.account_type || 'Current',
+            status: staffP.status || 'approved',
+            canViewTumbling: canViewTumbling,
+            assignedCheerOrgIds: assignedCheerOrgIds
+          };
+
+          const others = (siblingStaff || [])
+            .filter((s: any) => s.id !== user.id)
+            .map((s: any) => ({
               id: s.id,
               name: s.name,
+              username: s.username || undefined,
               status: s.status || 'approved',
               canViewTumbling: false,
               assignedCheerOrgIds: []
             })) as StaffProfile[];
-          }
+
+          staffList = [meStaff, ...others];
         } else {
           // ── FIRST SIGN-IN PROVISIONING ────────────────────────────────────
           // No owner_profiles row and no staff_profiles row. Either this is a
@@ -1941,18 +1962,78 @@ const App: React.FC = () => {
 
       if (pErr) { alert("Owner Profile Save Error: " + pErr.message); return; }
     } else {
+      const coachName = (profile.name || profile.businessName || '').trim();
       const coachUpdateData: any = {
-        name: profile.name || profile.businessName,
-        bank_name: profile.bankName,
-        account_number: profile.accountNumber,
-        branch_code: profile.branchCode,
-        account_type: profile.accountType
+        name: coachName,
+        bank_name: (profile.bankName || '').trim(),
+        account_number: (profile.accountNumber || '').trim(),
+        branch_code: (profile.branchCode || '').trim(),
+        account_type: profile.accountType || 'Current'
       };
       if (profile.username !== undefined) {
-        coachUpdateData.username = profile.username.trim().replace(/^@/, '').toLowerCase() || null;
+        coachUpdateData.username = profile.username ? profile.username.trim().replace(/^@/, '').toLowerCase() : null;
       }
-      const { error: sErr } = await supabase.from('staff_profiles').update(coachUpdateData).eq('id', user.id);
-      if (sErr) { alert("Coach Profile Save Error: " + sErr.message); return; }
+
+      let { error: sErr } = await supabase
+        .from('staff_profiles')
+        .update(coachUpdateData)
+        .eq('id', user.id);
+
+      // Tolerate legacy schemas missing columns
+      if (sErr) {
+        const missing = ['account_type', 'username', 'branch_code', 'bank_name', 'account_number', 'name']
+          .filter(col => sErr!.message.includes(col));
+        if (missing.length > 0) {
+          missing.forEach(col => delete coachUpdateData[col]);
+          const retry = await supabase.from('staff_profiles').update(coachUpdateData).eq('id', user.id);
+          sErr = retry.error;
+          if (!sErr) {
+            alert(`Coach profile saved, but columns (${missing.join(', ')}) need updating in Supabase. Run update_staff_profiles_schema.sql in your Supabase SQL Editor.`);
+          }
+        }
+      }
+
+      if (sErr) { 
+        console.error("Coach Profile Save Error:", sErr);
+        alert("Coach Profile Save Error: " + sErr.message); 
+        return; 
+      }
+
+      // Sync auth metadata for username login if applicable
+      try {
+        await supabase.auth.updateUser({
+          data: {
+            jflips_name: coachName,
+            jflips_username: coachUpdateData.username
+          }
+        });
+      } catch (authErr) {
+        console.warn('Could not sync user metadata:', authErr);
+      }
+
+      // Update state locally immediately
+      setState(prev => ({
+        ...prev,
+        profile: {
+          ...prev.profile,
+          name: coachName || prev.profile.name,
+          businessName: coachName || prev.profile.businessName,
+          username: coachUpdateData.username || prev.profile.username,
+          bankName: coachUpdateData.bank_name ?? prev.profile.bankName,
+          accountNumber: coachUpdateData.account_number ?? prev.profile.accountNumber,
+          branchCode: coachUpdateData.branch_code ?? prev.profile.branchCode,
+          accountType: coachUpdateData.account_type ?? prev.profile.accountType
+        },
+        staff: prev.staff.map(s => s.id === user.id ? {
+          ...s,
+          name: coachName || s.name,
+          username: coachUpdateData.username || s.username,
+          bankName: coachUpdateData.bank_name ?? s.bankName,
+          accountNumber: coachUpdateData.account_number ?? s.accountNumber,
+          branchCode: coachUpdateData.branch_code ?? s.branchCode,
+          accountType: coachUpdateData.account_type ?? s.accountType
+        } : s)
+      }));
     }
 
     loadCloudData(true);
@@ -9131,7 +9212,13 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                                 const coachId = coachTarget.coachId;
                                 const orgId = coachTarget.orgId;
                                 const coach = state.staff.find(s => s.id === coachId)
-                                  || (coachId === state.profile.id ? { name: state.profile.name || 'Owner' } as any : null);
+                                  || (coachId === state.profile.id ? { 
+                                       name: state.profile.name || state.profile.businessName || 'Coach',
+                                       bankName: state.profile.bankName,
+                                       accountNumber: state.profile.accountNumber,
+                                       branchCode: state.profile.branchCode,
+                                       accountType: state.profile.accountType
+                                     } as any : null);
                                 const orgGym = orgId ? state.gyms.find(gym => gym.id === orgId) : null;
 
                                 if (orgGym) {
@@ -9255,7 +9342,16 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                                 // Both of these were wrong, which is why every
                                 // coach invoice used to print the owner's bank.
                                 const bankTarget = coachTargetFor(selectedGroup);
-                                const coach: any = bankTarget ? state.staff.find(s => s.id === bankTarget.coachId) : null;
+                                const coach: any = bankTarget 
+                                  ? (state.staff.find(s => s.id === bankTarget.coachId)
+                                     || (bankTarget.coachId === state.profile.id ? { 
+                                          name: state.profile.name || state.profile.businessName || 'Coach',
+                                          bankName: state.profile.bankName,
+                                          accountNumber: state.profile.accountNumber,
+                                          branchCode: state.profile.branchCode,
+                                          accountType: state.profile.accountType
+                                        } : null))
+                                  : null;
 
                                 // One resolver for the whole app, so the PDF, the
                                 // PNG and the on-screen invoice can never print
