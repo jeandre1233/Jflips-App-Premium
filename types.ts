@@ -119,6 +119,10 @@ export interface HistoryMonth {
   schoolsCoachPay?: number;
   gymsGross?: number;
   gymsNet?: number;
+  /** Merchandise sold in this month, and what those goods cost you. */
+  merchGross?: number;
+  merchCost?: number;
+  merchNet?: number;
   totalGross?: number;
   totalCoachPayout?: number;
   netProfit?: number;
@@ -267,6 +271,83 @@ export interface Payment {
   is_expense?: boolean; // True if this is a payment TO a coach
 }
 
+// ── MERCHANDISE ─────────────────────────────────────────────────────────────
+
+/** One thing you sell. The catalogue, edited in Setup → Merchandise. */
+export interface MerchItem {
+  id: string;
+  name: string;
+  description?: string;
+  price: number;
+  /** What it costs you. Only used for merch margin reporting. */
+  cost_price?: number;
+  /** Size options offered, e.g. ['S','M','L']. Empty means the item is sizeless. */
+  sizes?: string[];
+  active?: boolean;
+  created_at?: string;
+}
+
+/**
+ * A bill-to person who exists nowhere else in the app — a parent who only ever
+ * bought a shirt, a walk-in, a sponsor. This is what lets an invoice be made
+ * out to a specific person who is not a registered athlete or gym.
+ */
+export interface MerchClient {
+  id: string;
+  name: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  notes?: string;
+  created_at?: string;
+}
+
+export type MerchBillToKind = 'athlete' | 'gym' | 'external';
+export type MerchOrderStatus = 'ordered' | 'delivered' | 'cancelled';
+
+/** One thing ordered by one client. Becomes one line on their invoice. */
+export interface MerchOrder {
+  id: string;
+  /**
+   * The invoice this bills to, resolved exactly like a session's client line:
+   * an athlete's groupKey (or their own id when unlinked), a gym / cheer-org
+   * id, or a MerchClient id. `bill_to_kind` says which.
+   */
+  bill_to_id: string;
+  bill_to_kind: MerchBillToKind;
+  item_id?: string;
+  /**
+   * Name, price and cost are SNAPSHOTS taken when the order was placed.
+   * Re-pricing the catalogue next season must never rewrite an invoice that
+   * has already been sent — the same reason payments.client_name exists.
+   */
+  item_name: string;
+  unit_price: number;
+  unit_cost?: number;
+  qty: number;
+  size?: string;
+  order_date: string;
+  status: MerchOrderStatus;
+  /**
+   * Null while the order sits on the live invoice. Stamped with the billing
+   * month key (e.g. "March 2026") when that client's invoice is reset, which
+   * is what takes it off the active invoice without deleting the record.
+   */
+  invoiced_month?: string | null;
+  notes?: string;
+  created_at?: string;
+}
+
+/**
+ * Which invoice a student's charges bill to — their family group when they are
+ * linked to siblings, otherwise themselves. ONE resolver, used by both the
+ * pricing engine and the merch order form, so a shirt can never land on an
+ * invoice id that the athlete's sessions don't also use.
+ */
+export function resolveBillToId(student: Pick<Student, 'id' | 'groupKey'>): string {
+  return student.groupKey || student.id;
+}
+
 export interface Skill {
   id: string;
   name: string;
@@ -331,6 +412,9 @@ export interface AppState {
   notifications: AppNotification[];
   pendingSyncCount: number;
   cheerRegistrations?: any[];
+  merchItems: MerchItem[];
+  merchClients: MerchClient[];
+  merchOrders: MerchOrder[];
 }
 
 export enum View {

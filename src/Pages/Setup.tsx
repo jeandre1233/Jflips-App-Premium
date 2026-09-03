@@ -23,7 +23,9 @@ import {
   Download,
   Zap,
   Key,
-  Copy
+  Copy,
+  ShoppingBag,
+  Package
 } from 'lucide-react';
 import { 
   AppState, 
@@ -32,7 +34,8 @@ import {
   Gym, 
   ClassType, 
   ClassSchedule,
-  StaffProfile 
+  StaffProfile,
+  MerchItem
 } from '../../types';
 import { supabase } from '../../supabase';
 import { 
@@ -492,10 +495,35 @@ const StaffManagementSection: React.FC<{
   );
 };
 
-export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onEntityTypeChange, onUpdateProfile, onAddStudent, onEditStudent, onRemoveStudent, onAddGym, onEditGym, onRemoveGym, onAddClass, onEditClass, onRemoveClass, isStudentLinked, onAddSchedule, onEditSchedule, onRemoveSchedule, onLogout, onRefreshStaff }: {
+export const RosterView = memo(({ 
+  state, 
+  activeTab, 
+  onTabChange, 
+  entityType, 
+  onEntityTypeChange, 
+  onUpdateProfile, 
+  onAddStudent, 
+  onEditStudent, 
+  onRemoveStudent, 
+  onAddGym, 
+  onEditGym, 
+  onRemoveGym, 
+  onAddClass, 
+  onEditClass, 
+  onRemoveClass, 
+  isStudentLinked, 
+  onAddSchedule, 
+  onEditSchedule, 
+  onRemoveSchedule, 
+  onLogout, 
+  onRefreshStaff,
+  onAddMerchItem,
+  onEditMerchItem,
+  onRemoveMerchItem
+}: {
   state: AppState,
-  activeTab: 'students' | 'classes' | 'schedule' | 'staff' | 'profile',
-  onTabChange: (tab: 'students' | 'classes' | 'schedule' | 'staff' | 'profile') => void,
+  activeTab: 'students' | 'classes' | 'schedule' | 'staff' | 'merch' | 'profile',
+  onTabChange: (tab: 'students' | 'classes' | 'schedule' | 'staff' | 'merch' | 'profile') => void,
   entityType: 'athletes' | 'gyms' | 'teams',
   onEntityTypeChange: (type: 'athletes' | 'gyms' | 'teams') => void,
   onUpdateProfile: (p: Profile) => void,
@@ -513,7 +541,10 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
   onEditSchedule: (s: ClassSchedule) => void,
   onRemoveSchedule: (id: string) => void,
   onLogout: () => void,
-  onRefreshStaff?: () => void
+  onRefreshStaff?: () => void,
+  onAddMerchItem?: () => void,
+  onEditMerchItem?: (item: MerchItem) => void,
+  onRemoveMerchItem?: (id: string) => void
 }) => {
   const [search, setSearch] = useState('');
   const [profileForm, setProfileForm] = useState<Profile>(state.profile);
@@ -695,7 +726,7 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
   };
 
   const tabs = isOwner 
-    ? (['students', 'classes', 'schedule', 'staff', 'profile'] as const)
+    ? (['students', 'classes', 'schedule', 'staff', 'merch', 'profile'] as const)
     : (['students', 'classes', 'schedule', 'profile'] as const);
 
   const [athleteFilter, setAthleteFilter] = useState<'all' | 'regular' | 'temp'>('all');
@@ -944,7 +975,7 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
       <div className="flex bg-slate-100/50 dark:bg-slate-800/40 p-1 rounded-xl relative overflow-x-auto no-scrollbar">
         {tabs.map((tab, idx) => (
           <button key={`${tab}-${idx}`} onClick={() => onTabChange(tab)} className={`flex-1 min-w-[55px] py-3 rounded-lg font-black text-[8px] uppercase tracking-widest transition-colors duration-300 relative z-10 ${activeTab === tab ? 'text-white' : 'text-[#94a3b8]'}`}>
-            {tab === 'students' ? 'Clients' : tab === 'schedule' ? 'Sched' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === 'students' ? 'Clients' : tab === 'schedule' ? 'Sched' : tab === 'merch' ? 'Merch' : tab.charAt(0).toUpperCase() + tab.slice(1)}
             {activeTab === tab && <motion.div layoutId="rosterTabBg" className="absolute inset-0 bg-[#1e4da1] dark:bg-blue-600 rounded-lg shadow-md -z-10" transition={{ type: "spring", bounce: 0.2, duration: 0.5 }} />}
           </button>
         ))}
@@ -1236,6 +1267,65 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                   {isOwner && (
                     <div className="flex gap-1.5 shrink-0">
                       <button onClick={(e) => { e.stopPropagation(); onRemoveClass(item.id); }} aria-label="Remove Class" className="p-2.5 bg-slate-50 dark:bg-slate-700 rounded-lg text-[#94a3b8] hover:text-red-500 active:scale-90"><Trash2 size={14} /></button>
+                    </div>
+                  )}
+                </motion.div>
+              ))}
+            </motion.div>
+          </div>
+        ) : activeTab === 'merch' ? (
+          <div className="space-y-4">
+            <div className="flex justify-between items-center mb-1">
+              <div>
+                <h2 className="text-2xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">Merchandise</h2>
+                <p className="text-[8px] font-black text-[#94a3b8] uppercase">Apparel & Gear Catalogue</p>
+              </div>
+              {isOwner && onAddMerchItem && (
+                <motion.button whileTap={{ scale: 0.8 }} onClick={onAddMerchItem} className="w-10 h-10 bg-[#1e4da1] text-white rounded-xl flex items-center justify-center shadow-lg">
+                  <Plus size={20} strokeWidth={3} />
+                </motion.button>
+              )}
+            </div>
+
+            <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-3 pb-20">
+              {(!state.merchItems || state.merchItems.length === 0) ? (
+                <div className="py-12 bg-white dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 rounded-3xl text-center">
+                  <Package className="mx-auto text-slate-300 dark:text-slate-600 mb-2" size={32} />
+                  <p className="text-slate-400 text-[10px] font-black uppercase">No Merchandise in Catalogue</p>
+                  {isOwner && onAddMerchItem && (
+                    <button onClick={onAddMerchItem} className="mt-3 text-[9px] font-black text-[#1e4da1] dark:text-blue-400 uppercase underline">
+                      + Add First Item
+                    </button>
+                  )}
+                </div>
+              ) : (state.merchItems || []).map((item, idx) => (
+                <motion.div
+                  key={`merch-cat-${item.id}-${idx}`}
+                  variants={athleteItemVariants}
+                  onClick={isOwner && onEditMerchItem ? () => onEditMerchItem(item) : undefined}
+                  className="p-4 bg-white dark:bg-slate-800/60 border border-slate-50 dark:border-slate-800 rounded-2xl flex items-center justify-between shadow-sm cursor-pointer hover:border-blue-200 dark:hover:border-blue-900 transition-colors"
+                >
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm italic shrink-0 bg-[#eff6ff] dark:bg-blue-900/30 text-[#1e4da1] dark:text-blue-400">
+                      <ShoppingBag size={20} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">{item.name}</p>
+                        {item.sizes && item.sizes.length > 0 && (
+                          <span className="text-[8px] font-bold text-slate-400 uppercase bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                            {item.sizes.join(', ')}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[8px] text-[#94a3b8] font-bold uppercase">
+                        R{item.price} {item.cost_price ? `• Cost R${item.cost_price}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                  {isOwner && onRemoveMerchItem && (
+                    <div className="flex gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <button onClick={() => onRemoveMerchItem(item.id)} aria-label="Remove Item" className="p-2.5 bg-slate-50 dark:bg-slate-700 rounded-lg text-[#94a3b8] hover:text-red-500 active:scale-90"><Trash2 size={14} /></button>
                     </div>
                   )}
                 </motion.div>

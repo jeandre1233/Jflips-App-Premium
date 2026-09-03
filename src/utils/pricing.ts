@@ -97,6 +97,8 @@ import {
   ClassType,
   Gym,
   Student,
+  MerchOrder,
+  MerchClient,
   getStudentSessionPrice
 } from '../../types';
 
@@ -141,19 +143,23 @@ export interface PricingContext {
    * until the owner sets a value.
    */
   siblingDiscount?: number;
+  merchOrders?: MerchOrder[];
+  merchClients?: MerchClient[];
 }
 
-/** One charge on a client-facing invoice (family, tumbling gym, or school). */
+/** One charge on a client-facing invoice (family, tumbling gym, school, or merch). */
 export interface PricedClientLine {
   sessionId: string;
   groupId: string;
   date: string;
-  /** family_id this bills to: a groupKey, a student id, a gym id, or an org id. */
+  /** family_id this bills to: a groupKey, a student id, a gym id, an org id, or merchClient id. */
   billToId: string;
   targetName: string;
   description: string;
   amount: number;
-  kind: 'class' | 'gym' | 'cheer';
+  costAmount?: number;
+  qty?: number;
+  kind: 'class' | 'gym' | 'cheer' | 'merch';
   /** Who coached it — shown under the line so a split total can be audited. */
   coachNames?: string[];
   /** Invoice month this belongs to, after applying the gym's billing day. */
@@ -561,6 +567,12 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
     }
   }
 
+  // ── MERCHANDISE ───────────────────────────────────────────────────────────
+  if (ctx.merchOrders && ctx.merchOrders.length > 0) {
+    const merchLines = priceMerch(ctx);
+    clientLines.push(...merchLines);
+  }
+
   const byDate = (a: { date: string }, b: { date: string }) =>
     new Date(a.date).getTime() - new Date(b.date).getTime();
 
@@ -568,6 +580,97 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
   coachLines.sort(byDate);
 
   return { clientLines, coachLines };
+}
+
+/**
+ * Filter orders that are active and not yet invoiced/archived.
+ */
+export function openMerchOrders(orders: MerchOrder[] = []): MerchOrder[] {
+  return (orders || []).filter(o => o && o.status !== 'cancelled' && !o.invoiced_month);
+}
+
+/**
+ * Filter orders that were stamped with a specific billing month key upon archive/reset.
+ */
+export function merchOrdersForMonth(orders: MerchOrder[] = [], monthKey: string): MerchOrder[] {
+  return (orders || []).filter(o => o && o.status !== 'cancelled' && o.invoiced_month === monthKey);
+}
+
+/**
+ * Price merchandise orders into client lines. Merchandise orders never create coach lines.
+ */
+export function priceMerch(ctx: PricingContext): PricedClientLine[] {
+  const orders = ctx.merchOrders || [];
+  const lines: PricedClientLine[] = [];
+
+  for (const order of orders) {
+    if (!order || order.status === 'cancelled') continue;
+
+    const qty = positive(order.qty, 1);
+    const amount = money(num(order.unit_price, 0) * qty);
+    const costAmount = money(num(order.unit_cost, 0) * qty);
+
+    let description = order.item_name || 'Merchandise';
+    if (order.size) {
+      description += ` (Size ${order.size})`;
+    }
+    if (qty > 1) {
+      description += ` × ${qty}`;
+    }
+
+    // Resolve targetName
+    let targetName = '';
+    if (order.bill_to_kind === 'athlete') {
+      const matching = (ctx.students || []).filter(
+        s => (s.groupKey && s.groupKey === order.bill_to_id) || s.id === order.bill_to_id
+      );
+      if (matching.length > 0) {
+        targetName = matching.map(m => m.name).join(' & ');
+      }
+    } else if (order.bill_to_kind === 'external') {
+      const ext = (ctx.merchClients || []).find(c => c.id === order.bill_to_id);
+      if (ext) targetName = ext.name;
+    } else if (order.bill_to_kind === 'gym') {
+      const gym = (ctx.gyms || []).find(g => g.id === order.bill_to_id);
+      if (gym) targetName = gym.name;
+    }
+
+    if (!targetName) {
+      const ext = (ctx.merchClients || []).find(c => c.id === order.bill_to_id);
+      if (ext) {
+        targetName = ext.name;
+      } else {
+        const student = (ctx.students || []).find(s => s.id === order.bill_to_id || s.groupKey === order.bill_to_id);
+        if (student) {
+          const matching = (ctx.students || []).filter(s => (s.groupKey && s.groupKey === order.bill_to_id) || s.id === order.bill_to_id);
+          targetName = matching.map(m => m.name).join(' & ');
+        } else {
+          const gym = (ctx.gyms || []).find(g => g.id === order.bill_to_id);
+          targetName = gym ? gym.name : (order.bill_to_id || 'Client');
+        }
+      }
+    }
+
+    const bm = billingMonthFor(order.order_date);
+
+    lines.push({
+      sessionId: order.id,
+      groupId: `merch:${order.id}`,
+      date: order.order_date,
+      billToId: order.bill_to_id,
+      targetName,
+      description,
+      amount,
+      costAmount,
+      qty,
+      kind: 'merch',
+      billingMonthKey: bm.key,
+      billingMonthName: bm.monthName,
+      billingYear: bm.year
+    });
+  }
+
+  return lines;
 }
 
 /** Total of a set of lines, safe against float drift. */
@@ -596,6 +699,13 @@ export interface CycleFinancials {
     sessionCount: number;
     hoursCoached: number;
   };
+  merch: {
+    grossRevenue: number;
+    costOfGoods: number;
+    netProfit: number;
+    unitsSold: number;
+    orderCount: number;
+  };
   totals: {
     grossInvoiced: number;
     totalCoachPayout: number;
@@ -607,7 +717,7 @@ export interface CycleFinancials {
     groupId: string;
     date: string;
     title: string;
-    category: 'tumbling' | 'schools' | 'gyms';
+    category: 'tumbling' | 'schools' | 'gyms' | 'merch';
     grossAmount: number;
     coachCost: number;
     netAmount: number;
@@ -687,6 +797,13 @@ export function calculateCycleFinancials(
   });
   const gymsHours = money(gymSessionsFiltered.reduce((acc, s) => acc + positive(s.hours_coached, 1), 0));
 
+  // 4. Merchandise
+  const merchClientLines = clientLines.filter(l => l.kind === 'merch');
+  const merchGross = sumLines(merchClientLines);
+  const merchCost = money(merchClientLines.reduce((acc, l) => acc + num(l.costAmount, 0), 0));
+  const merchNet = money(merchGross - merchCost);
+  const merchUnits = merchClientLines.reduce((acc, l) => acc + (l.qty || 1), 0);
+
   // Itemized breakdown per group
   const allGroupIds = Array.from(new Set([...tumblingGroupIds, ...schoolsGroupIds, ...gymsGroupIds]));
   const itemized: CycleFinancials['itemized'] = [];
@@ -736,12 +853,26 @@ export function calculateCycleFinancials(
     });
   });
 
+  merchClientLines.forEach(ml => {
+    itemized.push({
+      id: ml.groupId,
+      groupId: ml.groupId,
+      date: ml.date,
+      title: ml.description,
+      category: 'merch',
+      grossAmount: ml.amount,
+      coachCost: ml.costAmount || 0,
+      netAmount: money(ml.amount - (ml.costAmount || 0)),
+      subtext: `${ml.targetName} • Cost R${ml.costAmount || 0}`
+    });
+  });
+
   itemized.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   // Totals
-  const totalGrossInvoiced = money(tumblingGross + schoolsGross + gymsGross);
+  const totalGrossInvoiced = money(tumblingGross + schoolsGross + gymsGross + merchGross);
   const totalCoachPayout = money(tumblingCoachCost + schoolsCoachPay);
-  const netCycleRevenue = money(tumblingNet + gymsNet); // + schoolsNet which is 0
+  const netCycleRevenue = money(tumblingNet + gymsNet + merchNet);
   const totalSessions = tumblingGroupIds.size + schoolsGroupIds.size + gymsGroupIds.size;
 
   return {
@@ -764,6 +895,13 @@ export function calculateCycleFinancials(
       netProfit: gymsNet,
       sessionCount: gymsGroupIds.size,
       hoursCoached: gymsHours
+    },
+    merch: {
+      grossRevenue: merchGross,
+      costOfGoods: merchCost,
+      netProfit: merchNet,
+      unitsSold: merchUnits,
+      orderCount: merchClientLines.length
     },
     totals: {
       grossInvoiced: totalGrossInvoiced,

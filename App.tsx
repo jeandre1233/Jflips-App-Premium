@@ -21,6 +21,8 @@ import {
   LayoutDashboard,
   Plus,
   X,
+  ShoppingBag,
+  Package,
   Trash2,
   Pencil,
   ChevronRight,
@@ -78,7 +80,7 @@ import {
   Globe,
   Link
 } from 'lucide-react';
-import { View, Student, Gym, ClassType, AttendanceSession, AppState, HistoryMonth, Profile, Payment, ClassSchedule, InvoiceSnapshot, AppNotification, Competition, getStudentSessionPrice, StaffProfile, OwnerProfile } from './types';
+import { View, Student, Gym, ClassType, AttendanceSession, AppState, HistoryMonth, Profile, Payment, ClassSchedule, InvoiceSnapshot, AppNotification, Competition, getStudentSessionPrice, StaffProfile, OwnerProfile, MerchItem, MerchClient, MerchOrder, MerchOrderStatus, MerchBillToKind, resolveBillToId } from './types';
 import { toPng } from 'html-to-image';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
@@ -99,8 +101,11 @@ const NativeNotification = registerPlugin<NativeNotificationPlugin>('NativeNotif
 import { useNetworkStatus } from './src/hooks/useNetworkStatus';
 import ShareSignupLink from './src/components/ShareSignupLink';
 import { QuickLogModal } from './src/components/QuickLogModal';
+import { MerchOrderModal } from './src/components/MerchOrderModal';
+import type { MerchOrderDraft } from './src/components/MerchOrderModal';
+import { MerchItemModal } from './src/components/MerchItemModal';
 import { addToQueue, getPendingItems, updateItemStatus, deleteSyncedItems } from './src/utils/offlineQueue';
-import { priceSessions, sumLines, billingMonthFor } from './src/utils/pricing';
+import { priceSessions, priceMerch, openMerchOrders, merchOrdersForMonth, sumLines, billingMonthFor } from './src/utils/pricing';
 import type { PricingContext } from './src/utils/pricing';
 import {
   computeMonthTotals,
@@ -363,7 +368,10 @@ const INITIAL_STATE: AppState = {
   snapshots: [],
   notifications: [],
   pendingSyncCount: 0,
-  cheerRegistrations: []
+  cheerRegistrations: [],
+  merchItems: [],
+  merchClients: [],
+  merchOrders: []
 };
 
 // --- ANIMATION VARIANTS ---
@@ -758,7 +766,7 @@ const App: React.FC = () => {
   const [dbError, setDbError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState<string | null>(null);
   const [isResetConfirming, setIsResetConfirming] = useState(false);
-  const [resetConfirmation, setResetConfirmation] = useState<{ familyId: string, label: string } | null>(null);
+  const [resetConfirmation, setResetConfirmation] = useState<{ familyId: string, label: string, mode: 'coaching' | 'merch' } | null>(null);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [archiveMonth, setArchiveMonth] = useState<string>(MONTHS[new Date().getMonth()]);
   const [archiveYear, setArchiveYear] = useState<number>(new Date().getFullYear());
@@ -779,7 +787,15 @@ const App: React.FC = () => {
   const [initialCoachId, setInitialCoachId] = useState<string | null>(null);
   const [initialAthleteIds, setInitialAthleteIds] = useState<string[]>([]);
   const [quickLogModalData, setQuickLogModalData] = useState<{ classIds: string[], date: string, coachId?: string, athleteIds?: string[] } | null>(null);
-  const [rosterTab, setRosterTab] = useState<'students' | 'classes' | 'schedule' | 'staff' | 'profile'>('students');
+  /**
+   * Open merch order form. `fixedBillTo` is set when it was opened from inside
+   * one client's invoice, so the client cannot accidentally be changed; opened
+   * from the invoice list it is null and the form asks who to bill.
+   */
+  const [merchOrderModal, setMerchOrderModal] = useState<{ fixedBillTo?: { id: string; kind: MerchBillToKind; label: string } } | null>(null);
+  const [showMerchItemModal, setShowMerchItemModal] = useState(false);
+  const [editingMerchItem, setEditingMerchItem] = useState<MerchItem | null>(null);
+  const [rosterTab, setRosterTab] = useState<'students' | 'classes' | 'schedule' | 'staff' | 'merch' | 'profile'>('students');
   const [rosterEntityType, setRosterEntityType] = useState<'athletes' | 'gyms' | 'teams'>('athletes');
   const isOwner = state.profile.role === 'owner';
 
@@ -1220,7 +1236,7 @@ const App: React.FC = () => {
         return { data: [...tumblingStudents, ...teamAthletes], error: null };
       };
 
-      const [studentsRes, gymsRes, classesRes, sessionsRes, historyRes, paymentsRes, schedulesRes, snapshotsRes, notificationsRes, competitionsRes, cheerRegistrationsRes] = await Promise.all([
+      const [studentsRes, gymsRes, classesRes, sessionsRes, historyRes, paymentsRes, schedulesRes, snapshotsRes, notificationsRes, competitionsRes, cheerRegistrationsRes, merchItemsRes, merchClientsRes, merchOrdersRes] = await Promise.all([
         fetchStudents(),
         supabase.from('gyms').select('*').eq('user_id', targetUserId),
         supabase.from('class_types').select('*').eq('user_id', targetUserId),
@@ -1231,9 +1247,15 @@ const App: React.FC = () => {
         supabase.from('invoice_snapshots').select('*').eq('coach_id', user.id).order('created_at', { ascending: false }),
         supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20),
         supabase.from('competitions').select('*').eq('user_id', targetUserId).order('date', { ascending: true }),
-        supabase.from('cheer_registrations').select('*').eq('user_id', targetUserId).order('created_at', { ascending: false })
+        supabase.from('cheer_registrations').select('*').eq('user_id', targetUserId).order('created_at', { ascending: false }),
+        supabase.from('merch_items').select('*').eq('user_id', targetUserId).order('name', { ascending: true }),
+        supabase.from('merch_clients').select('*').eq('user_id', targetUserId).order('name', { ascending: true }),
+        supabase.from('merch_orders').select('*').eq('user_id', targetUserId).order('order_date', { ascending: true })
       ]);
 
+      // Merch tables are deliberately absent from this list. A project that has
+      // not run create_merch_tables.sql yet must keep working as it always did,
+      // with merch simply empty, rather than showing "Database Setup Required".
       const errors = [
         studentsRes.error,
         gymsRes.error,
@@ -1332,6 +1354,9 @@ const App: React.FC = () => {
           schoolsCoachPay: Number(h.schools_coach_pay ?? 0),
           gymsGross: Number(h.gyms_gross ?? 0),
           gymsNet: Number(h.gyms_net ?? 0),
+          merchGross: Number(h.merch_gross ?? 0),
+          merchCost: Number(h.merch_cost ?? 0),
+          merchNet: Number(h.merch_net ?? 0),
           totalGross: Number(h.total_gross ?? h.revenue ?? 0),
           totalCoachPayout: Number(h.total_coach_payout ?? 0),
           netProfit: Number(h.net_profit ?? h.revenue ?? 0),
@@ -1378,7 +1403,22 @@ const App: React.FC = () => {
           snapshot_data: sn.snapshot_data
         })),
         notifications: notificationsRes.data || [],
-        cheerRegistrations: cheerRegistrationsRes.data || []
+        cheerRegistrations: cheerRegistrationsRes.data || [],
+        merchItems: (merchItemsRes.data || []).map((m: any) => ({
+          ...m,
+          price: Number(m.price || 0),
+          cost_price: Number(m.cost_price || 0),
+          sizes: Array.isArray(m.sizes) ? m.sizes : [],
+          active: m.active !== false
+        })),
+        merchClients: merchClientsRes.data || [],
+        merchOrders: (merchOrdersRes.data || []).map((o: any) => ({
+          ...o,
+          unit_price: Number(o.unit_price || 0),
+          unit_cost: Number(o.unit_cost || 0),
+          qty: Number(o.qty || 1),
+          invoiced_month: o.invoiced_month || null
+        }))
       }));
     } catch (err: any) {
       console.error("Fetch failed", err);
@@ -1782,6 +1822,132 @@ const App: React.FC = () => {
     if (!confirm("Are you sure you want to delete this competition?")) return;
     const { error } = await supabase.from('competitions').delete().eq('id', id).eq('user_id', user.id);
     if (error) { alert("Delete Error: " + error.message); return; }
+    loadCloudData(true);
+  };
+
+  // ── MERCHANDISE ───────────────────────────────────────────────────────────
+  //  Orders, the catalogue behind them, and the external people an invoice can
+  //  be made out to. Everything here is owner-scoped; a coach never writes it.
+
+  const newMerchId = (prefix: string) =>
+    `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+  const handleSaveMerchItem = async (item: MerchItem) => {
+    if (!user) return;
+    const payload = {
+      id: item.id || newMerchId('mitem'),
+      name: item.name,
+      description: item.description || null,
+      price: Number(item.price) || 0,
+      cost_price: Number(item.cost_price) || 0,
+      sizes: item.sizes || [],
+      active: item.active !== false,
+      user_id: user.id
+    };
+    const { error } = await supabase.from('merch_items').upsert(payload);
+    if (error) { alert("Merch Item Save Error: " + error.message); return; }
+    loadCloudData(true);
+  };
+
+  const handleDeleteMerchItem = async (id: string) => {
+    if (!user) return;
+    // Orders snapshot their own name and price, so removing a catalogue item
+    // never disturbs an invoice it already appears on.
+    if (!confirm("Remove this item from your catalogue? Invoices that already list it are unaffected.")) return;
+    const { error } = await supabase.from('merch_items').delete().eq('id', id).eq('user_id', user.id);
+    if (error) { alert("Delete Error: " + error.message); return; }
+    loadCloudData(true);
+  };
+
+  const handleSaveMerchClient = async (client: MerchClient) => {
+    if (!user) return;
+    const payload = {
+      id: client.id || newMerchId('mclient'),
+      name: client.name,
+      address: client.address || null,
+      phone: client.phone || null,
+      email: client.email || null,
+      notes: client.notes || null,
+      user_id: user.id
+    };
+    const { error } = await supabase.from('merch_clients').upsert(payload);
+    if (error) { alert("Client Save Error: " + error.message); return; }
+    loadCloudData(true);
+  };
+
+  const handleDeleteMerchClient = async (id: string) => {
+    if (!user) return;
+    const openOrders = (state.merchOrders || []).filter(o => o.bill_to_id === id && !o.invoiced_month);
+    if (openOrders.length > 0) {
+      alert(`This person still has ${openOrders.length} item(s) on an open invoice. Remove those first.`);
+      return;
+    }
+    if (!confirm("Delete this merchandise client?")) return;
+    const { error } = await supabase.from('merch_clients').delete().eq('id', id).eq('user_id', user.id);
+    if (error) { alert("Delete Error: " + error.message); return; }
+    loadCloudData(true);
+  };
+
+  /**
+   * Write one order. A brand-new external person is inserted FIRST, so the
+   * order can reference a real client id — that id is also what groups their
+   * second and third purchase onto the same invoice instead of creating a
+   * duplicate client each time.
+   */
+  const handleSaveMerchOrder = async (draft: MerchOrderDraft) => {
+    if (!user) return;
+
+    let billToId = draft.order.bill_to_id;
+
+    if (draft.newClient) {
+      const clientId = newMerchId('mclient');
+      const { error: clientError } = await supabase.from('merch_clients').insert({
+        id: clientId,
+        name: draft.newClient.name,
+        address: draft.newClient.address || null,
+        phone: draft.newClient.phone || null,
+        email: draft.newClient.email || null,
+        user_id: user.id
+      });
+      if (clientError) { alert("Client Save Error: " + clientError.message); return; }
+      billToId = clientId;
+    }
+
+    if (!billToId) { alert("No client selected for this order."); return; }
+
+    const { error } = await supabase.from('merch_orders').insert({
+      id: newMerchId('morder'),
+      bill_to_id: billToId,
+      bill_to_kind: draft.order.bill_to_kind,
+      item_id: draft.order.item_id || null,
+      item_name: draft.order.item_name,
+      unit_price: draft.order.unit_price,
+      unit_cost: draft.order.unit_cost || 0,
+      qty: draft.order.qty,
+      size: draft.order.size || null,
+      order_date: draft.order.order_date,
+      status: draft.order.status,
+      invoiced_month: null,
+      notes: draft.order.notes || null,
+      user_id: user.id
+    });
+    if (error) { alert("Order Save Error: " + error.message); return; }
+    setMerchOrderModal(null);
+    loadCloudData(true);
+  };
+
+  const handleDeleteMerchOrder = async (id: string) => {
+    if (!user) return;
+    if (!confirm("Remove this item from the invoice?")) return;
+    const { error } = await supabase.from('merch_orders').delete().eq('id', id).eq('user_id', user.id);
+    if (error) { alert("Delete Error: " + error.message); return; }
+    loadCloudData(true);
+  };
+
+  const handleSetMerchOrderStatus = async (id: string, status: MerchOrderStatus) => {
+    if (!user) return;
+    const { error } = await supabase.from('merch_orders').update({ status }).eq('id', id).eq('user_id', user.id);
+    if (error) { alert("Update Error: " + error.message); return; }
     loadCloudData(true);
   };
 
@@ -2612,6 +2778,19 @@ const App: React.FC = () => {
    * same engine with the same inputs, or the two will disagree — which is what
    * this whole rework is here to prevent.
    */
+  /**
+   * MERCHANDISE IS OMITTED HERE ON PURPOSE.
+   *
+   * This context is used by the archive writer and by the reset flows, both of
+   * which price a specific SET of sessions. `priceMerch` knows nothing about
+   * that set — it returns every open order for every client — so including it
+   * would put one family's shirt on another family's archived month, and would
+   * add live orders to any archived month being recalculated.
+   *
+   * Merch belongs in a context only where the whole LIVE picture is being
+   * shown (the invoice screen, the dashboard) or where the caller handles it
+   * explicitly (`archiveMerchFor` in the reset flows).
+   */
   const buildPricingContext = useCallback((): PricingContext => ({
     gyms: state.gyms || [],
     classTypes: state.classTypes || [],
@@ -2650,6 +2829,62 @@ const App: React.FC = () => {
       staff: fillGaps(live.staff || [], snapshot.staff)
     };
   }, [buildPricingContext]);
+
+  /**
+   * Close off merchandise when a client's invoice is reset.
+   *
+   * Stamping `invoiced_month` is what takes an order off the live invoice —
+   * the pricing engine skips any order that carries one. This must run in the
+   * same action that writes the payment row, or the amount archived and the
+   * amount that was on the page will disagree.
+   *
+   * Returns what each client's merch added, per billing month, so the caller
+   * can fold it into the payment rows it is already writing.
+   *
+   * Defined here, below buildPricingContext, because it prices through it.
+   */
+  const archiveMerchFor = useCallback(async (
+    billToIds: string[],
+    fallbackMonthKey: string
+  ): Promise<Map<string, { monthKey: string; amount: number }[]>> => {
+    const out = new Map<string, { monthKey: string; amount: number }[]>();
+    if (!user) return out;
+
+    const targets = new Set(billToIds.filter(Boolean));
+    if (targets.size === 0) return out;
+
+    const open = openMerchOrders(state.merchOrders).filter(o => targets.has(o.bill_to_id));
+    if (open.length === 0) return out;
+
+    // Priced through the same engine that rendered the invoice, so the archived
+    // figure is by construction the figure the client was shown.
+    const merchLines = priceMerch({
+      ...buildPricingContext(),
+      merchOrders: open,
+      merchClients: state.merchClients || []
+    });
+
+    merchLines.forEach(line => {
+      // An order files under the month it was placed in, matching how a
+      // session's revenue is filed. fallbackMonthKey covers a dateless row.
+      const monthKey = line.billingMonthKey || fallbackMonthKey;
+      const list = out.get(line.billToId) || [];
+      const existing = list.find(e => e.monthKey === monthKey);
+      if (existing) existing.amount += line.amount;
+      else list.push({ monthKey, amount: line.amount });
+      out.set(line.billToId, list);
+    });
+
+    for (const line of merchLines) {
+      await supabase
+        .from('merch_orders')
+        .update({ invoiced_month: line.billingMonthKey || fallbackMonthKey })
+        .eq('id', line.sessionId)
+        .eq('user_id', user.id);
+    }
+
+    return out;
+  }, [user, state.merchOrders, state.merchClients, buildPricingContext]);
 
   /**
    * ════════════════════════════════════════════════════════════════════════
@@ -2731,14 +2966,38 @@ const App: React.FC = () => {
       const merged = mergeArchivedSessions(stored, group.sessions, opts.mode || 'union')
         .filter(s => !removeIds.has(s.id));
 
+      // ── Merchandise archived into this month ──────────────────────────
+      // Read from the DATABASE, not local state, for the same reason the
+      // sessions above are: the stamps were written moments ago by
+      // archiveMerchFor and local state has not reloaded yet. Reading the
+      // stamps back is also what keeps a recalculate idempotent.
+      const { data: merchRows } = await supabase.from('merch_orders')
+        .select('*')
+        .eq('user_id', ownerId)
+        .eq('invoiced_month', monthKey);
+
+      const monthMerch: MerchOrder[] = (merchRows || []).map((o: any) => ({
+        ...o,
+        unit_price: Number(o.unit_price || 0),
+        unit_cost: Number(o.unit_cost || 0),
+        qty: Number(o.qty || 1)
+      }));
+
       // ── Derive every total from that set ──────────────────────────────
       // Priced against current data, topped up from the month's own snapshot so
       // an athlete or gym deleted since the archive still prices correctly.
-      const totals = computeMonthTotals(merged, buildArchivePricingContext(existingRow?.snapshot_json));
+      const monthCtx: PricingContext = {
+        ...buildArchivePricingContext(existingRow?.snapshot_json),
+        merchOrders: monthMerch,
+        merchClients: state.merchClients || []
+      };
+      const totals = computeMonthTotals(merged, monthCtx);
 
       // A month with nothing left in it is not a month. Remove the row and its
-      // folder rather than leaving a zeroed shell in the History tab.
-      if (merged.length === 0) {
+      // folder rather than leaving a zeroed shell in the History tab. A month
+      // holding only merchandise is NOT empty — a shirt sold to someone who
+      // never attended is still revenue that has to be kept.
+      if (merged.length === 0 && monthMerch.length === 0) {
         if (existingRow) {
           await supabase.from('archived_sessions').delete().eq('user_id', ownerId).eq('month_key', monthKey);
           await supabase.from('history').delete().eq('id', existingRow.id).eq('user_id', ownerId);
@@ -2775,6 +3034,9 @@ const App: React.FC = () => {
         schools_coach_pay: totals.schoolsCoachPay,
         gyms_gross: totals.gymsGross,
         gyms_net: totals.gymsNet,
+        merch_gross: totals.merchGross,
+        merch_cost: totals.merchCost,
+        merch_net: totals.merchNet,
         total_coach_payout: totals.totalCoachPayout,
         net_profit: totals.netProfit,
         invoices_total: totals.invoicesTotal,
@@ -2795,7 +3057,7 @@ const App: React.FC = () => {
       // Tolerate a database missing the newer columns so the archive itself
       // still lands — the month is simply written without the invoice total.
       if (writeErr) {
-        const optional = ['invoices_total', 'invoice_count', 'recalculated_at'];
+        const optional = ['invoices_total', 'invoice_count', 'recalculated_at', 'merch_gross', 'merch_cost', 'merch_net'];
         if (optional.some(c => writeErr.message?.includes(c))) {
           optional.forEach(c => delete row[c]);
           if (existingRow) {
@@ -2828,7 +3090,7 @@ const App: React.FC = () => {
         }
       }
     }
-  }, [user, state.profile.role, state.profile.owner_id, state.payments, buildPricingContext, buildArchivePricingContext]);
+  }, [user, state.profile.role, state.profile.owner_id, state.payments, state.merchClients, buildPricingContext, buildArchivePricingContext]);
 
   /**
    * REDUNDANCY, DELETION SIDE
@@ -3018,7 +3280,18 @@ const App: React.FC = () => {
           snapPhone = g2.bill_to_phone || '';
         } else {
           const members = (state.students || []).filter(s => s.groupKey === famId || (s.id === famId && !s.groupKey));
-          if (members.length > 0) currentLabel = members.map(m => m.name).join(' & ');
+          if (members.length > 0) {
+            currentLabel = members.map(m => m.name).join(' & ');
+          } else {
+            // A merchandise client — on no roster, so their own record is the
+            // only place their bill-to details exist.
+            const mc = (state.merchClients || []).find(c => c.id === famId);
+            if (mc) {
+              currentLabel = mc.name;
+              snapAddress = mc.address || '';
+              snapPhone = mc.phone || '';
+            }
+          }
         }
         return { currentLabel, snapAddress, snapPhone };
       };
@@ -3038,6 +3311,12 @@ const App: React.FC = () => {
         }
         familyRevByMonth.get(famKey)!.revenue += line.amount;
       });
+
+      // MERCHANDISE IS NOT CLOSED HERE. The month-end reset closes the coaching
+      // book only. Merchandise is its own invoice with its own reset, so
+      // sweeping it up in a session archive would close an invoice the user was
+      // never looking at — and would put goods into a month-end figure the
+      // client's coaching invoice never showed.
 
       // -- Coach turn-in expense (what JFlips owes each coach) --
       // Cheer/school coach lines are deliberately NOT written as payment rows:
@@ -3272,11 +3551,26 @@ const App: React.FC = () => {
     }
   };
 
-  const resetSingleInvoice = async (familyId: string, label: string) => {
-    setResetConfirmation({ familyId, label });
+  const resetSingleInvoice = async (familyId: string, label: string, mode: 'coaching' | 'merch' = 'coaching') => {
+    setResetConfirmation({ familyId, label, mode });
   };
 
-  const executeResetSingleInvoice = async (familyId: string, label: string) => {
+  /**
+   * `mode` decides WHICH invoice is being closed, and the two are independent:
+   *
+   *   'coaching' — archives the client's sessions. Their merchandise is left
+   *                exactly where it is, because it is a separate invoice that
+   *                has not been sent or paid yet.
+   *   'merch'    — archives their merchandise only. No session is touched.
+   *
+   * Mixing the two is what would make a parent's coaching invoice change
+   * because someone bought a shirt.
+   */
+  const executeResetSingleInvoice = async (
+    familyId: string,
+    label: string,
+    mode: 'coaching' | 'merch' = 'coaching'
+  ) => {
     if (!user) return;
 
     // Coach invoices are derived documents — a turn-in payout and a per-coach
@@ -3288,10 +3582,12 @@ const App: React.FC = () => {
       return;
     }
 
-    const sessionsToReset = (state.sessions || []).filter(s => {
+    // A merchandise reset touches NO sessions, so the list is deliberately
+    // empty in that mode rather than filtered afterwards.
+    const sessionsToReset = mode === 'merch' ? [] : (state.sessions || []).filter(s => {
       const gym = state.gyms.find(g => g.id === s.classTypeId);
       if (gym && (gym.id === familyId || gym.parent_gym_id === familyId)) return true;
-      
+
       return (s.studentIds || []).some(sid => {
         const student = state.students.find(st => st.id === sid);
         if (!student) return false;
@@ -3301,7 +3597,15 @@ const App: React.FC = () => {
       });
     });
 
-    if (sessionsToReset.length === 0) {
+    const openMerchForClient = mode === 'merch'
+      ? openMerchOrders(state.merchOrders).filter(o => o.bill_to_id === familyId)
+      : [];
+
+    if (mode === 'merch' && openMerchForClient.length === 0) {
+      alert("No merchandise on this invoice to reset.");
+      return;
+    }
+    if (mode === 'coaching' && sessionsToReset.length === 0) {
       alert("No sessions found for this client in the current month.");
       return;
     }
@@ -3338,6 +3642,27 @@ const App: React.FC = () => {
 
     const now = new Date();
     const dueDateStr = new Date(now.getFullYear(), now.getMonth() + 1, 3).toISOString().split('T')[0];
+    const fallbackMonthKey = billingMonthFor(now.toISOString().split('T')[0]).key;
+
+    // ── MERCHANDISE ──────────────────────────────────────────────────────────
+    // Only in the merchandise book. Stamping and the payment row happen in the
+    // same action, which is what keeps "what was archived" equal to "what was
+    // on the page" — the shirt cannot be billed twice, or lost.
+    const merchByClient = mode === 'merch'
+      ? await archiveMerchFor([familyId], fallbackMonthKey)
+      : new Map<string, { monthKey: string; amount: number }[]>();
+
+    (merchByClient.get(familyId) || []).forEach(entry => {
+      const parsed = parseMonthKey(entry.monthKey);
+      if (!revenueByMonth.has(entry.monthKey)) {
+        revenueByMonth.set(entry.monthKey, {
+          monthName: parsed?.monthName || MONTHS[now.getMonth()],
+          year: parsed?.year || now.getFullYear(),
+          revenue: 0
+        });
+      }
+      revenueByMonth.get(entry.monthKey)!.revenue += entry.amount;
+    });
 
     for (const [monthLabelFull, data] of Array.from(revenueByMonth.entries())) {
       // 1. Handle Payment Record
@@ -3359,8 +3684,17 @@ const App: React.FC = () => {
         if (gym) {
           snapAddress = gym.bill_to_address || '';
           snapPhone = gym.bill_to_phone || '';
+        } else {
+          // A merchandise client's details live only on their own record, so
+          // snapshot them here or the archived invoice loses its Bill To block.
+          const mc = (state.merchClients || []).find(c => c.id === familyId);
+          if (mc) {
+            snapAddress = mc.address || '';
+            snapPhone = mc.phone || '';
+          }
         }
-        
+
+
         await supabase.from('payments').insert({
           id: crypto.randomUUID ? crypto.randomUUID() : `uid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
           invoice_id: monthLabelFull,
@@ -3406,7 +3740,12 @@ const App: React.FC = () => {
       return mine.length > 0 ? { ...sess, studentIds: mine } : null;
     }).filter(Boolean) as AttendanceSession[];
 
-    await writeHistoryMonths(familySlices);
+    // Merchandise months are named explicitly: a merch-only reset has no
+    // sessions to file, so without this the month would never be rewritten and
+    // its merch revenue would never reach History.
+    await writeHistoryMonths(familySlices, {
+      touchMonthKeys: (merchByClient.get(familyId) || []).map(e => e.monthKey)
+    });
 
     // 3. Retire the billed work for THIS client only.
     //    A class session shared with other families must NOT be deleted outright
@@ -3456,7 +3795,9 @@ const App: React.FC = () => {
     }
 
     loadCloudData(true);
-    alert(`${label} invoice has been reset and archived to their respective billing months.`);
+    alert(mode === 'merch'
+      ? `${label}'s merchandise invoice has been archived. Their session invoice is untouched.`
+      : `${label} invoice has been reset and archived to their respective billing months.`);
   };
 
   const handleUpdatePayment = async (paymentData: Partial<Payment>) => {
@@ -3720,7 +4061,7 @@ const App: React.FC = () => {
           onSaveAllocations={isOwner ? saveBankAllocations : undefined}
         />
       )}
-      {activeView === View.INVOICES && <InvoicesView state={state} user={user} onUpdatePayment={handleUpdatePayment} onResetInvoice={resetSingleInvoice} onShowRecovery={() => setShowRecoveryModal(true)} onSaveAllocations={saveBankAllocations} />}
+      {activeView === View.INVOICES && <InvoicesView state={state} user={user} onUpdatePayment={handleUpdatePayment} onResetInvoice={resetSingleInvoice} onShowRecovery={() => setShowRecoveryModal(true)} onSaveAllocations={saveBankAllocations} onAddMerch={(fixedBillTo) => setMerchOrderModal({ fixedBillTo })} onDeleteMerchOrder={handleDeleteMerchOrder} onSetMerchStatus={handleSetMerchOrderStatus} />}
       {activeView === View.HISTORY && isOwner && (
         <HistoryView 
           state={state} 
@@ -3753,6 +4094,9 @@ const App: React.FC = () => {
           onRemoveSchedule={removeSchedule}
           onLogout={handleLogout}
           onRefreshStaff={() => loadCloudData(true)}
+          onAddMerchItem={() => { setEditingMerchItem(null); setShowMerchItemModal(true); }}
+          onEditMerchItem={(item) => { setEditingMerchItem(item); setShowMerchItemModal(true); }}
+          onRemoveMerchItem={handleDeleteMerchItem}
         />
       )}
     </div>
@@ -3946,6 +4290,32 @@ const App: React.FC = () => {
           />
         </Modal>
       )}
+      {showMerchItemModal && (
+        <Modal
+          title={editingMerchItem ? 'Edit Item' : 'New Item'}
+          onClose={() => { setShowMerchItemModal(false); setEditingMerchItem(null); }}
+        >
+          <MerchItemModal
+            item={editingMerchItem}
+            onSave={async (item) => {
+              await handleSaveMerchItem(item);
+              setShowMerchItemModal(false);
+              setEditingMerchItem(null);
+            }}
+            onCancel={() => { setShowMerchItemModal(false); setEditingMerchItem(null); }}
+          />
+        </Modal>
+      )}
+      {merchOrderModal && (
+        <Modal title="Add Merchandise" onClose={() => setMerchOrderModal(null)}>
+          <MerchOrderModal
+            state={state}
+            fixedBillTo={merchOrderModal.fixedBillTo}
+            onSubmit={handleSaveMerchOrder}
+            onCancel={() => setMerchOrderModal(null)}
+          />
+        </Modal>
+      )}
       {showSettingsModal && (
         <AppSettingsModal 
           state={state} 
@@ -3964,13 +4334,17 @@ const App: React.FC = () => {
             <div className="flex items-center gap-4 p-4 bg-amber-50 dark:bg-amber-900/20 rounded-2xl border border-amber-100 dark:border-amber-800">
               <AlertTriangle className="text-amber-600 dark:text-amber-400 shrink-0" size={24} />
               <p className="text-sm text-amber-800 dark:text-amber-200 font-medium leading-relaxed">
-                This will archive all sessions for <span className="font-black italic">{resetConfirmation.label}</span> to history and clear them from the current active logs.
+                {resetConfirmation.mode === 'merch' ? (
+                  <>This will archive the <span className="font-black italic">merchandise</span> invoice for <span className="font-black italic">{resetConfirmation.label}</span> to history. Their session invoice is not affected.</>
+                ) : (
+                  <>This will archive all sessions for <span className="font-black italic">{resetConfirmation.label}</span> to history and clear them from the current active logs. Any merchandise they have ordered is not affected.</>
+                )}
               </p>
             </div>
             <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed px-1">A safety backup will be created automatically before the reset. You can restore this data later if needed.</p>
             <div className="flex gap-3 pt-2">
               <button onClick={() => setResetConfirmation(null)} className="flex-1 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">Cancel</button>
-              <button onClick={() => { executeResetSingleInvoice(resetConfirmation.familyId, resetConfirmation.label); setResetConfirmation(null); }} className="flex-1 py-4 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-red-200 dark:shadow-none hover:bg-red-700 transition-all">Confirm Reset</button>
+              <button onClick={() => { executeResetSingleInvoice(resetConfirmation.familyId, resetConfirmation.label, resetConfirmation.mode); setResetConfirmation(null); }} className="flex-1 py-4 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-red-200 dark:shadow-none hover:bg-red-700 transition-all">Confirm Reset</button>
             </div>
           </div>
         </Modal>
@@ -8899,7 +9273,7 @@ const RegisterView = memo(({
   );
 });
 
-const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetInvoice, onShowRecovery, onSaveAllocations }: { state: AppState, user: any, monthLabel?: string, onUpdatePayment: (p: Partial<Payment>) => void, onResetInvoice: (id: string, label: string) => void, onShowRecovery: () => void, onSaveAllocations?: (next: { allocations?: InvoiceAllocations; groupDefaults?: GroupDefaults }) => Promise<boolean> }) => {
+const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetInvoice, onShowRecovery, onSaveAllocations, onAddMerch, onDeleteMerchOrder, onSetMerchStatus }: { state: AppState, user: any, monthLabel?: string, onUpdatePayment: (p: Partial<Payment>) => void, onResetInvoice: (id: string, label: string, mode: 'coaching' | 'merch') => void, onShowRecovery: () => void, onSaveAllocations?: (next: { allocations?: InvoiceAllocations; groupDefaults?: GroupDefaults }) => Promise<boolean>, onAddMerch?: (fixedBillTo?: { id: string; kind: MerchBillToKind; label: string }) => void, onDeleteMerchOrder?: (id: string) => void, onSetMerchStatus?: (id: string, status: MerchOrderStatus) => void }) => {
   const [sel, setSel] = useState<string | null>(null);
   // The saved choices come from the profile, which is loaded from the database.
   // They used to be read straight out of localStorage here — under a key built
@@ -8916,6 +9290,19 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
     [state.profile.bank_allocation_defaults]
   );
   const [isGenerating, setIsGenerating] = useState(false);
+  /**
+   * TWO SEPARATE BOOKS OF INVOICES.
+   *
+   * 'coaching' — the monthly invoices that go out to parents, teams and gyms
+   *              for sessions coached. Merchandise NEVER appears on these.
+   * 'merch'    — a separate invoice per client for goods bought. Its own
+   *              document, its own total, its own reset.
+   *
+   * Keeping them apart means a parent's coaching invoice does not change
+   * because someone bought a shirt, and a shirt can be invoiced and paid for on
+   * its own schedule.
+   */
+  const [invoiceMode, setInvoiceMode] = useState<'coaching' | 'merch'>('coaching');
   const [invoiceFilter, setInvoiceFilter] = useState<'all' | 'athletes' | 'teams' | 'gyms' | 'staff'>('all');
   const [scale, setScale] = useState(1);
   const [manualZoom, setManualZoom] = useState<number | null>(null);
@@ -8985,8 +9372,15 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
     students: state.students || [],
     staff: state.staff || [],
     profile: { id: state.profile.id, pay_rate: state.profile.pay_rate, name: state.profile.name },
-    siblingDiscount: state.profile.sibling_discount
-  }), [state.gyms, state.classTypes, state.students, state.staff, state.profile]);
+    siblingDiscount: state.profile.sibling_discount,
+    // Merch is always priced; which BOOK it appears in is decided by
+    // linesForGroup below, not here. An archived month shows the merch that was
+    // stamped into it, a live one shows what is still open.
+    merchOrders: monthLabel
+      ? merchOrdersForMonth(state.merchOrders, monthLabel)
+      : openMerchOrders(state.merchOrders),
+    merchClients: state.merchClients || []
+  }), [state.gyms, state.classTypes, state.students, state.staff, state.profile, state.merchOrders, state.merchClients, monthLabel]);
 
   /**
    * ONE pricing pass over the month's sessions produces every figure on this
@@ -9029,20 +9423,32 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
     return { coachId: id, orgId: null };
   }, []);
 
-  /** Every priced line for one invoice, across ALL billing months. */
+  /**
+   * Every priced line for one invoice, across ALL billing months.
+   *
+   * THE MODE SPLIT LIVES HERE, and only here. A coaching invoice drops merch
+   * lines; a merchandise invoice keeps nothing but merch. Because every figure
+   * on the screen — the rows, the total, the card badge, the PDF — is derived
+   * from this one function, the two books can never disagree about what is on
+   * which invoice.
+   */
   const allLinesForGroup = useCallback((group: any): any[] => {
     if (!group) return [];
 
     const target = coachTargetFor(group);
     if (target) {
+      // Coach payouts are coaching-only by nature: nobody is paid for a shirt.
       return priced.coachLines.filter(l =>
         l.coachId === target.coachId &&
         (target.orgId ? l.orgId === target.orgId : l.orgId === null)
       );
     }
 
-    return priced.clientLines.filter(l => l.billToId === group.family_id);
-  }, [priced, coachTargetFor]);
+    return priced.clientLines.filter(l =>
+      l.billToId === group.family_id &&
+      (invoiceMode === 'merch' ? l.kind === 'merch' : l.kind !== 'merch')
+    );
+  }, [priced, coachTargetFor, invoiceMode]);
 
   /**
    * The lines that belong on the invoice being viewed.
@@ -9065,9 +9471,21 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
     return lines.filter(l => l.billingMonthKey === activeMonthKey);
   }, [allLinesForGroup, activeMonthKey, monthLabel]);
 
-  /** Distinct real-world sessions on an invoice — what the "N logs" badge shows. */
+  /**
+   * Distinct real-world sessions on an invoice — what the "N logs" badge shows.
+   * Merchandise is excluded: a shirt is not a coaching session, and counting it
+   * as one made the badge disagree with the register.
+   */
   const countForGroup = useCallback(
-    (group: any) => new Set(linesForGroup(group).map(l => l.groupId)).size,
+    (group: any) => new Set(
+      linesForGroup(group).filter(l => l.kind !== 'merch').map(l => l.groupId)
+    ).size,
+    [linesForGroup]
+  );
+
+  /** Merchandise lines on an invoice — badged separately from sessions. */
+  const merchCountForGroup = useCallback(
+    (group: any) => linesForGroup(group).filter(l => l.kind === 'merch').length,
     [linesForGroup]
   );
 
@@ -9221,6 +9639,28 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       });
     });
 
+    // ── EXTERNAL MERCH CLIENTS ────────────────────────────────────────────────
+    // People an invoice can be made out to who are not athletes or gyms at all.
+    // Listed here so a shirt sold to someone off the street still produces a
+    // proper invoice document. Registered athletes and gyms are already above,
+    // so a merch order billed to one of them needs nothing extra.
+    (state.merchClients || []).forEach(mc => {
+      if (!mc?.id) return;
+      if (res.some(r => r.family_id === mc.id)) return;
+      res.push({
+        id: `merchclient-${mc.id}`,
+        label: mc.name,
+        subLabel: 'Merchandise Client',
+        studentIds: [],
+        family_id: mc.id,
+        isGym: false,
+        isStaff: false,
+        isHistory: false,
+        isOrganization: false,
+        isMerchClient: true
+      } as any);
+    });
+
     // ── COACH INVOICES ────────────────────────────────────────────────────────
     // Registered STAFF only. The owner never gets an invoice — they are the one
     // being paid by the gyms, not paid by themselves. Note the owner is still
@@ -9283,32 +9723,48 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
     }
 
     return res;
-  }, [state.students, state.gyms, state.payments, state.sessions, monthLabel, state.staff, state.profile, user, priced, activeMonthKey]);
+  }, [state.students, state.gyms, state.payments, state.sessions, monthLabel, state.staff, state.profile, user, priced, activeMonthKey, state.merchClients]);
 
   const filteredInvoices = useMemo(() => {
     return (groupedInvoices || []).filter(g => {
+      // ── THE MERCHANDISE BOOK ──────────────────────────────────────────
+      // Only clients who actually have goods on them, and never a coach.
+      // Unlike the coaching list — which deliberately shows every client so a
+      // zero invoice is visible and explainable — an empty merch invoice is
+      // just noise, because nothing generates one until something is sold.
+      if (invoiceMode === 'merch') {
+        if (g.isStaff) return false;
+        return linesForGroup(g).length > 0;
+      }
+
+      // ── THE COACHING BOOK ─────────────────────────────────────────────
+      // A merchandise-only client has no coaching to bill, so they never
+      // belong here — otherwise every shirt sold to a stranger would add a
+      // permanent R0 invoice to the list you send to parents.
+      if ((g as any).isMerchClient) return false;
+
       if (invoiceFilter === 'all') return true;
       if (invoiceFilter === 'staff') return g.isStaff;
-      
+
       if (g.isStaff) return false;
-      
+
       if (invoiceFilter === 'gyms') {
         const parentGym = state.gyms.find(gym => gym.id === g.family_id);
         return parentGym && parentGym.gym_type === 'tumbling';
       }
-      
+
       if (invoiceFilter === 'teams') {
         const parentGym = state.gyms.find(gym => gym.id === g.family_id);
         return parentGym && parentGym.gym_type === 'cheer';
       }
-      
+
       if (invoiceFilter === 'athletes') {
         return !g.isGym;
       }
-      
+
       return true;
     });
-  }, [groupedInvoices, invoiceFilter, state.gyms]);
+  }, [groupedInvoices, invoiceFilter, invoiceMode, state.gyms, linesForGroup]);
 
   const selectedGroup = useMemo(() =>
     (groupedInvoices || []).find(g => g.family_id === sel),
@@ -9353,6 +9809,13 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
         : (multiAthlete ? l.targetName : '')
     }));
   }, [selectedGroup, linesForGroup]);
+
+  /** This client's un-invoiced merchandise, for the management card. */
+  const clientMerchOrders = useMemo(() => {
+    if (!selectedGroup) return [];
+    return openMerchOrders(state.merchOrders)
+      .filter(o => o.bill_to_id === selectedGroup.family_id);
+  }, [state.merchOrders, selectedGroup]);
 
   const currentDisplay = useMemo(() => {
     if (monthLabel) return monthLabel;
@@ -9415,7 +9878,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
         includeQueryParams: true,
         style: { borderRadius: '2rem' }
       });
-      const fileName = `Invoice_${selectedGroup.label.replace(/\s+/g, '_')}.png`;
+      const fileName = `${invoiceMode === 'merch' ? 'Merch_Invoice' : 'Invoice'}_${selectedGroup.label.replace(/\s+/g, '_')}.png`;
       await saveAndShareFile(dataUrl, fileName);
     } catch (e) {
       console.error('Invoice capture failed:', e);
@@ -9474,7 +9937,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
       const pdfH = (imgProps.height * contentW) / imgProps.width;
       
       doc.addImage(dataUrl, 'PNG', margin, margin, contentW, pdfH);
-      const fileName = `Invoice_${selectedGroup.label.replace(/\s+/g, '_')}.pdf`;
+      const fileName = `${invoiceMode === 'merch' ? 'Merch_Invoice' : 'Invoice'}_${selectedGroup.label.replace(/\s+/g, '_')}.pdf`;
       if (Capacitor.isNativePlatform()) {
         const pdfBase64 = doc.output('datauristring');
         await saveAndShareFile(pdfBase64, fileName);
@@ -9521,7 +9984,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
           cacheBust: true,
           includeQueryParams: true,
         });
-        dataUrls.push({ name: `Invoice_${group.label.replace(/\s+/g, '_')}.png`, url: dataUrl });
+        dataUrls.push({ name: `${invoiceMode === 'merch' ? 'Merch_Invoice' : 'Invoice'}_${group.label.replace(/\s+/g, '_')}.png`, url: dataUrl });
       } catch (e) {
         console.error(`Failed to capture invoice for ${group.label}`, e);
       }
@@ -9591,7 +10054,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
               {!monthLabel && !selectedGroup.isStaff && (
               <motion.button
                 whileTap={{ scale: 0.95 }}
-                onClick={() => onResetInvoice(selectedGroup.family_id, selectedGroup.label)}
+                onClick={() => onResetInvoice(selectedGroup.family_id, selectedGroup.label, invoiceMode)}
                 className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-100 dark:border-red-800 px-3 py-2 rounded-xl font-black text-[9px] uppercase shadow-md flex items-center gap-2"
               >
                 <RefreshCw size={12} /> Reset
@@ -9658,6 +10121,89 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
           </div>
         )}
 
+        {/* ════ MERCHANDISE ════
+            Lives OUTSIDE invoiceRef on purpose — invoiceRef is what gets
+            captured to PNG/PDF, so any control placed inside it would be
+            baked into the document the client receives. */}
+        {!monthLabel && invoiceMode === 'merch' && !selectedGroup.isStaff && (
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase italic tracking-wider">Items On This Invoice</h3>
+                <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase leading-relaxed tracking-wider">
+                  Add, remove or tick off what this client ordered. This card is
+                  not part of the invoice the client receives.
+                </p>
+              </div>
+              {onAddMerch && (
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => onAddMerch({
+                    id: selectedGroup.family_id,
+                    kind: (selectedGroup as any).isMerchClient ? 'external' : (selectedGroup.isGym || selectedGroup.isOrganization) ? 'gym' : 'athlete',
+                    label: selectedGroup.label
+                  })}
+                  className="bg-[#1e4da1] text-white px-4 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest shadow-lg flex items-center gap-2 shrink-0"
+                >
+                  <ShoppingBag size={12} /> Add Item
+                </motion.button>
+              )}
+            </div>
+
+            {clientMerchOrders.length === 0 ? (
+              <p className="text-[9px] font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest">
+                Nothing ordered yet
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {clientMerchOrders.map(o => (
+                  <div
+                    key={`merch-order-${o.id}`}
+                    className="flex items-center justify-between gap-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-black uppercase italic text-slate-800 dark:text-slate-100 truncate">
+                        {o.item_name}{o.size ? ` (Size ${o.size})` : ''}{o.qty > 1 ? ` × ${o.qty}` : ''}
+                      </p>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">
+                        {new Date(o.order_date).toLocaleDateString('en-GB')}
+                        {o.notes ? ` · ${o.notes}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[13px] font-black tabular-nums text-slate-900 dark:text-slate-100">
+                        R{Math.round(o.unit_price * o.qty * 100) / 100}
+                      </span>
+                      {onSetMerchStatus && (
+                        <button
+                          onClick={() => onSetMerchStatus(o.id, o.status === 'delivered' ? 'ordered' : 'delivered')}
+                          title={o.status === 'delivered' ? 'Handed over — tap to undo' : 'Mark as handed over'}
+                          className={`p-2 rounded-xl transition-colors ${
+                            o.status === 'delivered'
+                              ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          <CheckCircle2 size={13} />
+                        </button>
+                      )}
+                      {onDeleteMerchOrder && (
+                        <button
+                          onClick={() => onDeleteMerchOrder(o.id)}
+                          title="Remove from invoice"
+                          className="p-2 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div ref={containerRef} className="w-full overflow-x-auto no-scrollbar py-4 -mx-2 px-2 relative">
           {/* Zoom Controls */}
           <div className="sticky left-4 bottom-6 z-50 flex items-center gap-3 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md p-3 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-fit mb-4">
@@ -9709,7 +10255,11 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                                 ? <img src={state.profile.logo} className="w-20 h-20 object-contain rounded-xl mb-3" />
                                 : <p className="text-3xl font-black italic text-[#1e4da1] mb-3">{state.profile.businessName}</p>
                               }
-                              <p className="text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">Invoice</p>
+                              {/* Named on the document itself, so a parent
+                                  holding both can tell them apart. */}
+                              <p className="text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">
+                                {invoiceMode === 'merch' ? 'Merchandise Invoice' : 'Invoice'}
+                              </p>
                             </div>
                             <div className="text-right">
                               <p className="text-[13px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Period</p>
@@ -9763,6 +10313,21 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                                     </>
                                   );
                                 }
+                              }
+
+                              // An invoice made out to someone who is on no
+                              // roster — a merchandise-only client. Their own
+                              // record carries the full bill-to block.
+                              const merchClient = (state.merchClients || []).find(mc => mc.id === targetId);
+                              if (merchClient) {
+                                return (
+                                  <>
+                                    <p className="text-xl font-black uppercase italic text-slate-900 dark:text-slate-100">{merchClient.name}</p>
+                                    {merchClient.address && <p className="text-[12px] text-slate-500 mt-1 whitespace-pre-wrap leading-relaxed">{merchClient.address}</p>}
+                                    {merchClient.phone && <p className="text-[12px] text-slate-500 mt-1">{merchClient.phone}</p>}
+                                    {merchClient.email && <p className="text-[12px] text-slate-500 mt-1">{merchClient.email}</p>}
+                                  </>
+                                );
                               }
 
                               if (currentPayment?.bill_to_address || currentPayment?.bill_to_phone) {
@@ -9843,7 +10408,7 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                         })
                       ) : (
                         <div className="py-8 text-center">
-                          <p className="text-[10px] text-slate-400 font-black uppercase">No sessions logged</p>
+                          <p className="text-[10px] text-slate-400 font-black uppercase">Nothing billed yet</p>
                         </div>
                       )}
 
@@ -9934,7 +10499,23 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
   return (
     <div className="space-y-6 mt-4 px-2 pb-24">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">Invoices</h2>
+        <h2 className="text-xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">
+          {invoiceMode === 'merch' ? 'Merch Invoices' : 'Invoices'}
+        </h2>
+        <div className="flex items-center gap-2">
+        {/* Only in the merchandise book, where new orders belong. Opened with no
+            client fixed, so it can bill an athlete, a team, or a person who is
+            on no roster at all. */}
+        {!monthLabel && invoiceMode === 'merch' && onAddMerch && (
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => onAddMerch()}
+            className="flex items-center gap-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-4 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg transition-all"
+          >
+            <Plus size={13} strokeWidth={3} />
+            <span>New Sale</span>
+          </motion.button>
+        )}
         {filteredInvoices && filteredInvoices.length > 0 && (
           <motion.button
             whileTap={{ scale: 0.95 }}
@@ -9955,29 +10536,82 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
             )}
           </motion.button>
         )}
+        </div>
       </div>
 
-      <div className="flex overflow-x-auto gap-2 pb-2 hide-scrollbar">
-        {['all', 'athletes', 'teams', 'gyms', 'staff'].map((type, idx) => (
+      {/* ════ THE TWO BOOKS ════
+          Coaching invoices are what goes out to parents every month.
+          Merchandise invoices are billed separately, so buying a shirt never
+          changes the invoice a parent is already expecting. */}
+      <div className="flex bg-slate-100/70 dark:bg-slate-800/40 p-1 rounded-2xl relative">
+        {([
+          { key: 'coaching' as const, label: 'Sessions', icon: <Calendar size={13} /> },
+          { key: 'merch' as const, label: 'Merchandise', icon: <ShoppingBag size={13} /> }
+        ]).map(tab => (
           <button
-            key={`invoice-filter-${type}-${idx}`}
-            onClick={() => setInvoiceFilter(type as any)}
-            className={`px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest whitespace-nowrap transition-colors ${
-              invoiceFilter === type
-                ? 'bg-[#1e4da1] text-white'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+            key={`invoice-mode-${tab.key}`}
+            onClick={() => { setInvoiceMode(tab.key); setSel(null); }}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-colors duration-300 relative z-10 ${
+              invoiceMode === tab.key ? 'text-white' : 'text-[#94a3b8]'
             }`}
           >
-            {type === 'staff' ? 'Coaches' : type}
+            {tab.icon}
+            {tab.label}
+            {invoiceMode === tab.key && (
+              <motion.div
+                layoutId="invoiceModeBg"
+                className="absolute inset-0 bg-[#1e4da1] dark:bg-blue-600 rounded-xl shadow-md -z-10"
+                transition={{ type: 'spring', bounce: 0.2, duration: 0.5 }}
+              />
+            )}
           </button>
         ))}
       </div>
 
+      {/* The client-type chips only make sense for coaching. The merchandise
+          list is short and already only shows clients who bought something. */}
+      {invoiceMode === 'coaching' && (
+        <div className="flex overflow-x-auto gap-2 pb-2 hide-scrollbar">
+          {['all', 'athletes', 'teams', 'gyms', 'staff'].map((type, idx) => (
+            <button
+              key={`invoice-filter-${type}-${idx}`}
+              onClick={() => setInvoiceFilter(type as any)}
+              className={`px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest whitespace-nowrap transition-colors ${
+                invoiceFilter === type
+                  ? 'bg-[#1e4da1] text-white'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+              }`}
+            >
+              {type === 'staff' ? 'Coaches' : type}
+            </button>
+          ))}
+        </div>
+      )}
+
       <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-3">
-        {(!filteredInvoices || filteredInvoices.length === 0) ? <div className="bg-white dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-[2rem] p-10 text-center shadow-sm"><UserCircle className="mx-auto text-slate-200 dark:text-slate-600 mb-4" size={48} /><p className="text-[#94a3b8] text-[10px] font-black uppercase">No Invoices Found</p></div> : filteredInvoices.map((group, idx) => {
+        {(!filteredInvoices || filteredInvoices.length === 0) ? (
+          <div className="bg-white dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-[2rem] p-10 text-center shadow-sm">
+            {invoiceMode === 'merch' ? (
+              <>
+                <ShoppingBag className="mx-auto text-slate-200 dark:text-slate-600 mb-4" size={48} />
+                <p className="text-[#94a3b8] text-[10px] font-black uppercase">Nothing Sold Yet</p>
+                <p className="text-[9px] font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest mt-2 leading-relaxed">
+                  Tap New Sale to invoice a shirt or any other item —<br />
+                  to an athlete, a team, or anyone at all
+                </p>
+              </>
+            ) : (
+              <>
+                <UserCircle className="mx-auto text-slate-200 dark:text-slate-600 mb-4" size={48} />
+                <p className="text-[#94a3b8] text-[10px] font-black uppercase">No Invoices Found</p>
+              </>
+            )}
+          </div>
+        ) : filteredInvoices.map((group, idx) => {
           // Both figures come from the same pricing pass that renders the
           // invoice itself, so the card and the document always agree.
           const count = countForGroup(group);
+          const merchCount = merchCountForGroup(group);
           const groupTotal = sumLines(linesForGroup(group));
 
           const groupPayment = (state.payments || []).find(p => p.family_id === group.family_id && p.invoice_id === dbInvoiceId);
@@ -10011,7 +10645,19 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-1.5 mt-0.5"><Calendar size={9} className="text-[#94a3b8]" /><p className="text-[9px] text-slate-500 font-black uppercase">{count} logs</p></div>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    {invoiceMode === 'merch' ? (
+                      <>
+                        <Package size={9} className="text-[#94a3b8]" />
+                        <p className="text-[9px] text-slate-500 font-black uppercase">{merchCount} item{merchCount === 1 ? '' : 's'}</p>
+                      </>
+                    ) : (
+                      <>
+                        <Calendar size={9} className="text-[#94a3b8]" />
+                        <p className="text-[9px] text-slate-500 font-black uppercase">{count} logs</p>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
 

@@ -47,6 +47,9 @@ export interface MonthTotals {
   schoolsCoachPay: number;
   gymsGross: number;
   gymsNet: number;
+  merchGross: number;
+  merchCost: number;
+  merchNet: number;
   totalGross: number;
   totalCoachPayout: number;
   netProfit: number;
@@ -62,7 +65,7 @@ export interface MonthTotals {
 export interface ArchivedInvoice {
   familyId: string;
   amount: number;
-  kind: 'class' | 'gym' | 'cheer';
+  kind: 'class' | 'gym' | 'cheer' | 'merch';
 }
 
 export const EMPTY_MONTH_TOTALS: MonthTotals = {
@@ -73,6 +76,9 @@ export const EMPTY_MONTH_TOTALS: MonthTotals = {
   schoolsCoachPay: 0,
   gymsGross: 0,
   gymsNet: 0,
+  merchGross: 0,
+  merchCost: 0,
+  merchNet: 0,
   totalGross: 0,
   totalCoachPayout: 0,
   netProfit: 0,
@@ -184,11 +190,13 @@ export function computeMonthTotals(
   sessions: AttendanceSession[],
   ctx: PricingContext
 ): MonthTotals {
-  if (!sessions || sessions.length === 0) {
+  const hasSessions = sessions && sessions.length > 0;
+  const hasMerch = ctx?.merchOrders && ctx.merchOrders.length > 0;
+  if (!hasSessions && !hasMerch) {
     return { ...EMPTY_MONTH_TOTALS, invoices: [] };
   }
 
-  const { clientLines, coachLines } = priceSessions(sessions, ctx);
+  const { clientLines, coachLines } = priceSessions(sessions || [], ctx);
   const ownerId = ctx.profile?.id;
 
   const byKind = (k: PricedClientLine['kind']) => clientLines.filter(l => l.kind === k);
@@ -204,9 +212,14 @@ export function computeMonthTotals(
   const gymsGross        = sumLines(byKind('gym'));
   const gymsNet          = gymsGross;
 
-  const totalGross       = money(tumblingGross + schoolsGross + gymsGross);
+  const merchLines       = byKind('merch');
+  const merchGross       = sumLines(merchLines);
+  const merchCost        = money(merchLines.reduce((acc, l) => acc + (l.costAmount || 0), 0));
+  const merchNet         = money(merchGross - merchCost);
+
+  const totalGross       = money(tumblingGross + schoolsGross + gymsGross + merchGross);
   const totalCoachPayout = money(tumblingCoachPay + schoolsCoachPay);
-  const netProfit        = money(tumblingNet + gymsNet);
+  const netProfit        = money(tumblingNet + gymsNet + merchNet);
 
   // One invoice per client, exactly as the client received it. Zero and negative
   // lines are folded in so a discounted invoice still totals what was sent, but
@@ -227,10 +240,13 @@ export function computeMonthTotals(
     schoolsCoachPay,
     gymsGross,
     gymsNet,
+    merchGross,
+    merchCost,
+    merchNet,
     totalGross,
     totalCoachPayout,
     netProfit,
-    sessionCount: sessions.length,
+    sessionCount: (sessions || []).length,
     invoicesTotal: money(invoices.reduce((a, i) => a + i.amount, 0)),
     invoiceCount: invoices.length,
     invoices
