@@ -19,6 +19,9 @@ export const NOTIFICATION_TYPES = {
   COACH_SIGNUP: 'coach_signup',
   SESSION_LOGGED: 'session_logged',
   CLASS_ADDED: 'class_added',
+  CYCLE_REMINDER: 'cycle_reminder',
+  TEMP_FOLLOWUP: 'temp_followup',
+  MISSING_SESSION: 'missing_session',
   SYSTEM: 'system',
 } as const;
 
@@ -29,6 +32,9 @@ export const NOTIFICATION_TITLES: Record<NotificationType, string> = {
   coach_signup: 'Coach Join Request',
   session_logged: 'Session Logged',
   class_added: 'New Class Added',
+  cycle_reminder: 'End-of-Month Billing Cycle',
+  temp_followup: 'Trial Athletes Follow-Up',
+  missing_session: 'Missing Attendance Register',
   system: 'JFLIPS',
 };
 

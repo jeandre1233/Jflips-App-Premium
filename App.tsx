@@ -124,7 +124,7 @@ import type { BankAllocation, ClientGroup, GroupDefaults, InvoiceAllocations } f
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { SyncStatusBadge } from './src/components/SyncStatusBadge';
 import { sendWhatsAppAttendanceQuery, sendWhatsAppInvoiceReminder } from './src/utils/whatsapp';
-import { sendCycleMonthReminderNotification, getDiscordWebhookUrl, setDiscordWebhookUrl } from './src/utils/discordNotifications';
+import { sendCycleMonthReminderNotification, sendTempAthleteFollowupDiscordNotification, getDiscordWebhookUrl, setDiscordWebhookUrl } from './src/utils/discordNotifications';
 import { notifyUser, describeSessionLog, NOTIFICATION_TITLES } from './src/utils/notifications';
 import { 
   initAuth as initGoogleAuth, 
@@ -1394,6 +1394,87 @@ const App: React.FC = () => {
 
     const runBackgroundChecks = async () => {
       const now = new Date();
+      const isOwnerRole = state.profile.role === 'owner';
+      const ownerId = isOwnerRole ? user.id : (state.profile.owner_id || user.id);
+
+      // 1️⃣ Missing Session Register Alert
+      // Check if scheduled classes for today have ended/passed without attendance being logged
+      const todayDayOfWeek = now.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+      const todayYear = now.getFullYear();
+      const todayMonth = String(now.getMonth() + 1).padStart(2, '0');
+      const todayDate = String(now.getDate()).padStart(2, '0');
+      const todayStr = `${todayYear}-${todayMonth}-${todayDate}`;
+
+      const todaySchedules = (state.schedules || []).filter(s => s.day_of_week === todayDayOfWeek);
+      for (const sched of todaySchedules) {
+        if (!sched.time) continue;
+        const [schedHours, schedMins] = sched.time.split(':').map(v => parseInt(v, 10));
+        if (isNaN(schedHours)) continue;
+        const schedMinutesFromMidnight = schedHours * 60 + (schedMins || 0);
+        const currentMinutesFromMidnight = now.getHours() * 60 + now.getMinutes();
+
+        // Check if at least 45 minutes have elapsed past the class start time
+        if (currentMinutesFromMidnight >= schedMinutesFromMidnight + 45) {
+          const alertKey = `missing_session_alert_${todayStr}_${sched.id}`;
+          if (!localStorage.getItem(alertKey)) {
+            // Check if an attendance session has already been logged for this schedule/class today
+            const isSessionLogged = (state.sessions || []).some(session => {
+              if (session.date !== todayStr) return false;
+              if (sched.class_ids && sched.class_ids.length > 0) {
+                if (sched.class_ids.includes(session.classTypeId)) return true;
+              }
+              if ((session as any).schedule_id && (session as any).schedule_id === sched.id) return true;
+              if (sched.label && session.custom_event_name && session.custom_event_name.toLowerCase() === sched.label.toLowerCase()) return true;
+              return false;
+            });
+
+            if (!isSessionLogged) {
+              const matchedClasses = (sched.class_ids || []).map(cid => {
+                const ct = (state.classTypes || []).find(c => c.id === cid);
+                return ct ? ct.name : '';
+              }).filter(Boolean).join(', ');
+              const displayName = sched.label || matchedClasses || 'Scheduled Class';
+
+              const assignedCoach = (state.staff || []).find(st => st.id === sched.coach_id);
+              const coachSuffix = assignedCoach ? ` (Coach: ${assignedCoach.name})` : '';
+
+              try {
+                // Device push + in-app notification to the gym owner
+                await notifyUser({
+                  userId: ownerId,
+                  type: 'missing_session',
+                  title: 'Missing Attendance Register',
+                  message: `Attendance register for today's ${displayName} at ${sched.time}${coachSuffix} has not been logged yet.`,
+                  url: '/?tab=register',
+                  metadata: {
+                    schedule_id: sched.id,
+                    time: sched.time,
+                    date: todayStr,
+                    class_name: displayName,
+                  },
+                  push: true,
+                });
+
+                // Also alert the assigned coach if they have an active user ID
+                if (assignedCoach && assignedCoach.id && assignedCoach.id !== ownerId) {
+                  await notifyUser({
+                    userId: assignedCoach.id,
+                    type: 'missing_session',
+                    title: 'Missing Attendance Register',
+                    message: `Reminder: Please submit the attendance register for today's ${displayName} (${sched.time}).`,
+                    url: '/?tab=register',
+                    push: true,
+                  });
+                }
+
+                localStorage.setItem(alertKey, 'true');
+              } catch (err) {
+                console.error('Failed to trigger missing session notification:', err);
+              }
+            }
+          }
+        }
+      }
 
       // 2️⃣ Cycle Month Invoicing Reminder (on 30th/end of month if active sessions exist)
       const currentDayOfMonth = now.getDate();
@@ -1403,23 +1484,76 @@ const App: React.FC = () => {
       if (isEndMonth) {
         const monthLabel = MONTHS[now.getMonth()];
         const year = now.getFullYear();
-        const cycleAlertKey = `discord_cycle_alert_sent_${now.getMonth()}_${year}`;
+        const cycleAlertKey = `cycle_month_alert_sent_${now.getMonth()}_${year}`;
 
         // Check if we have active, unarchived sessions in current lists
         const hasUnarchivedSessions = (state.sessions || []).length > 0;
 
         if (hasUnarchivedSessions && !localStorage.getItem(cycleAlertKey)) {
           try {
-            const success = await sendCycleMonthReminderNotification({
+            // Discord alert
+            await sendCycleMonthReminderNotification({
               monthName: monthLabel,
               year,
               unarchivedSessionsCount: state.sessions.length
             });
-            if (success) {
-              localStorage.setItem(cycleAlertKey, 'true');
-            }
+
+            // Device push + in-app notification to the gym owner
+            await notifyUser({
+              userId: ownerId,
+              type: 'cycle_reminder',
+              title: `End-of-Month Billing Cycle (${monthLabel} ${year})`,
+              message: `You have ${state.sessions.length} active sessions logged for ${monthLabel} ${year}. Review billing and click 'Archive Month' under Setup to finalize invoices.`,
+              url: '/?tab=invoices',
+              push: true,
+            });
+
+            localStorage.setItem(cycleAlertKey, 'true');
           } catch (err) {
             console.error('Failed to notify cycle month invoice reminder:', err);
+          }
+        }
+
+        // 3️⃣ Temp Athlete Follow-up Reminder (Push + Discord)
+        // Trigger with the end of month cycle revenue notification
+        const tempAthletes = (state.students || []).filter(
+          s => !s.is_gym_member && (!!s.is_temporary || (s.id && String(s.id).startsWith('stu_temp_')))
+        );
+
+        if (tempAthletes.length > 0) {
+          const tempFollowupKey = `temp_athletes_followup_alert_${now.getMonth()}_${year}`;
+          if (!localStorage.getItem(tempFollowupKey)) {
+            try {
+              const namesList = tempAthletes.map(s => s.name).slice(0, 5).join(', ') + (tempAthletes.length > 5 ? ` +${tempAthletes.length - 5} more` : '');
+
+              // Discord alert
+              await sendTempAthleteFollowupDiscordNotification({
+                monthName: monthLabel,
+                year,
+                tempAthletes: tempAthletes.map(s => ({
+                  name: s.name,
+                  parentPhone: s.parent1_phone || s.phone
+                }))
+              });
+
+              // Device push + in-app notification to the gym owner
+              await notifyUser({
+                userId: ownerId,
+                type: 'temp_followup',
+                title: `Trial Athletes Follow-Up (${tempAthletes.length})`,
+                message: `The following athletes attended as self-added / temps: ${namesList}. Please WhatsApp their parents to ask them to officially sign up and complete registration!`,
+                url: '/?tab=setup',
+                metadata: {
+                  temp_athlete_ids: tempAthletes.map(s => s.id),
+                  temp_count: tempAthletes.length,
+                },
+                push: true,
+              });
+
+              localStorage.setItem(tempFollowupKey, 'true');
+            } catch (err) {
+              console.error('Failed to notify temp athlete followup:', err);
+            }
           }
         }
       }
@@ -1429,7 +1563,7 @@ const App: React.FC = () => {
     runBackgroundChecks();
     const interval = setInterval(runBackgroundChecks, 10 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [user, state.schedules, state.sessions, state.classTypes, state.gyms, state.staff, state.profile]);
+  }, [user, state.schedules, state.sessions, state.classTypes, state.gyms, state.staff, state.students, state.profile]);
 
   // ── LIVE NOTIFICATION FEED ──────────────────────────────────────────────────
   // Notification rows are written from *other people's* devices — a parent's
@@ -3901,6 +4035,7 @@ const App: React.FC = () => {
           onClear={clearNotifications}
           permission={Capacitor.isNativePlatform() ? 'granted' : notificationPermission}
           onEnableAlerts={requestNotificationPermission}
+          onNavigateView={handleViewChange}
         />
       )}
     </AnimatePresence>
@@ -8788,6 +8923,20 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
 
   const invoiceRef = useRef<HTMLDivElement>(null);
 
+  const isTempGroup = useCallback((group: any) => {
+    if (!group || group.isStaff || group.isGym) return false;
+    const ids = group.studentIds || [];
+    return (state.students || []).some(s => {
+      const isTemp = !!s.is_temporary || (s.id && String(s.id).startsWith('stu_temp_'));
+      if (!isTemp) return false;
+      if (ids.includes(s.id)) return true;
+      if (s.id === group.family_id) return true;
+      if (s.groupKey && s.groupKey === group.family_id) return true;
+      if (s.name && group.label && s.name.toLowerCase() === group.label.toLowerCase()) return true;
+      return false;
+    });
+  }, [state.students]);
+
   useEffect(() => {
     const updateScale = () => {
       if (manualZoom !== null) {
@@ -9429,7 +9578,15 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
     return (
       <motion.div initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} className="space-y-6 mt-4 pb-32 w-full px-2">
         <div className="flex justify-between items-center mb-2">
-          <button onClick={() => setSel(null)} className="text-slate-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-1 hover:text-[#1e4da1]">&larr; Back</button>
+          <div className="flex items-center gap-2.5">
+            <button onClick={() => setSel(null)} className="text-slate-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-1 hover:text-[#1e4da1]">&larr; Back</button>
+            {isTempGroup(selectedGroup) && (
+              <span className="inline-flex items-center gap-1 text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300/90 dark:border-amber-800 tracking-wider shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                Self-Added / Temp Athlete
+              </span>
+            )}
+          </div>
             <div className="flex gap-2">
               {!monthLabel && !selectedGroup.isStaff && (
               <motion.button
@@ -9847,6 +10004,12 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                         {(group as any).subLabel}
                       </span>
                     )}
+                    {isTempGroup(group) && (
+                      <span className="inline-flex items-center gap-1 text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300/90 dark:border-amber-800 tracking-wider shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                        Self-Added / Temp
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5 mt-0.5"><Calendar size={9} className="text-[#94a3b8]" /><p className="text-[9px] text-slate-500 font-black uppercase">{count} logs</p></div>
                 </div>
@@ -9974,6 +10137,9 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
     initialData?.custom_private_rate != null ? initialData.custom_private_rate.toString() : ''
   );
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isTemporary, setIsTemporary] = useState<boolean>(() => {
+    return !!initialData?.is_temporary || (initialData?.id && String(initialData.id).startsWith('stu_temp_'));
+  });
 
   const isTeamOnly = initialData?.is_gym_member || initialExtra?.is_cheer;
 
@@ -10085,6 +10251,7 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
       parent2_phone: parent2Phone,
       custom_group_rate: customGroupRate ? parseFloat(customGroupRate) : null,
       custom_private_rate: customPrivateRate ? parseFloat(customPrivateRate) : null,
+      is_temporary: isTemporary,
       ...initialExtra
     });
   };
@@ -10096,6 +10263,27 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
       </div>
 
       <div className="space-y-4 max-h-[60vh] overflow-y-auto no-scrollbar pr-1 pb-4">
+        {initialData && !isTeamOnly && isTemporary && (
+          <div className="p-3.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 rounded-2xl flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <span className="inline-flex items-center gap-1 text-[8px] font-black uppercase px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-300/80 dark:border-amber-800 tracking-wider">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                Self-Added / Temp Athlete
+              </span>
+              <p className="text-[10px] text-amber-900 dark:text-amber-200 font-bold mt-1">
+                Added on attendance register. Convert to official once registration is complete.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsTemporary(false)}
+              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-[9px] font-black uppercase tracking-wider shrink-0 transition-all shadow-sm active:scale-95"
+            >
+              Make Official
+            </button>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">First Name</label><input placeholder="FIRST NAME" value={firstName} onChange={e => setFirstName(e.target.value)} className="w-full p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
               <div className="space-y-1"><label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Last Name</label><input placeholder="LAST NAME" value={lastName} onChange={e => setLastName(e.target.value)} className="w-full p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200" /></div>
@@ -11131,8 +11319,9 @@ const NotificationsModal: React.FC<{
   onMarkRead: (id: string) => void,
   onClear: () => void,
   permission?: NotificationPermission,
-  onEnableAlerts?: () => void
-}> = ({ notifications, onClose, onMarkRead, onClear, permission, onEnableAlerts }) => {
+  onEnableAlerts?: () => void,
+  onNavigateView?: (view: View) => void
+}> = ({ notifications, onClose, onMarkRead, onClear, permission, onEnableAlerts, onNavigateView }) => {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
       <motion.div 
@@ -11180,38 +11369,103 @@ const NotificationsModal: React.FC<{
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">No new notifications</p>
             </div>
           ) : (
-            notifications.map((n, idx) => (
-              <motion.div 
-                key={n.id || `notif-${idx}`}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                className={`p-4 rounded-2xl border transition-all ${n.is_read ? 'bg-white dark:bg-slate-800 border-slate-50 dark:border-slate-700 opacity-60' : 'bg-blue-50/30 dark:bg-blue-900/10 border-blue-100 dark:border-blue-800 shadow-sm'}`}
-              >
-                <div className="flex justify-between items-start gap-3">
-                  <div className="flex-1">
-                    {(n.title || NOTIFICATION_TITLES[n.type]) && (
-                      <p className="text-[8px] font-black text-[#1e4da1] dark:text-blue-400 uppercase tracking-widest mb-1">
-                        {n.title || NOTIFICATION_TITLES[n.type]}
+            notifications.map((n, idx) => {
+              const isTemp = n.type === 'temp_followup';
+              const isMissing = n.type === 'missing_session';
+              const isCycle = n.type === 'cycle_reminder';
+
+              return (
+                <motion.div 
+                  key={n.id || `notif-${idx}`}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className={`p-4 rounded-2xl border transition-all ${
+                    n.is_read 
+                      ? 'bg-white dark:bg-slate-800 border-slate-50 dark:border-slate-700 opacity-60' 
+                      : isTemp
+                        ? 'bg-amber-50/40 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 shadow-sm'
+                        : isMissing
+                          ? 'bg-orange-50/40 dark:bg-orange-950/20 border-orange-200 dark:border-orange-800 shadow-sm'
+                          : 'bg-blue-50/30 dark:bg-blue-900/10 border-blue-100 dark:border-blue-800 shadow-sm'
+                  }`}
+                >
+                  <div className="flex justify-between items-start gap-3">
+                    <div className="flex-1">
+                      {(n.title || NOTIFICATION_TITLES[n.type]) && (
+                        <p className={`text-[8px] font-black uppercase tracking-widest mb-1 ${
+                          isTemp 
+                            ? 'text-amber-700 dark:text-amber-400' 
+                            : isMissing 
+                              ? 'text-orange-700 dark:text-orange-400' 
+                              : 'text-[#1e4da1] dark:text-blue-400'
+                        }`}>
+                          {n.title || NOTIFICATION_TITLES[n.type]}
+                        </p>
+                      )}
+                      <p className={`text-[11px] font-bold leading-relaxed ${n.is_read ? 'text-slate-500 dark:text-slate-400' : 'text-slate-800 dark:text-slate-100'}`}>
+                        {n.message}
                       </p>
+                      <p className="text-[8px] font-black text-slate-400 uppercase mt-2 tracking-wider">
+                        {new Date(n.created_at).toLocaleString()}
+                      </p>
+
+                      {/* Contextual quick navigation buttons */}
+                      {onNavigateView && (
+                        <div className="mt-2.5 flex items-center gap-2">
+                          {isTemp && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onMarkRead(n.id);
+                                onNavigateView(View.ROSTER);
+                                onClose();
+                              }}
+                              className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/40 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 text-[9px] font-black uppercase rounded-lg tracking-wider transition-colors inline-flex items-center gap-1"
+                            >
+                              Review Trial Athletes
+                            </button>
+                          )}
+                          {isMissing && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onMarkRead(n.id);
+                                onNavigateView(View.REGISTER);
+                                onClose();
+                              }}
+                              className="px-2.5 py-1 bg-orange-100 hover:bg-orange-200 dark:bg-orange-900/40 dark:hover:bg-orange-900/60 text-orange-800 dark:text-orange-200 text-[9px] font-black uppercase rounded-lg tracking-wider transition-colors inline-flex items-center gap-1"
+                            >
+                              Open Register
+                            </button>
+                          )}
+                          {isCycle && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onMarkRead(n.id);
+                                onNavigateView(View.INVOICES);
+                                onClose();
+                              }}
+                              className="px-2.5 py-1 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/40 dark:hover:bg-blue-900/60 text-blue-800 dark:text-blue-200 text-[9px] font-black uppercase rounded-lg tracking-wider transition-colors inline-flex items-center gap-1"
+                            >
+                              Review Invoices
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {!n.is_read && (
+                      <button 
+                        onClick={() => onMarkRead(n.id)}
+                        className="p-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-200 transition-colors"
+                      >
+                        <Check size={12} strokeWidth={3} />
+                      </button>
                     )}
-                    <p className={`text-[11px] font-bold leading-relaxed ${n.is_read ? 'text-slate-500 dark:text-slate-400' : 'text-slate-800 dark:text-slate-100'}`}>
-                      {n.message}
-                    </p>
-                    <p className="text-[8px] font-black text-slate-400 uppercase mt-2 tracking-wider">
-                      {new Date(n.created_at).toLocaleString()}
-                    </p>
                   </div>
-                  {!n.is_read && (
-                    <button 
-                      onClick={() => onMarkRead(n.id)}
-                      className="p-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-200 transition-colors"
-                    >
-                      <Check size={12} strokeWidth={3} />
-                    </button>
-                  )}
-                </div>
-              </motion.div>
-            ))
+                </motion.div>
+              );
+            })
           )}
         </div>
 

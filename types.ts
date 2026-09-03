@@ -238,6 +238,9 @@ export type NotificationType =
   | 'coach_signup'
   | 'session_logged'
   | 'class_added'
+  | 'cycle_reminder'
+  | 'temp_followup'
+  | 'missing_session'
   | 'system';
 
 export interface AppNotification {

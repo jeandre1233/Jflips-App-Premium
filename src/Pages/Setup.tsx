@@ -698,10 +698,39 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
     ? (['students', 'classes', 'schedule', 'staff', 'profile'] as const)
     : (['students', 'classes', 'schedule', 'profile'] as const);
 
-  const filteredAthletes = useMemo(() =>
-    (state.students || []).filter(s => !s.is_gym_member && s.name.toLowerCase().includes(search.toLowerCase())),
-    [state.students, search]
-  );
+  const [athleteFilter, setAthleteFilter] = useState<'all' | 'regular' | 'temp'>('all');
+
+  const tumblingStudents = useMemo(() => {
+    return (state.students || []).filter(s => !s.is_gym_member);
+  }, [state.students]);
+
+  const tempAthletesCount = useMemo(() => {
+    return tumblingStudents.filter(s => !!s.is_temporary || (s.id && String(s.id).startsWith('stu_temp_'))).length;
+  }, [tumblingStudents]);
+
+  const regularAthletesCount = useMemo(() => {
+    return tumblingStudents.filter(s => !s.is_temporary && !(s.id && String(s.id).startsWith('stu_temp_'))).length;
+  }, [tumblingStudents]);
+
+  const filteredAthletes = useMemo(() => {
+    const searchLower = search.toLowerCase().trim();
+    return tumblingStudents.filter(s => {
+      const isTemp = !!s.is_temporary || (s.id && String(s.id).startsWith('stu_temp_'));
+      if (athleteFilter === 'temp' && !isTemp) return false;
+      if (athleteFilter === 'regular' && isTemp) return false;
+
+      if (!searchLower) return true;
+      if (isTemp && ('temp'.includes(searchLower) || 'self-added'.includes(searchLower) || 'self added'.includes(searchLower) || 'trial'.includes(searchLower))) {
+        return true;
+      }
+      return (
+        s.name.toLowerCase().includes(searchLower) ||
+        (s.parent1_name && s.parent1_name.toLowerCase().includes(searchLower)) ||
+        (s.parent1_phone && s.parent1_phone.includes(searchLower)) ||
+        (s.phone && s.phone.includes(searchLower))
+      );
+    });
+  }, [tumblingStudents, search, athleteFilter]);
 
   const filteredGyms = useMemo(() => {
     const allGyms = (state.gyms || []).filter(g => g.gym_type !== 'cheer');
@@ -1267,6 +1296,45 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[#94a3b8]" size={16} />
                   <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-3 pl-11 pr-4 text-xs font-bold shadow-sm outline-none dark:text-slate-200" />
                 </div>
+
+                {entityType === 'athletes' && tempAthletesCount > 0 && (
+                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setAthleteFilter('all')}
+                      className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all shrink-0 ${
+                        athleteFilter === 'all'
+                          ? 'bg-[#1e4da1] text-white shadow-sm'
+                          : 'bg-white dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 border border-slate-150 dark:border-slate-800'
+                      }`}
+                    >
+                      All ({tumblingStudents.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAthleteFilter('regular')}
+                      className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all shrink-0 ${
+                        athleteFilter === 'regular'
+                          ? 'bg-[#1e4da1] text-white shadow-sm'
+                          : 'bg-white dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 border border-slate-150 dark:border-slate-800'
+                      }`}
+                    >
+                      Regular ({regularAthletesCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAthleteFilter('temp')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all shrink-0 ${
+                        athleteFilter === 'temp'
+                          ? 'bg-amber-600 text-white shadow-sm'
+                          : 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60'
+                      }`}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      Self-Added / Temp ({tempAthletesCount})
+                    </button>
+                  </div>
+                )}
                 
                 <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-3 shadow-sm">
                   <div className="flex items-center justify-between">
@@ -1347,31 +1415,63 @@ export const RosterView = memo(({ state, activeTab, onTabChange, entityType, onE
                   </div>
                 ))
               ) : (
-                (filteredAthletes || []).map((item, idx) => (
-                  <motion.div
-                    key={`entity-list-athletes-${item.id}-${idx}`}
-                    variants={athleteItemVariants}
-                    onClick={() => onEditStudent(item as Student)}
-                    className="p-4 bg-white dark:bg-slate-800/60 border border-slate-50 dark:border-slate-800 rounded-2xl flex items-center justify-between shadow-sm cursor-pointer hover:border-blue-200 dark:hover:border-blue-900 transition-colors"
-                  >
-                    <div className="flex items-center gap-3 overflow-hidden">
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm italic shrink-0 bg-[#eff6ff] dark:bg-blue-900/30 text-[#1e4da1] dark:text-blue-400">
-                        {isStudentLinked(item as Student) ? <Users size={16} /> : item.name.charAt(0)}
+                (filteredAthletes || []).map((item, idx) => {
+                  const student = item as Student;
+                  const isTemp = !!student.is_temporary || (student.id && String(student.id).startsWith('stu_temp_'));
+                  return (
+                    <motion.div
+                      key={`entity-list-athletes-${item.id}-${idx}`}
+                      variants={athleteItemVariants}
+                      onClick={() => onEditStudent(student)}
+                      className={`p-4 bg-white dark:bg-slate-800/60 border rounded-2xl flex items-center justify-between shadow-sm cursor-pointer transition-colors ${
+                        isTemp
+                          ? 'border-amber-200/90 dark:border-amber-900/60 hover:border-amber-400 dark:hover:border-amber-700 bg-gradient-to-r from-amber-50/40 dark:from-amber-950/20 via-white dark:via-slate-800/60 to-transparent'
+                          : 'border-slate-50 dark:border-slate-800 hover:border-blue-200 dark:hover:border-blue-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 overflow-hidden min-w-0">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm italic shrink-0 ${
+                          isTemp
+                            ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300'
+                            : 'bg-[#eff6ff] dark:bg-blue-900/30 text-[#1e4da1] dark:text-blue-400'
+                        }`}>
+                          {isStudentLinked(student) ? <Users size={16} /> : student.name.charAt(0)}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic truncate">{student.name}</p>
+                            {isTemp && (
+                              <span className="inline-flex items-center gap-1 text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300/90 dark:border-amber-800 tracking-wider shrink-0">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                                Self-Added / Temp
+                              </span>
+                            )}
+                          </div>
+                          {isTemp ? (
+                            <p className="text-[9px] font-bold text-amber-700/90 dark:text-amber-400/90 mt-0.5 truncate">
+                              {student.parent1_name ? `${student.parent1_name} • ` : ''}
+                              {student.parent1_phone || student.phone || 'No phone'} • Trial Athlete
+                            </p>
+                          ) : (
+                            (student.parent1_phone || student.phone) ? (
+                              <p className="text-[8px] text-slate-400 font-bold uppercase mt-0.5">
+                                {student.parent1_phone || student.phone}
+                              </p>
+                            ) : null
+                          )}
+                        </div>
                       </div>
-                      <div className="">
-                        <p className="text-sm font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">{item.name}</p>
+                      <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <button 
+                          onClick={() => onEditStudent(student)}
+                          className="p-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-xl transition-all text-slate-400"
+                        >
+                          <ChevronRight size={18} />
+                        </button>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                      <button 
-                        onClick={() => onEditStudent(item as Student)}
-                        className="p-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-xl transition-all text-slate-400"
-                      >
-                        <ChevronRight size={18} />
-                      </button>
-                    </div>
-                  </motion.div>
-                ))
+                    </motion.div>
+                  );
+                })
               )}
             </motion.div>
           </div>

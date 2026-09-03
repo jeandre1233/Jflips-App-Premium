@@ -111,3 +111,34 @@ export async function sendCycleMonthReminderNotification(data: {
 
   return sendDiscordMessage(`⚠️ **Monthly Invoicing Alert:** Remember to cycles the month for *${data.monthName} ${data.year}*!`, [embed]);
 }
+
+/**
+ * Send reminder at the end of the month cycle to follow up with temporary / trial athletes.
+ */
+export async function sendTempAthleteFollowupDiscordNotification(data: {
+  monthName: string;
+  year: number;
+  tempAthletes: { name: string; parentPhone?: string }[];
+}): Promise<boolean> {
+  const athleteList = data.tempAthletes
+    .map(a => `• **${a.name}**${a.parentPhone ? ` (${a.parentPhone})` : ''}`)
+    .slice(0, 10)
+    .join('\n');
+
+  const embed = {
+    title: '⚠️ Trial Athletes Follow-Up Reminder',
+    description: `The following athletes were logged as **self-added / temporary** in the attendance register during **${data.monthName} ${data.year}**.\n\nPlease WhatsApp their parents to ask them to officially sign up and complete registration:\n\n${athleteList}`,
+    color: 15769640, // Warm amber/orange
+    fields: [
+      { name: 'Trial Athletes Count', value: `${data.tempAthletes.length} athlete(s)`, inline: true },
+      { name: 'Action', value: 'WhatsApp parents & convert to official under Setup → Clients', inline: false }
+    ],
+    timestamp: new Date().toISOString(),
+    footer: {
+      text: 'JFLIPS Athlete Onboarding Monitor',
+    }
+  };
+
+  return sendDiscordMessage(`⚠️ **Trial Athletes Follow-Up:** ${data.tempAthletes.length} temporary athlete(s) need official signup for *${data.monthName} ${data.year}*!`, [embed]);
+}
+
