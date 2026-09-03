@@ -26,6 +26,10 @@ export interface Student {
   sub_team_ids?: string[];
   custom_group_rate?: number;
   custom_private_rate?: number;
+  is_temporary?: boolean;
+  trial_notes?: string;
+  created_by_coach_id?: string;
+  first_class_date?: string;
 }
 
 export function getStudentSessionPrice(

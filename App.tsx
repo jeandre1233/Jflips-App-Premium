@@ -39,6 +39,7 @@ import {
   BarChart3,
   UserCircle,
   UserCheck,
+  UserPlus,
   Upload,
   Loader2,
   AlertTriangle,
@@ -1042,7 +1043,7 @@ const App: React.FC = () => {
           // else. Falls back to a direct read for databases where the function
           // has not been created yet — that read simply returns no row once the
           // public policy is gone, which costs branding but breaks nothing.
-          let coachOwnerP: { business_name?: string; logo?: string } | null = null;
+          let coachOwnerP: { business_name?: string; logo?: string; default_group_rate?: number; sibling_discount?: number } | null = null;
           const { data: brandRows, error: brandErr } = await supabase
             .rpc('get_owner_branding', { p_owner_id: staffP.owner_id });
 
@@ -1051,7 +1052,7 @@ const App: React.FC = () => {
           } else if (brandErr) {
             const { data: legacyOwnerP } = await supabase
               .from('owner_profiles')
-              .select('business_name, logo')
+              .select('business_name, logo, default_group_rate, sibling_discount')
               .eq('id', staffP.owner_id)
               .maybeSingle();
             coachOwnerP = legacyOwnerP;
@@ -1064,6 +1065,8 @@ const App: React.FC = () => {
             username: staffP.username || undefined,
             businessName: staffP.name || coachOwnerP?.business_name || INITIAL_PROFILE.businessName,
             logo: coachOwnerP?.logo || INITIAL_PROFILE.logo,
+            default_group_rate: coachOwnerP?.default_group_rate != null ? Number(coachOwnerP.default_group_rate) : undefined,
+            sibling_discount: coachOwnerP?.sibling_discount != null ? Number(coachOwnerP.sibling_discount) : undefined,
             bankName: staffP.bank_name || '',
             accountNumber: staffP.account_number || '',
             branchCode: staffP.branch_code || '',
@@ -1296,7 +1299,9 @@ const App: React.FC = () => {
             is_gym_member: s.is_gym_member, 
             associated_gym_id: s.associated_gym_id,
             is_cheer: s.is_cheer,
-            sub_team_ids: parsedSubTeamIds
+            sub_team_ids: parsedSubTeamIds,
+            custom_group_rate: s.custom_group_rate != null ? Number(s.custom_group_rate) : undefined,
+            custom_private_rate: s.custom_private_rate != null ? Number(s.custom_private_rate) : undefined
           };
         }),
         gyms: (gymsRes.data || []).map((g: any) => ({
@@ -1473,6 +1478,8 @@ const App: React.FC = () => {
 
   const handleSaveStudent = async (name: string, phone?: string, linkedSiblingId?: string, extraData?: Partial<Student>) => {
     if (!user) return;
+    const isOwnerRole = state.profile.role === 'owner';
+    const targetUserId = isOwnerRole ? user.id : (state.profile.owner_id || user.id);
 
     // Sibling link. Picking any one child joins that child's household: if they
     // already have a group key we adopt it, otherwise we mint one and write it
@@ -1498,7 +1505,7 @@ const App: React.FC = () => {
             .from('tumbling_students')
             .update({ group_key: newKey })
             .eq('id', linkedSiblingId)
-            .eq('user_id', user.id);
+            .eq('user_id', targetUserId);
           if (sibErr) {
             alert(`Could not link ${sibling.name}: ${sibErr.message}`);
             return;
@@ -1506,7 +1513,7 @@ const App: React.FC = () => {
         }
       }
     }
-    const studentId = editingStudent ? editingStudent.id : `stu_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const studentId = (extraData?.id && extraData.id.startsWith('stu_')) ? extraData.id : (editingStudent ? editingStudent.id : `stu_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
     const isGymMember = extraData?.is_gym_member ?? (editingStudent?.is_gym_member || false);
     const table = isGymMember ? 'team_athletes' : 'tumbling_students';
     
@@ -1514,7 +1521,7 @@ const App: React.FC = () => {
     if (editingStudent) {
       const oldTable = editingStudent.is_gym_member ? 'team_athletes' : 'tumbling_students';
       if (oldTable !== table) {
-        await supabase.from(oldTable).delete().eq('id', editingStudent.id).eq('user_id', user.id);
+        await supabase.from(oldTable).delete().eq('id', editingStudent.id).eq('user_id', targetUserId);
       }
     }
 
@@ -1522,7 +1529,7 @@ const App: React.FC = () => {
     if (isGymMember) {
       payload = {
         id: studentId,
-        user_id: user.id,
+        user_id: targetUserId,
         name,
         associated_gym_id: extraData?.associated_gym_id || null,
         is_cheer: extraData?.is_cheer ?? true,
@@ -1531,13 +1538,19 @@ const App: React.FC = () => {
       };
       delete (payload as any).is_gym_member;
     } else {
+      const defaultNewRate = Number(state.profile.default_group_rate) || 0;
+      const effectiveGroupRate = (extraData?.custom_group_rate !== undefined)
+        ? extraData.custom_group_rate
+        : (editingStudent ? editingStudent.custom_group_rate : (defaultNewRate > 0 ? defaultNewRate : null));
+
       payload = {
         id: studentId,
         name,
         phone,
         group_key: finalGroupKey || null,
-        user_id: user.id,
-        ...extraData
+        user_id: targetUserId,
+        ...extraData,
+        custom_group_rate: effectiveGroupRate
       };
       delete (payload as any).is_gym_member;
       delete (payload as any).sub_team_ids;
@@ -1553,6 +1566,17 @@ const App: React.FC = () => {
       };
       const { error: retryError } = await supabase.from(table).upsert(fallbackPayload);
       error = retryError;
+    }
+
+    // If it fails on missing newly added optional columns in tumbling_students, strip them and retry
+    if (error && !isGymMember && (error.message.includes('is_temporary') || error.message.includes('trial_notes') || error.message.includes('created_by_coach_id') || error.message.includes('first_class_date'))) {
+      const safePayload = { ...payload };
+      delete safePayload.is_temporary;
+      delete safePayload.trial_notes;
+      delete safePayload.created_by_coach_id;
+      delete safePayload.first_class_date;
+      const { error: fallbackError } = await supabase.from(table).upsert(safePayload);
+      error = fallbackError;
     }
 
     if (error) { alert("Cloud Save Error: " + error.message); return; }
@@ -3523,7 +3547,15 @@ const App: React.FC = () => {
         />
       )}
       {activeView === View.LOG_SESSION && <LogSessionView state={state} onNavigate={handleViewChange} />}
-      {activeView === View.REGISTER && <RegisterView state={state} onSave={handleLogSession} onCancel={() => handleViewChange(View.LOG_SESSION)} initialSession={editingSession} />}
+      {activeView === View.REGISTER && (
+        <RegisterView 
+          state={state} 
+          onSave={handleLogSession} 
+          onCancel={() => handleViewChange(View.LOG_SESSION)} 
+          initialSession={editingSession}
+          onSaveStudent={handleSaveStudent}
+        />
+      )}
       {activeView === View.TEAM_ATTENDANCE && <TeamAttendanceView state={state} onSave={handleLogSession} initialTeamIds={initialTeamIds} initialDate={initialDate} initialCoachId={initialCoachId} initialSession={editingSession} gymType="cheer" />}
       {activeView === View.GYM_ATTENDANCE && <TeamAttendanceView state={state} onSave={handleLogSession} initialTeamIds={initialTeamIds} initialDate={initialDate} initialCoachId={initialCoachId} initialSession={editingSession} gymType="tumbling" />}
       {/* onSaveAllocations is owner-only — a coach has no business account of
@@ -8173,12 +8205,37 @@ const LogSessionView = memo(({ state, onNavigate }: { state: AppState, onNavigat
   );
 });
 
-const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state: AppState, onSave: (ct: any, sids: string[], date: string, hrs?: number, coachId?: string, isComp?: boolean) => void, onCancel: () => void, initialSession?: AttendanceSession | null }) => {
+const RegisterView = memo(({ 
+  state, 
+  onSave, 
+  onCancel, 
+  initialSession,
+  onSaveStudent
+}: { 
+  state: AppState, 
+  onSave: (ct: any, sids: string[], date: string, hrs?: number, coachId?: string, isComp?: boolean) => void, 
+  onCancel: () => void, 
+  initialSession?: AttendanceSession | null,
+  onSaveStudent?: (name: string, phone?: string, linkedSiblingId?: string, extraData?: Partial<Student>) => Promise<void>
+}) => {
   const [selectedClassId, setSelectedClassId] = useState(initialSession?.classTypeId || '');
   const [selectedStudents, setSelectedStudents] = useState<string[]>(initialSession?.studentIds || []);
   const [date, setDate] = useState(initialSession?.date || new Date().toISOString().split('T')[0]);
   const [hours, setHours] = useState<number | string>(initialSession?.hours_coached || '');
   
+  // Search state for attendance list
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  // Add Athlete Modal state in RegisterView
+  const [showAddAthleteModal, setShowAddAthleteModal] = useState(false);
+  const [newAthleteFirstName, setNewAthleteFirstName] = useState('');
+  const [newAthleteLastName, setNewAthleteLastName] = useState('');
+  const [newAthleteParentName, setNewAthleteParentName] = useState('');
+  const [newAthleteParentPhone, setNewAthleteParentPhone] = useState('');
+  const [newAthleteTrialNotes, setNewAthleteTrialNotes] = useState('');
+  const [isSavingAthlete, setIsSavingAthlete] = useState(false);
+  const [addAthleteError, setAddAthleteError] = useState<string | null>(null);
+
   const isOwner = state.profile.role === 'owner';
 
   const [selectedCoachIds, setSelectedCoachIds] = useState<string[]>(() => {
@@ -8214,7 +8271,7 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
     // No gym specific logic needed here anymore
   }, [selectedOption, initialSession]);
 
-  const entitiesToShow = useMemo(() => {
+  const rawEntitiesToShow = useMemo(() => {
     if (!selectedClassId) return [];
 
     const selectedClass = (state.classTypes || []).find(ct => ct.id === selectedClassId);
@@ -8227,6 +8284,35 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
 
     return [...assigned, ...unassigned];
   }, [selectedClassId, state.students, state.classTypes]);
+
+  // Filter entities according to search query
+  const entitiesToShow = useMemo(() => {
+    if (!searchQuery.trim()) return rawEntitiesToShow;
+    const q = searchQuery.toLowerCase().trim();
+    return rawEntitiesToShow.filter(s => {
+      const fullName = (s.name || `${s.first_name || ''} ${s.last_name || ''}`).toLowerCase();
+      const parentPhone = (s.parent1_phone || s.phone || '').toLowerCase();
+      const parentName = (s.parent1_name || '').toLowerCase();
+      return fullName.includes(q) || parentPhone.includes(q) || parentName.includes(q);
+    });
+  }, [rawEntitiesToShow, searchQuery]);
+
+  // Determine if a student has attended any sessions before (or is brand new / 1st time)
+  const isFirstTimeAthlete = useCallback((studentId: string) => {
+    const student = (state.students || []).find(s => s.id === studentId);
+    if (student?.is_temporary) return true;
+    
+    // Check if athlete appears in any logged sessions (live or archived)
+    const hasLiveSession = (state.sessions || []).some(sess => (sess.studentIds || []).includes(studentId));
+    if (hasLiveSession) return false;
+
+    const hasHistorySession = (state.history || []).some(h => 
+      (h.sessions || []).some(sess => (sess.studentIds || []).includes(studentId))
+    );
+    if (hasHistorySession) return false;
+
+    return true;
+  }, [state.students, state.sessions, state.history]);
 
   useEffect(() => {
     // Auto-select enrolled students when selecting a class
@@ -8277,6 +8363,75 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
     }));
 
     onSave(sessionsToSave, [], date, 0, undefined, false);
+  };
+
+  const handleCreateTemporaryAthlete = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddAthleteError(null);
+
+    const fName = newAthleteFirstName.trim();
+    const lName = newAthleteLastName.trim();
+    const phone = newAthleteParentPhone.trim();
+    const pName = newAthleteParentName.trim();
+    const combinedName = fName + (lName ? ` ${lName}` : '');
+
+    if (!combinedName) {
+      setAddAthleteError("Please enter athlete's name.");
+      return;
+    }
+    if (!phone) {
+      setAddAthleteError("Parent cell phone number is strictly required.");
+      return;
+    }
+
+    if (!onSaveStudent) {
+      setAddAthleteError("Unable to save athlete: missing handler.");
+      return;
+    }
+
+    setIsSavingAthlete(true);
+    try {
+      const newStudentId = `stu_temp_${Date.now()}_${Math.random().toString(36).substr(2, 7)}`;
+      const selectedClass = (state.classTypes || []).find(ct => ct.id === selectedClassId);
+      const defaultNewAthleteRate = Number(state.profile?.default_group_rate) || 
+        Number((state.profile as any)?.defaultGroupRate) || 0;
+
+      await onSaveStudent(
+        combinedName,
+        phone,
+        undefined,
+        {
+          id: newStudentId,
+          first_name: fName,
+          last_name: lName,
+          parent1_name: pName || 'Parent',
+          parent1_phone: phone,
+          phone: phone,
+          class_name: selectedClass?.name || 'Tumbling Class',
+          is_gym_member: false,
+          is_temporary: true,
+          custom_group_rate: defaultNewAthleteRate > 0 ? defaultNewAthleteRate : null,
+          trial_notes: newAthleteTrialNotes.trim() || undefined,
+          created_by_coach_id: state.profile?.id || undefined,
+          first_class_date: date
+        }
+      );
+
+      // Automatically check/select the new athlete in attendance
+      setSelectedStudents(prev => prev.includes(newStudentId) ? prev : [...prev, newStudentId]);
+
+      // Reset modal fields
+      setNewAthleteFirstName('');
+      setNewAthleteLastName('');
+      setNewAthleteParentName('');
+      setNewAthleteParentPhone('');
+      setNewAthleteTrialNotes('');
+      setShowAddAthleteModal(false);
+    } catch (err: any) {
+      setAddAthleteError(err?.message || "Failed to create temporary athlete");
+    } finally {
+      setIsSavingAthlete(false);
+    }
   };
 
   return (
@@ -8352,7 +8507,53 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
       </div>
 
       <div className="space-y-3">
-        <label className="text-[10px] font-black text-[#94a3b8] uppercase px-1">Attendance</label>
+        <div className="flex items-center justify-between px-1">
+          <label className="text-[10px] font-black text-[#94a3b8] uppercase">Attendance</label>
+          {selectedClassId && (
+            <span className="text-[8px] font-black uppercase text-slate-400">
+              {selectedStudents.length} Selected
+            </span>
+          )}
+        </div>
+
+        {selectedClassId && (
+          <div className="flex flex-col sm:flex-row gap-2">
+            {/* Attendance Search Bar */}
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search athlete or parent phone..."
+                className="w-full pl-9 pr-8 py-3 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 outline-none focus:border-[#1e4da1] dark:focus:border-blue-500 shadow-sm"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            {/* Add Athlete Button */}
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.96 }}
+              onClick={() => {
+                setAddAthleteError(null);
+                setShowAddAthleteModal(true);
+              }}
+              className="px-4 py-3 bg-blue-50 dark:bg-blue-900/30 text-[#1e4da1] dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/50 shadow-sm shrink-0"
+            >
+              <UserPlus size={14} />
+              <span>Add Athlete</span>
+            </motion.button>
+          </div>
+        )}
 
         <div className="space-y-2.5">
           {!selectedClassId ? (
@@ -8365,9 +8566,22 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
                 <p className="text-[8px] text-blue-400 uppercase mt-1">Invoice will be sent to {selectedOption.name}</p>
               </div>
             </div>
+          ) : (entitiesToShow || []).length === 0 ? (
+            <div className="bg-white dark:bg-slate-800/40 border border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-8 text-center space-y-2">
+              <p className="text-[10px] text-slate-400 font-black uppercase">No athletes found {searchQuery ? `matching "${searchQuery}"` : ''}</p>
+              <button
+                type="button"
+                onClick={() => setShowAddAthleteModal(true)}
+                className="text-xs font-black uppercase text-[#1e4da1] dark:text-blue-400 hover:underline"
+              >
+                + Add "{searchQuery}" as a new trial athlete
+              </button>
+            </div>
           ) : (entitiesToShow || []).map((entity, idx) => {
             const selectedClass = (state.classTypes || []).find(ct => ct.id === selectedClassId);
             const isAssignedToClass = selectedClass?.studentIds?.includes(entity.id);
+            const isFirstTime = isFirstTimeAthlete(entity.id);
+            const isTemp = !!entity.is_temporary;
 
             return (
               <motion.button key={`entity-reg-${entity.id}-${idx}`} variants={registerItemVariants} whileTap={{ scale: 0.97 }} onClick={() => toggleEntity(entity.id)} className={`w-full p-4 rounded-xl border flex items-center justify-between transition-colors ${selectedStudents.includes(entity.id) ? 'bg-[#eff6ff] dark:bg-blue-900/30 border-[#1e4da1] text-[#1e4da1] shadow-md' : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-[#1a1a1a] dark:text-slate-300'}`}>
@@ -8375,15 +8589,34 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
                   <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${selectedStudents.includes(entity.id) ? 'bg-[#1e4da1] border-[#1e4da1]' : 'border-slate-200'}`}>
                     {selectedStudents.includes(entity.id) && <CheckCircle2 size={12} className="text-white" />}
                   </div>
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <User size={14} className="opacity-50 shrink-0" />
-                    <span className="font-black uppercase italic text-[13px] truncate">{entity.name}</span>
+                  <div className="flex flex-col min-w-0 flex-1 text-left">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <User size={14} className="opacity-50 shrink-0" />
+                      <span className="font-black uppercase italic text-[13px] truncate">{entity.name}</span>
+                    </div>
+                    {entity.parent1_phone && (
+                      <span className="text-[9px] text-slate-400 dark:text-slate-500 font-bold ml-5">
+                        Parent: {entity.parent1_phone} {entity.parent1_name ? `(${entity.parent1_name})` : ''}
+                      </span>
+                    )}
                   </div>
-                  {isAssignedToClass && (
-                    <span className="text-[8px] font-black uppercase px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/50 text-[#1e4da1] dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0">
-                      Enrolled
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {isTemp && (
+                      <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                        Temp Athlete
+                      </span>
+                    )}
+                    {isFirstTime && !isTemp && (
+                      <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                        1st Time
+                      </span>
+                    )}
+                    {isAssignedToClass && (
+                      <span className="text-[8px] font-black uppercase px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/50 text-[#1e4da1] dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                        Enrolled
+                      </span>
+                    )}
+                  </div>
                 </div>
               </motion.button>
             );
@@ -8395,6 +8628,138 @@ const RegisterView = memo(({ state, onSave, onCancel, initialSession }: { state:
         <motion.button whileTap={{ scale: 0.95 }} onClick={handleSave} className="flex-[4] bg-[#1e4da1] dark:bg-blue-600 text-white py-4.5 rounded-2xl font-black text-[11px] uppercase shadow-2xl">Confirm Log</motion.button>
         <motion.button whileTap={{ scale: 0.9 }} onClick={onCancel} className="flex-1 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 text-[#94a3b8] p-4 rounded-2xl flex items-center justify-center shadow-lg"><X size={24} /></motion.button>
       </div>
+
+      {/* Add Athlete / Trial Attendee Modal */}
+      {showAddAthleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95, y: 15 }} 
+            animate={{ opacity: 1, scale: 1, y: 0 }} 
+            exit={{ opacity: 0, scale: 0.95, y: 15 }}
+            className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-100 dark:border-slate-800 space-y-4"
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-[#1e4da1] dark:text-blue-400 flex items-center justify-center">
+                  <UserPlus size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black uppercase italic text-slate-800 dark:text-white">Add Athlete</h3>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">New / Trial Tumbling Attendee</p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowAddAthleteModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {addAthleteError && (
+              <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 rounded-xl text-red-600 dark:text-red-400 text-xs font-bold">
+                {addAthleteError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateTemporaryAthlete} className="space-y-3.5">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase ml-1">
+                    First Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Liam"
+                    value={newAthleteFirstName}
+                    onChange={e => setNewAthleteFirstName(e.target.value)}
+                    className="w-full p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl font-bold text-xs uppercase outline-none focus:ring-2 focus:ring-[#1e4da1] dark:text-white"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Last Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Smith"
+                    value={newAthleteLastName}
+                    onChange={e => setNewAthleteLastName(e.target.value)}
+                    className="w-full p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl font-bold text-xs uppercase outline-none focus:ring-2 focus:ring-[#1e4da1] dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-400 uppercase ml-1">
+                  Parent Cell Phone <span className="text-red-500">* (Mandatory for contact)</span>
+                </label>
+                <div className="relative">
+                  <Phone size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="tel"
+                    required
+                    placeholder="e.g. 082 123 4567"
+                    value={newAthleteParentPhone}
+                    onChange={e => setNewAthleteParentPhone(e.target.value)}
+                    className="w-full pl-9 pr-3.5 py-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-[#1e4da1] dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Parent / Guardian Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Sarah Smith"
+                  value={newAthleteParentName}
+                  onChange={e => setNewAthleteParentName(e.target.value)}
+                  className="w-full p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl font-bold text-xs uppercase outline-none focus:ring-2 focus:ring-[#1e4da1] dark:text-white"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Notes / Trial Info</label>
+                <input
+                  type="text"
+                  placeholder="e.g. First trial class, wants to sign up for Tuesday sessions"
+                  value={newAthleteTrialNotes}
+                  onChange={e => setNewAthleteTrialNotes(e.target.value)}
+                  className="w-full p-3.5 bg-slate-50 dark:bg-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-[#1e4da1] dark:text-white"
+                />
+              </div>
+
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-xl border border-blue-200 dark:border-blue-900/40 text-[10px] text-blue-800 dark:text-blue-300 font-bold leading-relaxed space-y-1">
+                <div>
+                  ℹ️ Athlete will be billed at <strong>R{Number(state.profile?.default_group_rate) || 0}</strong> (Default New Athlete Rate).
+                </div>
+                <div className="text-[9px] text-slate-500 dark:text-slate-400">
+                  Parent cell phone number is stored so you can follow up and convert to full enrollment.
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 pt-2">
+                <motion.button
+                  whileTap={{ scale: 0.96 }}
+                  type="submit"
+                  disabled={isSavingAthlete}
+                  className="flex-[2] py-4 bg-[#1e4da1] text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isSavingAthlete ? <RefreshCw size={14} className="animate-spin" /> : <UserPlus size={14} />}
+                  <span>{isSavingAthlete ? 'Saving...' : 'Add & Select'}</span>
+                </motion.button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddAthleteModal(false)}
+                  className="flex-1 py-4 bg-slate-100 dark:bg-slate-800 text-slate-400 rounded-xl font-black text-xs uppercase tracking-widest"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 });
