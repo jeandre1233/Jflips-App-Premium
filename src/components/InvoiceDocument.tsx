@@ -178,7 +178,7 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({
       {/* Header */}
       <View style={styles.header}>
         <View>
-          {profile.logo && <Image src={profile.logo} style={styles.logo} />}
+          <Image src="/Invoice.png" style={styles.logo} />
           <Text style={styles.businessSub}>Invoice #{invoiceId}</Text>
         </View>
         <View style={styles.businessInfo}>

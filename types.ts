@@ -165,6 +165,7 @@ export interface OwnerProfile {
   siblingDiscount?: number; // sibling_discount numeric
   /** Seeds a NEW athlete's custom_group_rate. Never re-applied afterwards. */
   defaultGroupRate?: number; // default_group_rate numeric
+  defaultLoggingCoachId?: string; // default_logging_coach_id text
   createdAt?: string; // created_at timestamptz
 }
 
@@ -212,6 +213,8 @@ export interface Profile {
   can_view_tumbling?: boolean;
   can_view_school_gyms?: boolean;
   assigned_cheer_org_ids?: string[];
+  /** Default coach ID auto-selected when logging sessions */
+  default_logging_coach_id?: string;
   /**
    * Rand deducted once from a class session when two or more linked siblings
    * attend it together. Owner-level setting; 0 or absent disables it.
@@ -396,6 +399,24 @@ export interface Competition {
   created_at?: string;
 }
 
+export interface StaffPayslip {
+  id: string;
+  reference_id?: string;
+  coach_id: string;
+  owner_id?: string;
+  period_month: string;
+  total_hours: number;
+  total_sessions: number;
+  gross_amount: number;
+  status: 'unpaid' | 'paid' | 'processing';
+  paid_at?: string;
+  payment_method?: string;
+  notes?: string;
+  snapshot_data?: any;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface AppState {
   students: Student[];
   gyms: Gym[];
@@ -415,6 +436,7 @@ export interface AppState {
   merchItems: MerchItem[];
   merchClients: MerchClient[];
   merchOrders: MerchOrder[];
+  payslips?: StaffPayslip[];
 }
 
 export enum View {

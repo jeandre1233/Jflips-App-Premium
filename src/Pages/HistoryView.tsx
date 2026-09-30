@@ -20,9 +20,18 @@ import {
   School,
   Activity,
   CheckCircle2,
-  X
+  X,
+  Wallet,
+  FileText,
+  Loader2
 } from 'lucide-react';
-import { AppState, HistoryMonth, AttendanceSession } from '../../types';
+import { toPng } from 'html-to-image';
+import { jsPDF } from 'jspdf';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { AppState, HistoryMonth, AttendanceSession, StaffProfile } from '../../types';
+import { priceSessions, PricingContext, PricedCoachLine } from '../utils/pricing';
 
 interface HistoryViewProps {
   state: AppState;
@@ -48,6 +57,191 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   const [expandedMonthId, setExpandedMonthId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStreamFilter, setSelectedStreamFilter] = useState<'all' | 'tumbling' | 'schools' | 'gyms'>('all');
+
+  // Archived Payslip Inspection State
+  const [selectedArchivedPayslip, setSelectedArchivedPayslip] = useState<{
+    monthName: string;
+    year: number;
+    reference: string;
+    coach: any;
+    allLines: PricedCoachLine[];
+    totalHours: number;
+    totalEarnings: number;
+    sessionCount: number;
+  } | null>(null);
+  const [isGeneratingPayslipPdf, setIsGeneratingPayslipPdf] = useState(false);
+  const payslipDocRef = React.useRef<HTMLDivElement>(null);
+
+  const pricingContext: PricingContext = useMemo(() => ({
+    gyms: state.gyms || [],
+    classTypes: state.classTypes || [],
+    students: state.students || [],
+    staff: state.staff || [],
+    profile: state.profile
+  }), [state.gyms, state.classTypes, state.students, state.staff, state.profile]);
+
+  const saveAndShareFile = async (dataUrl: string, fileName: string) => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const base64Data = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+        const savedFile = await Filesystem.writeFile({
+          path: fileName,
+          data: base64Data,
+          directory: Directory.Cache,
+        });
+
+        await Share.share({
+          title: fileName,
+          text: `Sharing ${fileName}`,
+          url: savedFile.uri,
+          dialogTitle: `Share ${fileName}`,
+        });
+      } catch (e) {
+        console.error('Native share failed', e);
+        alert('Failed to share file on mobile.');
+      }
+    } else {
+      const link = document.createElement('a');
+      link.download = fileName;
+      link.href = dataUrl;
+      link.click();
+    }
+  };
+
+  const handleDownloadArchivedPdf = async () => {
+    if (!selectedArchivedPayslip || !payslipDocRef.current) return;
+    setIsGeneratingPayslipPdf(true);
+    const wasDark = document.documentElement.classList.contains('dark');
+    if (wasDark) document.documentElement.classList.remove('dark');
+
+    try {
+      await new Promise(r => setTimeout(r, 600));
+      const dataUrl = await toPng(payslipDocRef.current, {
+        backgroundColor: '#ffffff',
+        pixelRatio: 3,
+        cacheBust: true
+      });
+
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pdfW = 210;
+      const margin = 10;
+      const contentW = pdfW - (margin * 2);
+      const imgProps = doc.getImageProperties(dataUrl);
+      const pdfH = (imgProps.height * contentW) / imgProps.width;
+
+      doc.addImage(dataUrl, 'PNG', margin, margin, contentW, pdfH);
+      const fileName = `Payslip_${selectedArchivedPayslip.coach.name.replace(/\s+/g, '_')}_${selectedArchivedPayslip.monthName}_${selectedArchivedPayslip.year}.pdf`;
+      
+      if (Capacitor.isNativePlatform()) {
+        const pdfBase64 = doc.output('datauristring');
+        await saveAndShareFile(pdfBase64, fileName);
+      } else {
+        doc.save(fileName);
+      }
+    } catch (e) {
+      console.error('Archived payslip PDF failed:', e);
+      alert('Failed to generate PDF');
+    } finally {
+      if (wasDark) document.documentElement.classList.add('dark');
+      setIsGeneratingPayslipPdf(false);
+    }
+  };
+
+  const handleDownloadArchivedPng = async () => {
+    if (!selectedArchivedPayslip || !payslipDocRef.current) return;
+    setIsGeneratingPayslipPdf(true);
+    const wasDark = document.documentElement.classList.contains('dark');
+    if (wasDark) document.documentElement.classList.remove('dark');
+
+    try {
+      await new Promise(r => setTimeout(r, 600));
+      const dataUrl = await toPng(payslipDocRef.current, {
+        backgroundColor: '#ffffff',
+        pixelRatio: 2,
+        cacheBust: true,
+        style: { borderRadius: '1rem' }
+      });
+      const fileName = `Payslip_${selectedArchivedPayslip.coach.name.replace(/\s+/g, '_')}_${selectedArchivedPayslip.monthName}_${selectedArchivedPayslip.year}.png`;
+      await saveAndShareFile(dataUrl, fileName);
+    } catch (e) {
+      console.error('Archived payslip PNG failed:', e);
+      alert('Failed to capture PNG');
+    } finally {
+      if (wasDark) document.documentElement.classList.add('dark');
+      setIsGeneratingPayslipPdf(false);
+    }
+  };
+
+  const getArchivedMonthPayslips = (m: HistoryMonth) => {
+    const monthKey = `${m.monthName} ${m.year}`;
+    const matchingSaved = (state.payslips || []).filter(p => p.period_month === monthKey);
+    if (matchingSaved.length > 0) {
+      return matchingSaved.map(p => {
+        const snap = p.snapshot_data || {};
+        const staffObj = (state.staff || []).find(st => st.id === p.coach_id) || snap.coach || { id: p.coach_id, name: 'Coach' };
+        return {
+          id: p.id,
+          reference: p.reference_id || `PAY-${m.year}-${m.monthName.slice(0, 3).toUpperCase()}-${p.coach_id.slice(0, 6).toUpperCase()}`,
+          coach: staffObj,
+          totalHours: p.total_hours,
+          totalEarnings: p.gross_amount,
+          sessionCount: p.total_sessions,
+          allLines: snap.lines || []
+        };
+      });
+    }
+
+    if (!m.sessions || m.sessions.length === 0) return [];
+    const { coachLines } = priceSessions(m.sessions, pricingContext);
+    const byCoach = new Map<string, {
+      id: string;
+      reference: string;
+      coach: any;
+      totalHours: number;
+      totalEarnings: number;
+      sessionCount: number;
+      allLines: PricedCoachLine[];
+    }>();
+
+    coachLines.forEach(l => {
+      if (!l.coachId) return;
+      const staffObj = (state.staff || []).find(s => s.id === l.coachId) || {
+        id: l.coachId,
+        name: l.targetName || 'Coach',
+        email: '',
+        phone: '',
+        bankName: '',
+        accountNumber: '',
+        branchCode: '',
+        accountType: 'Current'
+      };
+
+      if (!byCoach.has(l.coachId)) {
+        byCoach.set(l.coachId, {
+          id: `arch_${m.id}_${l.coachId}`,
+          reference: `PAY-${m.year}-${m.monthName.slice(0, 3).toUpperCase()}-${l.coachId.slice(0, 6).toUpperCase()}`,
+          coach: staffObj,
+          totalHours: 0,
+          totalEarnings: 0,
+          sessionCount: 0,
+          allLines: []
+        });
+      }
+
+      const entry = byCoach.get(l.coachId)!;
+      entry.allLines.push(l);
+      entry.totalHours += Number(l.hours || 0);
+      entry.totalEarnings += Number(l.amount || 0);
+    });
+
+    byCoach.forEach(entry => {
+      entry.sessionCount = new Set(entry.allLines.map(l => l.groupId)).size;
+      entry.totalHours = Math.round(entry.totalHours * 10) / 10;
+      entry.totalEarnings = Math.round(entry.totalEarnings * 100) / 100;
+    });
+
+    return Array.from(byCoach.values());
+  };
 
   const historyRecords = useMemo(() => {
     const list = [...(state.history || [])];
@@ -415,7 +609,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               R {overallTotals.coachPay.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
             <p className="text-[9px] font-bold text-slate-400 mt-1 uppercase tracking-wider">
-              Turn-ins & cheer pass-through
+              Staff Coaching Remuneration
             </p>
           </div>
         </motion.div>
@@ -498,7 +692,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               </span>
             </div>
             <div className="flex items-baseline justify-between text-xs">
-              <span className="text-slate-400 font-medium">Coach Turn-In:</span>
+              <span className="text-slate-400 font-medium">Coach Remuneration:</span>
               <span className="font-bold text-purple-600 dark:text-purple-400">
                 - R {overallTotals.tumblingCoachPay.toFixed(2)}
               </span>
@@ -718,7 +912,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                               <span className="font-bold text-slate-800 dark:text-slate-200">R {tGross.toFixed(2)}</span>
                             </div>
                             <div className="text-[11px] text-slate-500 dark:text-slate-400 flex justify-between">
-                              <span>Coach Turn-In Cost:</span>
+                              <span>Coach Remuneration:</span>
                               <span className="font-bold text-purple-600 dark:text-purple-400">R {tCoach.toFixed(2)}</span>
                             </div>
                           </div>
@@ -755,6 +949,63 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                             </div>
                           </div>
                         </div>
+
+                        {/* Archived Staff Payslips Section */}
+                        {(() => {
+                          const monthPayslips = getArchivedMonthPayslips(m);
+                          if (monthPayslips.length === 0) return null;
+                          return (
+                            <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <FileText size={16} className="text-[#1e4da1] dark:text-blue-400" />
+                                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                                    Archived Staff Payslips ({monthPayslips.length})
+                                  </h4>
+                                </div>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">
+                                  Total: R{monthPayslips.reduce((s, p) => s + p.totalEarnings, 0).toFixed(2)}
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                                {monthPayslips.map((p, pIdx) => (
+                                  <div
+                                    key={`month-payslip-${p.id || pIdx}`}
+                                    className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2"
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-xs font-black uppercase text-slate-800 dark:text-slate-100 truncate">
+                                        {p.coach.name}
+                                      </p>
+                                      <p className="text-[10px] text-slate-400 font-mono truncate">
+                                        {p.reference}
+                                      </p>
+                                      <p className="text-[10px] font-bold text-purple-600 dark:text-purple-400 mt-0.5">
+                                        R{p.totalEarnings.toFixed(2)} · {p.totalHours} hrs ({p.sessionCount} sessions)
+                                      </p>
+                                    </div>
+                                    <button
+                                      onClick={() => setSelectedArchivedPayslip({
+                                        monthName: m.monthName,
+                                        year: m.year,
+                                        reference: p.reference,
+                                        coach: p.coach,
+                                        allLines: p.allLines,
+                                        totalHours: p.totalHours,
+                                        totalEarnings: p.totalEarnings,
+                                        sessionCount: p.sessionCount
+                                      })}
+                                      className="shrink-0 px-3 py-1.5 bg-[#1e4da1] hover:bg-blue-600 text-white rounded-lg text-[10px] font-black uppercase tracking-wider shadow-sm flex items-center gap-1 cursor-pointer transition-all"
+                                    >
+                                      <FileText size={12} /> View Payslip
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
 
                         {/* Actions for Month */}
                         <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
@@ -896,6 +1147,263 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 >
                   Done
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Archived Staff Payslip Viewer Modal */}
+      <AnimatePresence>
+        {selectedArchivedPayslip && (
+          <div className="fixed inset-0 z-[250] flex items-center justify-center p-2 sm:p-4 bg-black/75 backdrop-blur-md overflow-y-auto">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-4xl bg-slate-100 dark:bg-slate-900 rounded-3xl shadow-2xl flex flex-col my-auto border border-slate-200 dark:border-slate-800 overflow-hidden"
+            >
+              {/* Modal Top Bar */}
+              <div className="flex items-center justify-between p-4 px-6 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-[#1e4da1] dark:text-blue-400">
+                    <FileText size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-wider text-slate-800 dark:text-white">
+                      Archived Staff Payslip
+                    </h3>
+                    <p className="text-[10px] font-mono text-slate-400">
+                      {selectedArchivedPayslip.coach.name} · {selectedArchivedPayslip.reference}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleDownloadArchivedPdf}
+                    disabled={isGeneratingPayslipPdf}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1e4da1] hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-sm cursor-pointer disabled:opacity-50"
+                  >
+                    {isGeneratingPayslipPdf ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                    Download PDF
+                  </button>
+                  <button
+                    onClick={handleDownloadArchivedPng}
+                    disabled={isGeneratingPayslipPdf}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-black uppercase tracking-wider shadow-sm cursor-pointer disabled:opacity-50"
+                  >
+                    <Download size={14} />
+                    Download PNG
+                  </button>
+                  <button
+                    onClick={() => setSelectedArchivedPayslip(null)}
+                    className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 ml-2"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Payslip Document Preview */}
+              <div className="p-4 sm:p-6 overflow-y-auto max-h-[75vh] flex justify-center bg-slate-100 dark:bg-slate-950">
+                <div
+                  ref={payslipDocRef}
+                  style={{ width: 794, minHeight: 850, padding: '48px 56px', fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif" }}
+                  className="relative bg-white text-slate-900 shadow-xl rounded-xl"
+                >
+                  {/* Top blue bar */}
+                  <div className="absolute top-0 left-0 right-0 h-2 bg-[#1e4da1] rounded-t-xl" />
+
+                  {/* Header */}
+                  <div className="flex justify-between items-start mb-6">
+                    <div>
+                      <img
+                        src="/Invoice.png"
+                        alt="JFLIPS"
+                        className="h-16 md:h-20 object-contain rounded-xl mb-1"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                      <p className="text-base font-black uppercase tracking-[0.25em] text-[#1e4da1] mt-1">
+                        PAYSLIP
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Pay Period</p>
+                      <p className="text-xl font-black text-slate-900">{selectedArchivedPayslip.monthName} {selectedArchivedPayslip.year}</p>
+                      <p className="text-[11px] text-slate-400 mt-1 font-bold">
+                        Archive Record
+                      </p>
+                      <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                        REF: {selectedArchivedPayslip.reference}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="w-full h-px bg-slate-200 mb-6" />
+
+                  {/* Recipient & Employer */}
+                  <div className="grid grid-cols-2 gap-8 mb-8">
+                    <div className="space-y-1">
+                      <p className="text-[11px] font-black uppercase tracking-[0.25em] text-[#1e4da1]">
+                        Employer
+                      </p>
+                      <p className="text-base font-black uppercase italic text-slate-900">
+                        {state.profile.businessName || 'JFLIPS'}
+                      </p>
+                      {state.profile.email && <p className="text-[11px] text-slate-500">{state.profile.email}</p>}
+                    </div>
+
+                    <div className="space-y-1">
+                      <p className="text-[11px] font-black uppercase tracking-[0.25em] text-[#1e4da1]">
+                        Coach
+                      </p>
+                      <p className="text-lg font-black uppercase italic text-slate-900">
+                        {selectedArchivedPayslip.coach.name}
+                      </p>
+                      {selectedArchivedPayslip.coach.email && <p className="text-[11px] text-slate-500">{selectedArchivedPayslip.coach.email}</p>}
+                      {selectedArchivedPayslip.coach.phone && <p className="text-[11px] text-slate-500">{selectedArchivedPayslip.coach.phone}</p>}
+                    </div>
+                  </div>
+
+                  {/* Banking Details */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-6">
+                    <div className="mb-2">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#1e4da1]">
+                        Banking Details
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-4 gap-4">
+                      <div>
+                        <p className="text-[9px] font-black text-slate-400 uppercase">Bank Name</p>
+                        <p className="text-[12px] font-black uppercase text-slate-800">
+                          {selectedArchivedPayslip.coach.bankName || 'Not Provided'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-black text-slate-400 uppercase">Account Number</p>
+                        <p className="text-[12px] font-black font-mono text-slate-800">
+                          {selectedArchivedPayslip.coach.accountNumber || '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-black text-slate-400 uppercase">Branch Code</p>
+                        <p className="text-[12px] font-black font-mono text-slate-800">
+                          {selectedArchivedPayslip.coach.branchCode || 'Default'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-black text-slate-400 uppercase">Account Type</p>
+                        <p className="text-[12px] font-black uppercase text-slate-800">
+                          {selectedArchivedPayslip.coach.accountType || 'Current'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 5-Column Table */}
+                  <div className="mb-2">
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '95px 1fr 100px 95px 110px',
+                        gap: '10px'
+                      }}
+                      className="px-3 py-2 bg-slate-100 rounded-t-xl"
+                    >
+                      <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Date</span>
+                      <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Session or Class</span>
+                      <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider text-right">Hourly Rate</span>
+                      <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider text-right">Hours Coached</span>
+                      <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider text-right">Total Earnings</span>
+                    </div>
+
+                    <div className="border border-slate-200 rounded-b-xl overflow-hidden divide-y divide-slate-100">
+                      {selectedArchivedPayslip.allLines && selectedArchivedPayslip.allLines.length > 0 ? (
+                        selectedArchivedPayslip.allLines.map((line, idx) => {
+                          const isEven = idx % 2 === 0;
+                          const org = line.orgId ? state.gyms.find(g => g.id === line.orgId) : null;
+                          const subText = org ? `${org.name}` : 'Tumbling Class';
+
+                          return (
+                            <div
+                              key={`arch-coach-line-${idx}`}
+                              style={{
+                                display: 'grid',
+                                gridTemplateColumns: '95px 1fr 100px 95px 110px',
+                                gap: '10px'
+                              }}
+                              className={`items-center px-3 py-2.5 ${isEven ? 'bg-white' : 'bg-slate-50/70'}`}
+                            >
+                              <span className="text-[11px] font-bold text-slate-500 tabular-nums">
+                                {new Date(line.date).toLocaleDateString('en-GB')}
+                              </span>
+                              <div className="min-w-0 pr-2">
+                                <p className="text-[12px] font-black text-slate-900 uppercase italic truncate">
+                                  {line.description}
+                                </p>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider truncate">
+                                  {subText}
+                                  {line.splitCount > 1 ? ` · Split (${line.splitCount} coaches)` : ''}
+                                </p>
+                              </div>
+                              <span className="text-[12px] font-bold text-slate-600 text-right tabular-nums">
+                                R{Number(line.rate || 0).toFixed(2)}/hr
+                              </span>
+                              <span className="text-[12px] font-black text-slate-800 text-right tabular-nums">
+                                {Number(line.hours || 0).toFixed(1)} hrs
+                              </span>
+                              <span className="text-[13px] font-black text-slate-900 text-right tabular-nums">
+                                R{Number(line.amount || 0).toFixed(2)}
+                              </span>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="py-12 text-center">
+                          <p className="text-[11px] text-slate-400 font-black uppercase tracking-wider">
+                            No coaching sessions recorded for this period
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Summary & Footer */}
+                  <div className="mt-8 pt-4 border-t-2 border-slate-200">
+                    <div className="flex justify-between items-end">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-6">
+                          <div>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Total Sessions</p>
+                            <p className="text-xl font-black text-slate-800">{selectedArchivedPayslip.sessionCount}</p>
+                          </div>
+                          <div className="w-px h-8 bg-slate-200" />
+                          <div>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Total Hours Coached</p>
+                            <p className="text-xl font-black text-slate-800">{selectedArchivedPayslip.totalHours} hrs</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <p className="text-[12px] font-black uppercase tracking-[0.2em] text-[#1e4da1] mb-1">
+                          Total Remuneration Due
+                        </p>
+                        <p className="text-5xl font-black italic text-[#1e4da1] leading-none tabular-nums">
+                          R{selectedArchivedPayslip.totalEarnings.toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="w-full h-px bg-slate-100 mt-8 mb-3" />
+                    <p className="text-[9px] text-slate-300 font-bold uppercase text-center tracking-widest">
+                      Official Remuneration Advice · Generated by JFLIPS Gymnastics
+                    </p>
+                  </div>
+                </div>
               </div>
             </motion.div>
           </div>

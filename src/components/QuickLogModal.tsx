@@ -18,10 +18,10 @@ export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, d
 
   const coachOptions = useMemo(() => {
     const list: { id: string; name: string; role?: string }[] = [];
-    if (state.profile.id) {
+    if (!isOwner && state.profile.id) {
       list.push({
         id: state.profile.id,
-        name: isOwner ? (state.profile.name ? `${state.profile.name} (Myself)` : 'Myself (Owner)') : (state.profile.name || 'Myself'),
+        name: state.profile.name || 'Myself',
         role: state.profile.role
       });
     }
@@ -38,14 +38,16 @@ export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, d
     if (!isOwner && state.profile.id) {
       return [state.profile.id];
     }
-    // If coachId was explicitly passed and matches a known coach/profile
-    if (coachId && (coachId === state.profile.id || (state.staff || []).some(s => s.id === coachId))) {
+    // If coachId was explicitly passed and matches a known coach in staff
+    if (coachId && (state.staff || []).some(s => s.id === coachId)) {
       return [coachId];
     }
-    // Default to current profile
-    if (state.profile.id) {
-      return [state.profile.id];
+    // If default logging coach is designated by the owner
+    if (state.profile.default_logging_coach_id) {
+      const exists = (state.staff || []).some(s => s.id === state.profile.default_logging_coach_id);
+      if (exists) return [state.profile.default_logging_coach_id];
     }
+    // Default to first staff member
     if (state.staff && state.staff.length > 0) {
       return [state.staff[0].id];
     }

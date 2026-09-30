@@ -80,7 +80,7 @@ import {
   Globe,
   Link
 } from 'lucide-react';
-import { View, Student, Gym, ClassType, AttendanceSession, AppState, HistoryMonth, Profile, Payment, ClassSchedule, InvoiceSnapshot, AppNotification, Competition, getStudentSessionPrice, StaffProfile, OwnerProfile, MerchItem, MerchClient, MerchOrder, MerchOrderStatus, MerchBillToKind, resolveBillToId } from './types';
+import { View, Student, Gym, ClassType, AttendanceSession, AppState, HistoryMonth, Profile, Payment, ClassSchedule, InvoiceSnapshot, AppNotification, Competition, getStudentSessionPrice, StaffProfile, OwnerProfile, MerchItem, MerchClient, MerchOrder, MerchOrderStatus, MerchBillToKind, resolveBillToId, StaffPayslip } from './types';
 import { toPng } from 'html-to-image';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
@@ -105,8 +105,9 @@ import { MerchOrderModal } from './src/components/MerchOrderModal';
 import type { MerchOrderDraft } from './src/components/MerchOrderModal';
 import { MerchItemModal } from './src/components/MerchItemModal';
 import { addToQueue, getPendingItems, updateItemStatus, deleteSyncedItems } from './src/utils/offlineQueue';
+import { AccountsView } from './src/Pages/AccountsView';
 import { priceSessions, priceMerch, openMerchOrders, merchOrdersForMonth, sumLines, billingMonthFor } from './src/utils/pricing';
-import type { PricingContext } from './src/utils/pricing';
+import type { PricingContext, PricedCoachLine } from './src/utils/pricing';
 import {
   computeMonthTotals,
   mergeArchivedSessions,
@@ -371,7 +372,8 @@ const INITIAL_STATE: AppState = {
   cheerRegistrations: [],
   merchItems: [],
   merchClients: [],
-  merchOrders: []
+  merchOrders: [],
+  payslips: []
 };
 
 // --- ANIMATION VARIANTS ---
@@ -504,7 +506,7 @@ const DesktopSidebar: React.FC<{
     { view: View.DASHBOARD,       icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
     { view: View.LOG_SESSION,     icon: <ClipboardCheck size={20} />,  label: 'Log Session' },
     { view: View.TEAM_MANAGEMENT, icon: <Settings size={20} />,          label: 'Management' },
-    { view: View.INVOICES,        icon: <FileText size={20} />,        label: isOwner ? 'Invoices' : 'My Pay' },
+    { view: View.INVOICES,        icon: <FileText size={20} />,        label: isOwner ? 'Accounts' : 'My Pay' },
     ...(isOwner ? [{ view: View.HISTORY, icon: <History size={20} />, label: 'History' }] : []),
     { view: View.ROSTER,          icon: <Settings2 size={20} />,       label: 'Setup' },
   ];
@@ -994,7 +996,8 @@ const App: React.FC = () => {
               );
             } catch { return {}; }
           })(),
-          id: user.id
+          id: user.id,
+          default_logging_coach_id: ownerP.default_logging_coach_id || localStorage.getItem(`jflips_default_logging_coach_${user.id}`) || undefined
         };
 
         // Fetch staff profiles for owner
@@ -1236,7 +1239,7 @@ const App: React.FC = () => {
         return { data: [...tumblingStudents, ...teamAthletes], error: null };
       };
 
-      const [studentsRes, gymsRes, classesRes, sessionsRes, historyRes, paymentsRes, schedulesRes, snapshotsRes, notificationsRes, competitionsRes, cheerRegistrationsRes, merchItemsRes, merchClientsRes, merchOrdersRes] = await Promise.all([
+      const [studentsRes, gymsRes, classesRes, sessionsRes, historyRes, paymentsRes, schedulesRes, snapshotsRes, notificationsRes, competitionsRes, cheerRegistrationsRes, merchItemsRes, merchClientsRes, merchOrdersRes, payslipsRes] = await Promise.all([
         fetchStudents(),
         supabase.from('gyms').select('*').eq('user_id', targetUserId),
         supabase.from('class_types').select('*').eq('user_id', targetUserId),
@@ -1250,7 +1253,17 @@ const App: React.FC = () => {
         supabase.from('cheer_registrations').select('*').eq('user_id', targetUserId).order('created_at', { ascending: false }),
         supabase.from('merch_items').select('*').eq('user_id', targetUserId).order('name', { ascending: true }),
         supabase.from('merch_clients').select('*').eq('user_id', targetUserId).order('name', { ascending: true }),
-        supabase.from('merch_orders').select('*').eq('user_id', targetUserId).order('order_date', { ascending: true })
+        supabase.from('merch_orders').select('*').eq('user_id', targetUserId).order('order_date', { ascending: true }),
+        (async () => {
+          try {
+            const query = isOwner
+              ? supabase.from('staff_payslips').select('*').eq('owner_id', targetUserId)
+              : supabase.from('staff_payslips').select('*').or(`coach_id.eq.${user.id},owner_id.eq.${targetUserId}`);
+            return await query;
+          } catch {
+            return { data: [], error: null };
+          }
+        })()
       ]);
 
       // Merch tables are deliberately absent from this list. A project that has
@@ -1418,7 +1431,33 @@ const App: React.FC = () => {
           unit_cost: Number(o.unit_cost || 0),
           qty: Number(o.qty || 1),
           invoiced_month: o.invoiced_month || null
-        }))
+        })),
+        payslips: (() => {
+          let list: StaffPayslip[] = (payslipsRes?.data || []).map((p: any) => ({
+            id: p.id,
+            reference_id: p.reference_id || p.notes,
+            coach_id: p.coach_id,
+            owner_id: p.owner_id,
+            period_month: p.period_month,
+            total_hours: Number(p.total_hours || 0),
+            total_sessions: Number(p.total_sessions || 0),
+            gross_amount: Number(p.gross_amount || 0),
+            status: p.status || 'unpaid',
+            paid_at: p.paid_at,
+            payment_method: p.payment_method,
+            notes: p.notes,
+            snapshot_data: p.snapshot_data,
+            created_at: p.created_at,
+            updated_at: p.updated_at
+          }));
+          if (list.length === 0) {
+            try {
+              const localSaved = JSON.parse(localStorage.getItem(`jflips_staff_payslips_${targetUserId}`) || '[]');
+              if (Array.isArray(localSaved) && localSaved.length > 0) list = localSaved;
+            } catch {}
+          }
+          return list;
+        })()
       }));
     } catch (err: any) {
       console.error("Fetch failed", err);
@@ -3345,6 +3384,93 @@ const App: React.FC = () => {
       //    be counted a second time when the rest of the month is archived.
       await writeHistoryMonths(sessionsToReset);
 
+      // 2b. Auto-Save Permanent Snapshot Payslips into staff_payslips
+      const newPayslips: StaffPayslip[] = [];
+      const coachesInSessions = new Map<string, {
+        coach: any;
+        lines: PricedCoachLine[];
+        totalHours: number;
+        grossAmount: number;
+        monthKey: string;
+        year: number;
+        monthName: string;
+      }>();
+
+      coachLines.forEach(cl => {
+        if (!cl.coachId) return;
+        const coach = (state.staff || []).find(s => s.id === cl.coachId) || { id: cl.coachId, name: cl.targetName || 'Coach' };
+        const key = cl.billingMonthKey;
+        const coachMonthKey = `${cl.coachId}_${key}`;
+
+        if (!coachesInSessions.has(coachMonthKey)) {
+          coachesInSessions.set(coachMonthKey, {
+            coach,
+            lines: [],
+            totalHours: 0,
+            grossAmount: 0,
+            monthKey: key,
+            year: cl.billingYear,
+            monthName: cl.billingMonthName
+          });
+        }
+        const entry = coachesInSessions.get(coachMonthKey)!;
+        entry.lines.push(cl);
+        entry.totalHours += Number(cl.hours || 0);
+        entry.grossAmount += Number(cl.amount || 0);
+      });
+
+      for (const entry of Array.from(coachesInSessions.values())) {
+        const coachId = entry.coach.id;
+        const sessionCount = new Set(entry.lines.map(l => l.groupId)).size;
+        const refId = `PAY-${entry.year}-${entry.monthName.slice(0, 3).toUpperCase()}-${coachId.slice(0, 6).toUpperCase()}`;
+        const payslipRecord: StaffPayslip = {
+          id: crypto.randomUUID ? crypto.randomUUID() : `uid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          reference_id: refId,
+          coach_id: coachId,
+          owner_id: user.id,
+          period_month: entry.monthKey,
+          total_hours: Math.round(entry.totalHours * 10) / 10,
+          total_sessions: sessionCount,
+          gross_amount: Math.round(entry.grossAmount * 100) / 100,
+          status: 'unpaid',
+          snapshot_data: {
+            coach: entry.coach,
+            lines: entry.lines,
+            archived_at: new Date().toISOString()
+          },
+          created_at: new Date().toISOString()
+        };
+        newPayslips.push(payslipRecord);
+
+        try {
+          await supabase.from('staff_payslips').insert({
+            id: payslipRecord.id,
+            coach_id: payslipRecord.coach_id,
+            owner_id: payslipRecord.owner_id,
+            period_month: payslipRecord.period_month,
+            total_hours: payslipRecord.total_hours,
+            total_sessions: payslipRecord.total_sessions,
+            gross_amount: payslipRecord.gross_amount,
+            status: payslipRecord.status,
+            snapshot_data: payslipRecord.snapshot_data,
+            notes: refId
+          });
+        } catch (slipErr) {
+          console.warn('Could not write to staff_payslips table:', slipErr);
+        }
+      }
+
+      if (newPayslips.length > 0) {
+        setState(prev => {
+          const existing = prev.payslips || [];
+          const combined = [...existing.filter(e => !newPayslips.some(n => n.coach_id === e.coach_id && n.period_month === e.period_month)), ...newPayslips];
+          try {
+            localStorage.setItem(`jflips_staff_payslips_${user.id}`, JSON.stringify(combined));
+          } catch {}
+          return { ...prev, payslips: combined };
+        });
+      }
+
       // 3. Family Payments
       for (const data of Array.from(familyRevByMonth.values())) {
         const { data: existingPay } = await supabase.from('payments').select('*').eq('invoice_id', data.monthLabel).eq('family_id', data.famId).eq('user_id', user.id);
@@ -4061,7 +4187,7 @@ const App: React.FC = () => {
           onSaveAllocations={isOwner ? saveBankAllocations : undefined}
         />
       )}
-      {activeView === View.INVOICES && <InvoicesView state={state} user={user} onUpdatePayment={handleUpdatePayment} onResetInvoice={resetSingleInvoice} onShowRecovery={() => setShowRecoveryModal(true)} onSaveAllocations={saveBankAllocations} onAddMerch={(fixedBillTo) => setMerchOrderModal({ fixedBillTo })} onDeleteMerchOrder={handleDeleteMerchOrder} onSetMerchStatus={handleSetMerchOrderStatus} />}
+      {activeView === View.INVOICES && <AccountsView state={state} user={user} onUpdatePayment={handleUpdatePayment} onResetInvoice={resetSingleInvoice} onShowRecovery={() => setShowRecoveryModal(true)} onSaveAllocations={saveBankAllocations} onAddMerch={(fixedBillTo) => setMerchOrderModal({ fixedBillTo })} onDeleteMerchOrder={handleDeleteMerchOrder} onSetMerchStatus={handleSetMerchOrderStatus} />}
       {activeView === View.HISTORY && isOwner && (
         <HistoryView 
           state={state} 
@@ -4446,7 +4572,7 @@ const App: React.FC = () => {
                   activeView === View.TEAM_ATTENDANCE ? 'Team Attendance' :
                   activeView === View.GYM_ATTENDANCE ? 'Gym Attendance' :
                   activeView === View.TEAM_MANAGEMENT ? 'Team Management' :
-                  activeView === View.INVOICES ? 'Invoices' :
+                  activeView === View.INVOICES ? (isOwner ? 'Accounts' : 'My Pay') :
                   activeView === View.HISTORY ? (selectedHistoryMonth ? `${selectedHistoryMonth.monthName} ${selectedHistoryMonth.year}` : 'History') :
                   activeView === View.STATISTICS ? 'Statistics' :
                   activeView === View.ROSTER ? 'Setup' : ''}
@@ -4563,8 +4689,8 @@ const App: React.FC = () => {
         <NavButton active={activeView === View.DASHBOARD} icon={<LayoutDashboard size={18} />} label="Home" onClick={() => handleViewChange(View.DASHBOARD)} />
         <NavButton active={activeView === View.LOG_SESSION} icon={<ClipboardCheck size={18} />} label="Log" onClick={() => { setEditingSession(null); handleViewChange(View.LOG_SESSION); }} />
         <NavButton active={activeView === View.TEAM_MANAGEMENT} icon={<Settings size={18} />} label="Mgmt" onClick={() => handleViewChange(View.TEAM_MANAGEMENT)} />
-        {/* Coaches see their own invoice tab; owners see invoices */}
-        <NavButton active={activeView === View.INVOICES} icon={<FileText size={18} />} label={isOwner ? "Invs" : "My Pay"} onClick={() => handleViewChange(View.INVOICES)} />
+        {/* Coaches see their own invoice tab; owners see accounts */}
+        <NavButton active={activeView === View.INVOICES} icon={<FileText size={18} />} label={isOwner ? "Accounts" : "My Pay"} onClick={() => handleViewChange(View.INVOICES)} />
         {isOwner && (
           <NavButton active={activeView === View.HISTORY} icon={<History size={18} />} label="History" onClick={() => handleViewChange(View.HISTORY)} />
         )}
@@ -5893,7 +6019,9 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
           if (initialTeamIds.length === 1 && initialCoachId) {
             initialMap[tid] = initialCoachId;
           } else {
-            initialMap[tid] = (state.profile.role === 'owner') ? coachIdFallback : (state.profile.id || '');
+            initialMap[tid] = isOwner
+              ? (state.profile.default_logging_coach_id || coachIdFallback || (state.staff[0]?.id || ''))
+              : (state.profile.id || '');
           }
         });
         setTeamCoachIds(initialMap);
@@ -5928,14 +6056,10 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
 
   const coachOptions = useMemo(() => {
     const list: { id: string; name: string; role?: string }[] = [];
-    if (state.profile.id) {
+    if (!isOwner && state.profile.id) {
       list.push({
         id: state.profile.id,
-        // A coach's own entry showed the OWNER's business name here, which made
-        // the list look like it contained no actual people.
-        name: isOwner
-          ? (state.profile.name || 'Myself (Owner)')
-          : (state.profile.name || 'Myself'),
+        name: state.profile.name || 'Myself',
         role: state.profile.role || 'coach'
       });
     }
@@ -5996,8 +6120,10 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
         if (p?.coach_ids && p.coach_ids.length > 0) coachIdFallback = p.coach_ids[0];
       }
       
-      // Default to logged-in user profile (owner or coach)
-      const selectedId = state.profile.id || coachIdFallback || (state.staff[0]?.id || '');
+      // Default to designated logging coach or coach fallback or first staff member
+      const selectedId = isOwner
+        ? (state.profile.default_logging_coach_id || coachIdFallback || (state.staff[0]?.id || ''))
+        : (state.profile.id || coachIdFallback || (state.staff[0]?.id || ''));
       initialMap[tid] = selectedId;
       initialMultiCoachMap[tid] = selectedId ? [selectedId] : [];
       
@@ -6321,7 +6447,10 @@ const TeamAttendanceView = memo(({ state, onSave, initialTeamIds, initialDate, i
               </div>
             ) : (
               activeTeams.map((team, idx) => {
-                const selectedCoachesForThisTeam = multiCoachIdsMap[team.id] || (teamCoachIds[team.id] ? [teamCoachIds[team.id]] : [state.profile.id || '']);
+                const ownerDefaultIds = state.profile.default_logging_coach_id
+                  ? [state.profile.default_logging_coach_id]
+                  : (state.staff[0]?.id ? [state.staff[0].id] : []);
+                const selectedCoachesForThisTeam = multiCoachIdsMap[team.id] || (teamCoachIds[team.id] ? [teamCoachIds[team.id]] : (isOwner ? ownerDefaultIds : [state.profile.id || '']));
                 return (
                 <div key={`team-log-${team.id}-${idx}`} className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-2xl flex flex-col gap-2 border border-blue-100 dark:border-blue-900/30">
                   <div className="flex items-center justify-between px-1">
@@ -6785,7 +6914,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
   /** Saves the payout-account defaults and per-client overrides to the database. */
   onSaveAllocations?: (next: { allocations?: InvoiceAllocations; groupDefaults?: GroupDefaults }) => Promise<boolean>
 }) => {
-  const [activeTab, setActiveTab] = useState<'roster' | 'competitions' | 'registrations' | 'payouts'>('roster');
+  const [activeTab, setActiveTab] = useState<'roster' | 'competitions' | 'registrations' | 'payouts' | 'staff'>('roster');
   const [subTab, setSubTab] = useState<'roster' | 'attendance'>('roster');
   const [selectedMainId, setSelectedMainId] = useState<string | null>(null);
   const [selectedSubId, setSelectedSubId] = useState<string | null>(null);
@@ -7305,6 +7434,13 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
             {activeTab === 'payouts' && <motion.div layoutId="tm-tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#1e4da1] dark:bg-blue-400" />}
           </button>
         )}
+        <button
+          onClick={() => setActiveTab('staff')}
+          className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative ${activeTab === 'staff' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}
+        >
+          Staff & Coaches
+          {activeTab === 'staff' && <motion.div layoutId="tm-tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#1e4da1] dark:bg-blue-400" />}
+        </button>
       </div>
 
       {activeTab === 'payouts' && onSaveAllocations && (
@@ -8565,6 +8701,112 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
         </Modal>
       )}
 
+      {activeTab === 'staff' && (
+        <div className="space-y-6">
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm space-y-2">
+            <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase italic tracking-wider">
+              Staff & Coach Profiles
+            </h3>
+            <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase leading-relaxed tracking-wider">
+              Designate which coach is auto-selected by default when you log classes, team practices, and gym sessions. Tap "Set as Default" on any coach below.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {(state.staff || []).length === 0 ? (
+              <div className="col-span-full p-8 text-center bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-800 space-y-2">
+                <p className="text-xs font-black uppercase text-slate-400">No coaches added yet</p>
+                <p className="text-[10px] text-slate-400">Head over to Setup &gt; Staff &amp; Coaches to invite or approve coaches.</p>
+              </div>
+            ) : (state.staff || []).map((coach: any, cIdx: number) => {
+              const isDefault = state.profile.default_logging_coach_id === coach.id;
+
+              const handleSetDefault = async () => {
+                const ownerId = state.profile.id;
+                if (!ownerId) return;
+                try {
+                  await supabase.from('owner_profiles').update({ default_logging_coach_id: coach.id }).eq('id', ownerId);
+                } catch (e) {
+                  console.warn('DB update failed, using localStorage', e);
+                }
+                localStorage.setItem(`jflips_default_logging_coach_${ownerId}`, coach.id);
+                state.profile.default_logging_coach_id = coach.id;
+                if (onRefresh) onRefresh();
+              };
+
+              return (
+                <div
+                  key={`tm-staff-${coach.id || cIdx}`}
+                  className={`p-5 rounded-3xl border transition-all space-y-4 ${
+                    isDefault
+                      ? 'bg-amber-50/30 dark:bg-amber-950/20 border-amber-300 dark:border-amber-600/40 shadow-md shadow-amber-500/5'
+                      : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700/80 shadow-sm'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className="text-base font-black uppercase text-slate-900 dark:text-white truncate">
+                          {coach.name}
+                        </h4>
+                      </div>
+                      {coach.email && (
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium truncate">
+                          {coach.email}
+                        </p>
+                      )}
+                      {coach.phone && (
+                        <p className="text-[10px] text-slate-400 font-medium">
+                          {coach.phone}
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      {isDefault ? (
+                        <span className="px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 flex items-center gap-1.5 shadow-sm">
+                          ★ Default Logging Coach
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleSetDefault}
+                          className="px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-wider bg-slate-100 dark:bg-slate-700/60 hover:bg-amber-50 hover:text-amber-700 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-200 transition-all border border-slate-200 dark:border-slate-600 cursor-pointer shadow-sm"
+                        >
+                          Set as Default
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Coach remuneration & banking preview */}
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800/80 grid grid-cols-2 sm:grid-cols-3 gap-3 text-[10px]">
+                    <div>
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Rate</p>
+                      <p className="font-black text-slate-800 dark:text-slate-200">
+                        {coach.payRate || coach.pay_rate ? `R${coach.payRate || coach.pay_rate}/hr` : '—'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Bank</p>
+                      <p className="font-bold text-slate-700 dark:text-slate-300 truncate">
+                        {coach.bankName || coach.bank_name || 'Not provided'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Account</p>
+                      <p className="font-mono text-slate-700 dark:text-slate-300 truncate">
+                        {coach.accountNumber || coach.account_number || '—'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {showAddComp && (
         <Modal title={editingComp ? "Edit Competition" : "Add Competition"} onClose={() => setShowAddComp(false)}>
           <CompetitionForm 
@@ -8749,6 +8991,11 @@ const RegisterView = memo(({
 
   const [selectedCoachIds, setSelectedCoachIds] = useState<string[]>(() => {
     if (initialSession?.coach_id) return [initialSession.coach_id];
+    if (isOwner) {
+      if (state.profile.default_logging_coach_id) return [state.profile.default_logging_coach_id];
+      if (state.staff && state.staff.length > 0) return [state.staff[0].id];
+      return [];
+    }
     if (state.profile.id) return [state.profile.id];
     if (state.staff && state.staff.length > 0) return [state.staff[0].id];
     return [];
@@ -8839,10 +9086,10 @@ const RegisterView = memo(({
 
   const coachOptions = useMemo(() => {
     const list: { id: string; name: string; role?: string }[] = [];
-    if (state.profile.id) {
+    if (!isOwner && state.profile.id) {
       list.push({
         id: state.profile.id,
-        name: isOwner ? 'Myself (Owner)' : (state.profile.name || 'Myself'),
+        name: state.profile.name || 'Myself',
         role: state.profile.role
       });
     }

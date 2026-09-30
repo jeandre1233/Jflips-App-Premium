@@ -69,9 +69,11 @@ const CoachApprovalCard: React.FC<{
   coach: StaffProfile;
   cheerGyms: Gym[];
   ownerBusinessName?: string;
+  isDefaultLoggingCoach?: boolean;
+  onSetDefaultLoggingCoach?: () => void;
   onRefreshStaff?: () => void;
   showToast: (msg: string, type: 'success' | 'error' | 'info') => void;
-}> = ({ coach, cheerGyms, ownerBusinessName, onRefreshStaff, showToast }) => {
+}> = ({ coach, cheerGyms, ownerBusinessName, isDefaultLoggingCoach, onSetDefaultLoggingCoach, onRefreshStaff, showToast }) => {
   const [canViewTumbling, setCanViewTumbling] = useState<boolean>(coach.canViewTumbling);
   const [canViewSchoolGyms, setCanViewSchoolGyms] = useState<boolean>(coach.canViewSchoolGyms ?? false);
   const [assignedCheerOrgIds, setAssignedCheerOrgIds] = useState<string[]>(coach.assignedCheerOrgIds || []);
@@ -195,15 +197,31 @@ const CoachApprovalCard: React.FC<{
           </div>
         </div>
 
-        <span className={`px-2.5 py-1 rounded-full text-[8px] font-black uppercase tracking-wider ${
-          coach.status === 'approved'
-            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
-            : coach.status === 'rejected'
-            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'
-            : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 animate-pulse'
-        }`}>
-          {coach.status}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          {isDefaultLoggingCoach ? (
+            <span className="px-2.5 py-1 rounded-full text-[8px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-400 border border-amber-300 dark:border-amber-700/60 flex items-center gap-1 shadow-sm">
+              ★ Default Logging Coach
+            </span>
+          ) : onSetDefaultLoggingCoach ? (
+            <button
+              type="button"
+              onClick={onSetDefaultLoggingCoach}
+              className="px-2.5 py-1 rounded-full text-[8px] font-black uppercase tracking-wider bg-slate-100 hover:bg-amber-50 text-slate-600 hover:text-amber-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 cursor-pointer transition-all shadow-sm"
+            >
+              ★ Set as Default Coach
+            </button>
+          ) : null}
+
+          <span className={`px-2.5 py-1 rounded-full text-[8px] font-black uppercase tracking-wider ${
+            coach.status === 'approved'
+              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+              : coach.status === 'rejected'
+              ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'
+              : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 animate-pulse'
+          }`}>
+            {coach.status}
+          </span>
+        </div>
       </div>
 
       {/* Permissions & Credentials Configuration */}
@@ -484,6 +502,22 @@ const StaffManagementSection: React.FC<{
                 coach={coach}
                 cheerGyms={cheerGyms}
                 ownerBusinessName={state.profile?.businessName}
+                isDefaultLoggingCoach={
+                  state.profile?.default_logging_coach_id === coach.id
+                }
+                onSetDefaultLoggingCoach={async () => {
+                  const ownerId = state.profile?.id;
+                  if (!ownerId) return;
+                  try {
+                    await supabase.from('owner_profiles').update({ default_logging_coach_id: coach.id }).eq('id', ownerId);
+                  } catch (e) {
+                    console.warn('DB update failed, using localStorage', e);
+                  }
+                  localStorage.setItem(`jflips_default_logging_coach_${ownerId}`, coach.id);
+                  state.profile.default_logging_coach_id = coach.id;
+                  showToast(`Default logging coach set to ${coach.name}!`, 'success');
+                  if (onRefreshStaff) onRefreshStaff();
+                }}
                 onRefreshStaff={onRefreshStaff}
                 showToast={showToast}
               />
