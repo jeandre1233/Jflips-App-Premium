@@ -162,7 +162,9 @@ export function groupSessionsByMonth(
     // A session nobody is billed for (an empty roster, say) still belongs in
     // history — fall back to its calendar month so it is never silently lost.
     const m = monthOf.get(s.id) || (() => {
-      const b = billingMonthFor(s.date);
+      const g = ctx.gyms.find(x => x.id === s.classTypeId);
+      const owner = g?.parent_gym_id ? ctx.gyms.find(x => x.id === g.parent_gym_id) : undefined;
+      const b = billingMonthFor(s.date, (owner || g)?.billing_day);
       return { key: b.key, monthName: b.monthName, year: b.year };
     })();
 

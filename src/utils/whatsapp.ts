@@ -41,6 +41,26 @@ Thank you!`;
 }
 
 /**
+ * Opens a pre-filled WhatsApp chat nudging a client about an invoice that has
+ * not been paid yet. Used from History's month tabs.
+ */
+export function sendWhatsAppPaymentNudge(clientName: string, phone: string, amount: number, monthLabel: string): void {
+  if (!phone) {
+    alert(`No phone number saved for ${clientName}.`);
+    return;
+  }
+  const message = `Hi ${clientName}! 🤸
+
+A friendly reminder that the JFLIPS invoice for *${monthLabel}* (*R${amount.toFixed(2)}*) is still outstanding.
+
+Please remember to make payment when you can, and send proof of payment once done.
+
+Thank you so much!`;
+
+  window.open(`whatsapp://send?phone=${cleanPhoneNumber(phone)}&text=${encodeURIComponent(message)}`, '_blank');
+}
+
+/**
  * Opens a pre-filled WhatsApp chat to a parent/client reminding them of an invoice reminder.
  */
 export function sendWhatsAppInvoiceReminder(clientName: string, phone: string, amount: number, dueDate: string): void {

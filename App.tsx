@@ -1557,6 +1557,54 @@ const App: React.FC = () => {
         }
       }
 
+      // 💰 Payment check — ONE nudge a month, from the 3rd. Lists invoices from
+      // earlier months that have not been ticked off as paid. Nothing else about
+      // payments ever notifies; chasing is done by hand from History.
+      if (isOwnerRole && now.getDate() >= 3) {
+        const payAlertKey = `payment_check_alert_${now.getFullYear()}_${now.getMonth()}`;
+        if (!localStorage.getItem(payAlertKey)) {
+          const currentIdx = now.getFullYear() * 12 + now.getMonth();
+          const unpaid = (state.payments || []).filter(p => {
+            if (p.is_expense || p.is_paid || Number(p.amount_due || 0) <= 0) return false;
+            const parsed = parseMonthKey(p.invoice_id);
+            if (!parsed) return false;
+            return parsed.year * 12 + MONTHS.indexOf(parsed.monthName) < currentIdx;
+          });
+
+          if (unpaid.length > 0) {
+            try {
+              // Dedupe across devices: phone and laptop both run this check.
+              const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+              const { data: already } = await supabase.from('notifications')
+                .select('id')
+                .eq('user_id', ownerId)
+                .eq('type', 'cycle_reminder')
+                .gte('created_at', monthStart)
+                .contains('metadata', { kind: 'payment_check' })
+                .limit(1);
+
+              if (!already || already.length === 0) {
+                const total = unpaid.reduce((a, p) => a + Number(p.amount_due || 0), 0);
+                await notifyUser({
+                  userId: ownerId,
+                  type: 'cycle_reminder',
+                  title: 'Invoice Payment Check',
+                  message: `${unpaid.length} invoice${unpaid.length === 1 ? ' is' : 's are'} still unpaid (R${total.toFixed(2)}). Open History to tick off what has been paid and message the rest.`,
+                  url: '/?tab=history',
+                  metadata: { kind: 'payment_check', unpaid_count: unpaid.length },
+                  push: true,
+                });
+              }
+              localStorage.setItem(payAlertKey, 'true');
+            } catch (err) {
+              console.error('Failed to send payment check reminder:', err);
+            }
+          } else {
+            localStorage.setItem(payAlertKey, 'true');
+          }
+        }
+      }
+
       // 2️⃣ Cycle Month Invoicing Reminder (on 30th/end of month if active sessions exist)
       const currentDayOfMonth = now.getDate();
       const isFeb = now.getMonth() === 1;
@@ -1644,7 +1692,7 @@ const App: React.FC = () => {
     runBackgroundChecks();
     const interval = setInterval(runBackgroundChecks, 10 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [user, state.schedules, state.sessions, state.classTypes, state.gyms, state.staff, state.students, state.profile]);
+  }, [user, state.schedules, state.sessions, state.classTypes, state.gyms, state.staff, state.students, state.profile, state.payments]);
 
   // ── LIVE NOTIFICATION FEED ──────────────────────────────────────────────────
   // Notification rows are written from *other people's* devices — a parent's
@@ -3803,7 +3851,10 @@ const App: React.FC = () => {
       if (existingPay && existingPay.length > 0) {
         const pay = existingPay[0];
         await supabase.from('payments').update({
-          amount_due: Number(pay.amount_due || 0) + data.revenue
+          amount_due: Number(pay.amount_due || 0) + data.revenue,
+          // More has been billed onto an invoice that may already be ticked
+          // off, so it is no longer fully paid. Only sent when the column exists.
+          ...('is_paid' in pay ? { is_paid: false, paid_at: null } : {})
         }).eq('id', pay.id);
       } else {
         let snapAddress = '';
@@ -3936,6 +3987,38 @@ const App: React.FC = () => {
     });
     if (error) { alert("Payment Save Error: " + error.message); return; }
     loadCloudData(true);
+  };
+
+  /**
+   * Mark invoices paid / unpaid from History. Updates local state first so the
+   * tick is instant, then writes to Supabase and rolls back if the write fails.
+   */
+  const handleSetInvoicePaid = async (paymentIds: string[], paid: boolean) => {
+    if (!user || paymentIds.length === 0) return;
+    const ids = new Set(paymentIds);
+    const paidAt = paid ? new Date().toISOString() : null;
+    const previous = state.payments;
+
+    setState(prev => ({
+      ...prev,
+      payments: (prev.payments || []).map(p =>
+        ids.has(p.id) ? { ...p, is_paid: paid, paid_at: paidAt } : p
+      )
+    }));
+
+    const ownerId = state.profile.role === 'owner' ? user.id : state.profile.owner_id;
+    const { error } = await supabase.from('payments')
+      .update({ is_paid: paid, paid_at: paidAt })
+      .in('id', paymentIds)
+      .eq('user_id', ownerId || user.id);
+
+    if (error) {
+      setState(prev => ({ ...prev, payments: previous }));
+      const missing = /is_paid|paid_at/i.test(error.message);
+      alert(missing
+        ? 'Paid tracking needs one database update. Run add_invoice_paid_tracking.sql in the Supabase SQL Editor, then try again.'
+        : 'Could not save payment status: ' + error.message);
+    }
   };
 
   const handleSaveSchedule = async (classIds: string[], dayOfWeek: number, time: string, label?: string, color?: string, coachId?: string) => {
@@ -4197,6 +4280,7 @@ const App: React.FC = () => {
           onRestoreSnapshot={restoreInvoiceSnapshot}
           onRecalculate={recalculateHistory}
           isRecalculating={isSyncing}
+          onSetInvoicePaid={handleSetInvoicePaid}
         />
       )}
       {activeView === View.ROSTER && (

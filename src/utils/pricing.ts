@@ -111,21 +111,28 @@ export const MONTH_NAMES = [
 ];
 
 /**
- * The calendar month of a session, used only to LABEL archived history.
+ * The month a session FILES UNDER in history, used only to LABEL archives.
  *
  * There is deliberately NO date restriction anywhere in invoicing. A session
  * logged in July stays on the active invoice until it is reset, and appears on
- * whatever invoice you send — including an August one. `billing_day` is
- * intentionally not applied here: the reset action is what closes an invoice
- * period, not the calendar.
+ * whatever invoice you send — including an August one. The reset action is what
+ * closes an invoice period; this only decides which month folder it lands in.
+ *
+ * A client with a mid-month billing day (say the 20th) is invoiced for the cycle
+ * 20th → 19th and the invoice goes out around the 20th, so the whole cycle files
+ * under the month it is SENT in: with a billing day of 20, 25 June and 5 July
+ * both file under July. A billing day of 1 (the default) is a plain calendar month.
  */
 export function billingMonthFor(
   dateStr: string,
-  _billingDay: number = 1
+  billingDay: number = 1
 ): { monthName: string; year: number; key: string } {
   const d = new Date(dateStr);
-  const monthName = MONTH_NAMES[d.getMonth()];
-  const year = d.getFullYear();
+  const day = Math.floor(Number(billingDay)) || 1;
+  const shift = day > 1 && d.getDate() >= day ? 1 : 0;
+  const filed = new Date(d.getFullYear(), d.getMonth() + shift, 1);
+  const monthName = MONTH_NAMES[filed.getMonth()];
+  const year = filed.getFullYear();
   return { monthName, year, key: `${monthName} ${year}` };
 }
 
@@ -370,9 +377,10 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
       new Set(rows.map(r => r.coach_id).filter((id): id is string => isInvoiceableCoach(id, ctx)))
     );
 
-    // Calendar month only — this labels archived history and never filters what
-    // appears on a live invoice.
-    const bm = billingMonthFor(head.date);
+    // Labels archived history (honouring the client's billing day) and never
+    // filters what appears on a live invoice. The billing day lives on the
+    // main organisation, not its sub-teams.
+    const bm = billingMonthFor(head.date, (parent || gym)?.billing_day);
     const monthStamp = {
       billingMonthKey: bm.key,
       billingMonthName: bm.monthName,

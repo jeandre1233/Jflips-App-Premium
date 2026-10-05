@@ -272,6 +272,9 @@ export interface Payment {
   due_date: string;
   created_at?: string;
   is_expense?: boolean; // True if this is a payment TO a coach
+  /** Owner has confirmed the client paid this invoice. */
+  is_paid?: boolean;
+  paid_at?: string | null;
 }
 
 // ── MERCHANDISE ─────────────────────────────────────────────────────────────

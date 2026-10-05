@@ -32,9 +32,14 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { AppState, HistoryMonth, AttendanceSession, StaffProfile } from '../../types';
 import { priceSessions, PricingContext, PricedCoachLine } from '../utils/pricing';
+import { InvoiceTracker } from '../components/InvoiceTracker';
+
+const money = (n: number): number => Math.round((Number(n) || 0) * 100) / 100;
 
 interface HistoryViewProps {
   state: AppState;
+  /** Tick invoices paid / unpaid. Backs the month tabs. */
+  onSetInvoicePaid?: (paymentIds: string[], paid: boolean) => void;
   onShowRecovery?: () => void;
   onRestoreSnapshot?: (snapshot: any) => void;
   /**
@@ -51,7 +56,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onShowRecovery,
   onRestoreSnapshot,
   onRecalculate,
-  isRecalculating
+  isRecalculating,
+  onSetInvoicePaid
 }) => {
   const [selectedMonth, setSelectedMonth] = useState<HistoryMonth | null>(null);
   const [expandedMonthId, setExpandedMonthId] = useState<string | null>(null);
@@ -304,9 +310,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       });
     });
 
-    const grandTotal = historyRecords.reduce(
+    const grandTotal = money(historyRecords.reduce(
       (acc, h) => acc + (byHistoryId.get(h.id)?.stored || 0), 0
-    );
+    ));
     const anyMismatch = Array.from(byHistoryId.values()).some(v => v.mismatch);
 
     return { byHistoryId, grandTotal, anyMismatch };
@@ -325,6 +331,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     let schoolsCoachPay = 0;
     let gymsGross = 0;
     let gymsNet = 0;
+    let merchGross = 0;
+    let merchNet = 0;
 
     historyRecords.forEach(h => {
       const tGross = Number(h.tumblingGross ?? 0);
@@ -337,13 +345,18 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       const gGross = Number(h.gymsGross ?? 0);
       const gNet = Number(h.gymsNet ?? gGross);
 
-      const totalG = Number(h.totalGross ?? h.revenue ?? (tGross + sGross + gGross));
+      const mGross = Number(h.merchGross ?? 0);
+      const mNet = Number(h.merchNet ?? 0);
+
+      const totalG = Number(h.totalGross ?? h.revenue ?? (tGross + sGross + gGross + mGross));
       const totalC = Number(h.totalCoachPayout ?? (tCoach + sCoach));
-      const totalN = Number(h.netProfit ?? (tNet + gNet));
+      const totalN = Number(h.netProfit ?? (tNet + gNet + mNet));
 
       gross += totalG;
       coachPay += totalC;
       net += totalN;
+      merchGross += mGross;
+      merchNet += mNet;
       sessions += Number(h.sessionCount ?? (h.sessions?.length || 0));
 
       tumblingGross += tGross;
@@ -357,18 +370,22 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
     const profitMargin = gross > 0 ? Math.round((net / gross) * 100) : 0;
 
+    // Sum first, round once at the end, so cents of float drift never pile up
+    // across dozens of months.
     return {
-      gross,
-      coachPay,
-      net,
+      gross: money(gross),
+      coachPay: money(coachPay),
+      net: money(net),
       sessions,
-      tumblingGross,
-      tumblingCoachPay,
-      tumblingNet,
-      schoolsGross,
-      schoolsCoachPay,
-      gymsGross,
-      gymsNet,
+      tumblingGross: money(tumblingGross),
+      tumblingCoachPay: money(tumblingCoachPay),
+      tumblingNet: money(tumblingNet),
+      schoolsGross: money(schoolsGross),
+      schoolsCoachPay: money(schoolsCoachPay),
+      gymsGross: money(gymsGross),
+      gymsNet: money(gymsNet),
+      merchGross: money(merchGross),
+      merchNet: money(merchNet),
       profitMargin
     };
   }, [historyRecords]);
@@ -398,6 +415,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       'Schools Coach Pay (R)',
       'External Gyms Gross (R)',
       'External Gyms Net (R)',
+      'Merchandise Invoiced (R)',
+      'Merchandise Net (R)',
       'Session Count',
       'Recorded At'
     ];
@@ -415,6 +434,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       (Number(h.schoolsCoachPay ?? 0)).toFixed(2),
       (Number(h.gymsGross ?? 0)).toFixed(2),
       (Number(h.gymsNet ?? 0)).toFixed(2),
+      (Number(h.merchGross ?? 0)).toFixed(2),
+      (Number(h.merchNet ?? 0)).toFixed(2),
       Number(h.sessionCount ?? (h.sessions?.length || 0)),
       `"${h.recordedAt || ''}"`
     ]);
@@ -464,7 +485,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       ['Net Business Profit (R)', (Number(m.netProfit ?? 0)).toFixed(2), '', '', ''],
       ['Tumbling Gross (R)', (Number(m.tumblingGross ?? 0)).toFixed(2), '', '', ''],
       ['Schools Invoiced (R)', (Number(m.schoolsGross ?? 0)).toFixed(2), '', '', ''],
-      ['External Gyms Gross (R)', (Number(m.gymsGross ?? 0)).toFixed(2), '', '', '']
+      ['External Gyms Gross (R)', (Number(m.gymsGross ?? 0)).toFixed(2), '', '', ''],
+      ['Merchandise Invoiced (R)', (Number(m.merchGross ?? 0)).toFixed(2), '', '', '']
     ];
 
     const csvContent = '\uFEFF' + [
@@ -565,6 +587,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* ── Month tabs: which invoices are paid ───────────────────────────── */}
+      <InvoiceTracker state={state} onSetInvoicePaid={onSetInvoicePaid} />
 
       {/* Main Stats KPI Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -753,6 +778,16 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             </div>
           </div>
         </div>
+
+        {overallTotals.merchGross > 0 && (
+          <div className="flex items-baseline justify-between text-xs px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800">
+            <span className="font-black uppercase tracking-widest text-[10px] text-slate-500">👕 Merchandise</span>
+            <span className="font-bold text-slate-700 dark:text-slate-200">
+              Invoiced R {overallTotals.merchGross.toFixed(2)} ·{' '}
+              <span className="text-emerald-600 dark:text-emerald-400">Net R {overallTotals.merchNet.toFixed(2)}</span>
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Month-by-Month Cycle Cards */}
