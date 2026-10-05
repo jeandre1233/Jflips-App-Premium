@@ -366,6 +366,13 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
     else groups.set(key, [s]);
   });
 
+  // An athlete is billed ONCE for a given class on a given day. Every register
+  // logged is its own group, so logging a second register for the same class
+  // (instead of editing the first), or a save that was retried, used to bill the
+  // same child twice and pay the coach twice. This set is what makes a duplicate
+  // register harmless however it got there.
+  const billedAthlete = new Set<string>();
+
   for (const [groupId, rows] of groups) {
     const head = rows[0];
     const gym = ctx.gyms.find(g => g.id === head.classTypeId);
@@ -501,7 +508,17 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
 
     // Athletes are identical across the group's rows; union defensively so a
     // multi-coach class is charged once, not once per coach.
-    const athleteIds = Array.from(new Set(rows.flatMap(r => r.studentIds || [])));
+    const rosterIds = Array.from(new Set(rows.flatMap(r => r.studentIds || [])));
+    const eventKey = (head.custom_event_name || '').toLowerCase();
+    const athleteIds = rosterIds.filter(sid => {
+      const k = `${head.classTypeId}|${head.date}|${eventKey}|${sid}`;
+      if (billedAthlete.has(k)) return false;
+      billedAthlete.add(k);
+      return true;
+    });
+    // Every athlete on this register was already billed by an earlier one: it is
+    // a duplicate of that register, so it bills nobody and pays no coach.
+    if (rosterIds.length > 0 && athleteIds.length === 0) continue;
     const classHours = resolveHours(head);
 
     // Bucket the athletes present by the invoice they bill to. Linked siblings
