@@ -7405,24 +7405,24 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
   return (
     <div className="space-y-6 mt-4">
       {/* Tabs */}
-      <div className="flex gap-8 border-b border-slate-100 dark:border-slate-800 pb-0">
+      <div className="flex items-center gap-6 sm:gap-8 border-b border-slate-100 dark:border-slate-800 pb-0 overflow-x-auto no-scrollbar scroll-smooth -mx-2 px-2 sm:mx-0 sm:px-0">
         <button 
           onClick={() => setActiveTab('roster')}
-          className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative ${activeTab === 'roster' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}
+          className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative shrink-0 whitespace-nowrap cursor-pointer ${activeTab === 'roster' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}
         >
           Team Rosters
           {activeTab === 'roster' && <motion.div layoutId="tm-tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#1e4da1] dark:bg-blue-400" />}
         </button>
         <button 
           onClick={() => setActiveTab('competitions')}
-          className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative ${activeTab === 'competitions' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}
+          className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative shrink-0 whitespace-nowrap cursor-pointer ${activeTab === 'competitions' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}
         >
           Competition Schedule
           {activeTab === 'competitions' && <motion.div layoutId="tm-tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#1e4da1] dark:bg-blue-400" />}
         </button>
         <button 
           onClick={() => setActiveTab('registrations')}
-          className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative ${activeTab === 'registrations' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}
+          className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative shrink-0 whitespace-nowrap cursor-pointer ${activeTab === 'registrations' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}
         >
           Registrations
           {activeTab === 'registrations' && <motion.div layoutId="tm-tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#1e4da1] dark:bg-blue-400" />}
@@ -7430,7 +7430,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
         {onSaveAllocations && (
           <button
             onClick={() => setActiveTab('payouts')}
-            className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative ${activeTab === 'payouts' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}
+            className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative shrink-0 whitespace-nowrap cursor-pointer ${activeTab === 'payouts' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}
           >
             Payout Accounts
             {activeTab === 'payouts' && <motion.div layoutId="tm-tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#1e4da1] dark:bg-blue-400" />}
@@ -7438,7 +7438,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
         )}
         <button
           onClick={() => setActiveTab('staff')}
-          className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative ${activeTab === 'staff' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}
+          className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative shrink-0 whitespace-nowrap cursor-pointer ${activeTab === 'staff' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}
         >
           Staff & Coaches
           {activeTab === 'staff' && <motion.div layoutId="tm-tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#1e4da1] dark:bg-blue-400" />}
