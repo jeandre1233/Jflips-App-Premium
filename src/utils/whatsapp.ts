@@ -40,6 +40,24 @@ Thank you!`;
   window.open(url, '_blank');
 }
 
+/** The message sent to the parents' WhatsApp group. */
+export const GROUP_PAYMENT_REMINDER = [
+  'Hallo almal.',
+  '',
+  'Onthou asseblief om julle betalings vir hierdie maand af te handel.',
+  '',
+  'Baie dankie!'
+].join('\n');
+
+/**
+ * Opens WhatsApp with the group reminder already typed. WhatsApp does not allow
+ * an app to post into a group by itself, so this opens its chat picker: choose
+ * the group, then press send.
+ */
+export function sendWhatsAppGroupReminder(): void {
+  window.open(`https://wa.me/?text=${encodeURIComponent(GROUP_PAYMENT_REMINDER)}`, '_blank');
+}
+
 /**
  * Opens a pre-filled WhatsApp chat nudging a client about an invoice that has
  * not been paid yet. Used from History's month tabs.
