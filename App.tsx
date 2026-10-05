@@ -655,10 +655,12 @@ const App: React.FC = () => {
       // Request and register push notifications
       PushNotifications.requestPermissions().then(result => {
         if (result.receive === 'granted') {
-          PushNotifications.register();
+          PushNotifications.register().catch(err => {
+            console.warn('Push notification registration notice:', err);
+          });
         }
       }).catch(err => {
-        console.error('Push notification permissions error:', err);
+        console.warn('Push notification permissions notice:', err);
       });
 
       PushNotifications.addListener('registration', token => {

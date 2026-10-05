@@ -1,51 +1,53 @@
 package com.jflips.pro
 
-import android.os.Bundle
-import android.graphics.Color
-import android.view.View
-import android.view.Window
-import android.view.WindowManager
 import android.content.res.Configuration
+import android.os.Bundle
+import android.util.Log
+import androidx.core.graphics.toColorInt
+import androidx.core.view.WindowCompat
 import com.getcapacitor.BridgeActivity
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
 
 class MainActivity : BridgeActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        initFirebaseFallback()
         registerPlugin(NativeNotificationPlugin::class.java)
         super.onCreate(savedInstanceState)
-        
-        val window: Window = window
-        
-        // Ensure system draws background for status/navigation bars
-        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
-        window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
-        window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
         
         // Detect system theme to match system bar style natively on launch
         val nightModeFlags = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
         val isDarkMode = nightModeFlags == Configuration.UI_MODE_NIGHT_YES
         
-        if (isDarkMode) {
-            window.statusBarColor = Color.parseColor("#07090f") // top bar background matching dark mode
-            window.navigationBarColor = Color.parseColor("#0d1117") // bottom nav background matching dark mode
-            
-            // Light system bar icons (white)
-            var flags = window.decorView.systemUiVisibility
-            flags = flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                flags = flags and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+        window.statusBarColor = if (isDarkMode) "#07090f".toColorInt() else "#f8fafc".toColorInt()
+        window.navigationBarColor = if (isDarkMode) "#0d1117".toColorInt() else "#ffffff".toColorInt()
+
+        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+        insetsController.isAppearanceLightStatusBars = !isDarkMode
+        insetsController.isAppearanceLightNavigationBars = !isDarkMode
+    }
+
+    private fun initFirebaseFallback() {
+        try {
+            if (FirebaseApp.getApps(this).isEmpty()) {
+                try {
+                    FirebaseApp.initializeApp(this)
+                } catch (e: Exception) {
+                    Log.w("MainActivity", "Default FirebaseApp init skipped or failed: ${e.message}")
+                }
             }
-            window.decorView.systemUiVisibility = flags
-        } else {
-            window.statusBarColor = Color.parseColor("#f8fafc") // top bar background matching light mode
-            window.navigationBarColor = Color.parseColor("#ffffff") // bottom nav background matching light mode
-            
-            // Dark system bar icons (dark grey)
-            var flags = window.decorView.systemUiVisibility
-            flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                flags = flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            if (FirebaseApp.getApps(this).isEmpty()) {
+                val options = FirebaseOptions.Builder()
+                    .setApplicationId("1:100000000000:android:0000000000000000000000")
+                    .setApiKey("AIzaSyDummyApiKeyForFirebaseInitFallback00")
+                    .setProjectId("jflips-pro-app")
+                    .setGcmSenderId("100000000000")
+                    .build()
+                FirebaseApp.initializeApp(this, options)
+                Log.i("MainActivity", "Fallback FirebaseApp initialized successfully")
             }
-            window.decorView.systemUiVisibility = flags
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Could not initialize FirebaseApp", e)
         }
     }
 }

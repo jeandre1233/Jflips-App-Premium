@@ -1,9 +1,12 @@
 package com.jflips.pro
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
+import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.getcapacitor.JSObject
@@ -15,7 +18,9 @@ import com.getcapacitor.annotation.CapacitorPlugin
 @CapacitorPlugin(name = "NativeNotification")
 class NativeNotificationPlugin : Plugin() {
 
-    private val CHANNEL_ID = "jflips_native_channel"
+    companion object {
+        private const val CHANNEL_ID = "jflips_native_channel"
+    }
 
     @PluginMethod
     fun showTestNotification(call: PluginCall) {
@@ -31,8 +36,21 @@ class NativeNotificationPlugin : Plugin() {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ActivityCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                val ret = JSObject()
+                ret.put("status", "error")
+                ret.put("message", "Permission POST_NOTIFICATIONS not granted")
+                call.resolve(ret)
+                return
+            }
+        }
+
         with(NotificationManagerCompat.from(context)) {
-            // notificationId is a unique int for each notification that you must define
             notify(1001, builder.build())
         }
 
