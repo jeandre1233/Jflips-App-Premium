@@ -255,7 +255,7 @@ export const InvoiceTracker: React.FC<InvoiceTrackerProps> = ({ state, onSetInvo
           className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-900/50 text-[11px] font-black uppercase tracking-wider hover:bg-green-100 dark:hover:bg-green-900/50 transition-all"
         >
           <MessageCircle size={14} />
-          Remind the WhatsApp group to pay
+          Send Reminder
         </button>
 
         {rows.length > 0 && (
