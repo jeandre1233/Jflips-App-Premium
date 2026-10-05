@@ -30,7 +30,7 @@ import { jsPDF } from 'jspdf';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import { AppState, HistoryMonth, AttendanceSession, StaffProfile } from '../../types';
+import { AppState, HistoryMonth, AttendanceSession, StaffProfile, StaffPayslip } from '../../types';
 import { priceSessions, PricingContext, PricedCoachLine } from '../utils/pricing';
 import { InvoiceTracker } from '../components/InvoiceTracker';
 
@@ -40,6 +40,7 @@ interface HistoryViewProps {
   state: AppState;
   /** Tick invoices paid / unpaid. Backs the month tabs. */
   onSetInvoicePaid?: (paymentIds: string[], paid: boolean) => void;
+  onFixInvoiceAmount?: (paymentId: string, amount: number) => void;
   onShowRecovery?: () => void;
   onRestoreSnapshot?: (snapshot: any) => void;
   /**
@@ -57,7 +58,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onRestoreSnapshot,
   onRecalculate,
   isRecalculating,
-  onSetInvoicePaid
+  onSetInvoicePaid,
+  onFixInvoiceAmount
 }) => {
   const [selectedMonth, setSelectedMonth] = useState<HistoryMonth | null>(null);
   const [expandedMonthId, setExpandedMonthId] = useState<string | null>(null);
@@ -180,7 +182,18 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
   const getArchivedMonthPayslips = (m: HistoryMonth) => {
     const monthKey = `${m.monthName} ${m.year}`;
-    const matchingSaved = (state.payslips || []).filter(p => p.period_month === monthKey);
+    // One payslip per coach: older versions saved a copy on every reset, so keep
+    // the best of each (paid first, then the newest).
+    const rank = (st?: string) => (st === 'paid' ? 0 : st === 'processing' ? 1 : 2);
+    const bestByCoach = new Map<string, StaffPayslip>();
+    (state.payslips || []).filter(p => p.period_month === monthKey).forEach(p => {
+      const cur = bestByCoach.get(p.coach_id);
+      if (!cur || rank(p.status) < rank(cur.status) ||
+          (rank(p.status) === rank(cur.status) && String(p.created_at || '') > String(cur.created_at || ''))) {
+        bestByCoach.set(p.coach_id, p);
+      }
+    });
+    const matchingSaved = Array.from(bestByCoach.values());
     if (matchingSaved.length > 0) {
       return matchingSaved.map(p => {
         const snap = p.snapshot_data || {};
@@ -589,7 +602,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       </div>
 
       {/* ── Month tabs: which invoices are paid ───────────────────────────── */}
-      <InvoiceTracker state={state} onSetInvoicePaid={onSetInvoicePaid} />
+      <InvoiceTracker state={state} onSetInvoicePaid={onSetInvoicePaid} onFixInvoiceAmount={onFixInvoiceAmount} />
 
       {/* Main Stats KPI Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

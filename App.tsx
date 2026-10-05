@@ -117,6 +117,7 @@ import {
   toArchivedRow,
   fromArchivedRow
 } from './src/utils/historyEngine';
+import type { MonthTotals } from './src/utils/historyEngine';
 import {
   resolveAllocation,
   resolveBankDetails,
@@ -1452,6 +1453,18 @@ const App: React.FC = () => {
             created_at: p.created_at,
             updated_at: p.updated_at
           }));
+          // Older versions inserted a fresh payslip on every reset, so the same
+          // coach + month can exist several times. Keep one (paid first, then
+          // the newest) so nothing downstream ever lists copies.
+          const rank = (p: StaffPayslip) => (p.status === 'paid' ? 0 : p.status === 'processing' ? 1 : 2);
+          const best = new Map<string, StaffPayslip>();
+          list.forEach(p => {
+            const k = `${p.coach_id}|${p.period_month}`;
+            const cur = best.get(k);
+            if (!cur || rank(p) < rank(cur) ||
+                (rank(p) === rank(cur) && String(p.created_at || '') > String(cur.created_at || ''))) best.set(k, p);
+          });
+          list = Array.from(best.values());
           if (list.length === 0) {
             try {
               const localSaved = JSON.parse(localStorage.getItem(`jflips_staff_payslips_${targetUserId}`) || '[]');
@@ -2999,14 +3012,20 @@ const App: React.FC = () => {
    * Pass `removeIds` to drop sessions out of a month (a deletion) while
    * recomputing it in the same pass.
    */
+  type MonthResult = { monthName: string; year: number; totals: MonthTotals; coachLines: PricedCoachLine[] };
+
   const writeHistoryMonths = useCallback(async (
     incoming: AttendanceSession[],
     opts: { removeIds?: string[]; touchMonthKeys?: string[]; mode?: 'union' | 'replace' } = {}
-  ): Promise<void> => {
-    if (!user) return;
+  ): Promise<Map<string, MonthResult>> => {
+    // What each month came to, derived from its full archived set. The invoice,
+    // coach-payout and payslip writers below take their amounts from HERE and
+    // nowhere else, so none of them can ever disagree with History.
+    const results = new Map<string, MonthResult>();
+    if (!user) return results;
     const isOwner = state.profile.role === 'owner';
     const ownerId = isOwner ? user.id : state.profile.owner_id;
-    if (!ownerId) return;
+    if (!ownerId) return results;
 
     const ctx = buildPricingContext();
     const removeIds = new Set(opts.removeIds || []);
@@ -3024,7 +3043,7 @@ const App: React.FC = () => {
       if (parsed) byMonth.set(key, { monthName: parsed.monthName, year: parsed.year, sessions: [] });
     });
 
-    if (byMonth.size === 0) return;
+    if (byMonth.size === 0) return results;
 
     for (const [monthKey, group] of Array.from(byMonth.entries())) {
       const { data: existingRows } = await supabase.from('history')
@@ -3104,7 +3123,10 @@ const App: React.FC = () => {
         gyms: archiveCtx.gyms,
         staff: archiveCtx.staff,
         classTypes: archiveCtx.classTypes,
-        payments: state.payments || []
+        payments: state.payments || [],
+        // What each client's invoice should total, so History can flag any
+        // payment record that has drifted from it.
+        invoices: totals.invoices
       };
 
       const row: any = {
@@ -3159,6 +3181,13 @@ const App: React.FC = () => {
       }
       if (writeErr) { console.error('History write failed for ' + monthKey, writeErr); continue; }
 
+      results.set(monthKey, {
+        monthName: group.monthName,
+        year: group.year,
+        totals,
+        coachLines: priceSessions(merged, monthCtx).coachLines
+      });
+
       // ── Keep the folder in step ───────────────────────────────────────
       // Upserting on the original session id is what makes re-archiving a
       // no-op instead of a duplicate.
@@ -3175,11 +3204,200 @@ const App: React.FC = () => {
         if (upErr) {
           // Missing table just means history_and_banking.sql has not been run.
           // sessions_json above is still authoritative, so this is not fatal.
-          console.warn('archived_sessions unavailable — run history_and_banking.sql for full redundancy', upErr.message);
+          console.warn('archived_sessions unavailable — run history_redundancy.sql for full redundancy', upErr.message);
         }
       }
     }
+    return results;
   }, [user, state.profile.role, state.profile.owner_id, state.payments, state.merchClients, buildPricingContext, buildArchivePricingContext]);
+
+  /**
+   * ONE INVOICE PER CLIENT PER MONTH, WITH THE ARCHIVE'S AMOUNT.
+   *
+   * This used to be `existing + new`, so any run that happened twice (a retry
+   * after a failed delete, a stale screen, a double tap) doubled or tripled what
+   * a client owed. Now the amount is the ARCHIVE's figure for that client and
+   * month, written as an absolute value, so running it again changes nothing.
+   * Duplicate rows for the same client + month are collapsed to one (a paid one
+   * is kept in preference). An invoice that was ticked paid is only un-ticked if
+   * MORE is now being billed on it.
+   */
+  const settleInvoicePayments = useCallback(async (
+    results: Map<string, MonthResult>,
+    onlyFamilyId?: string
+  ): Promise<void> => {
+    if (!user) return;
+    const ownerId = state.profile.role === 'owner' ? user.id : state.profile.owner_id;
+    if (!ownerId) return;
+    const now = new Date();
+    const dueDateStr = new Date(now.getFullYear(), now.getMonth() + 1, 3).toISOString().split('T')[0];
+
+    const snapshotFor = (famId: string) => {
+      let label = 'Client'; let address = ''; let phone = '';
+      const gym = (state.gyms || []).find(g => g.id === famId);
+      if (gym) {
+        label = gym.bill_to_name || gym.name || 'Client';
+        address = gym.bill_to_address || '';
+        phone = gym.bill_to_phone || '';
+      } else {
+        const members = (state.students || []).filter(s => s.groupKey === famId || (s.id === famId && !s.groupKey));
+        if (members.length > 0) {
+          label = members.map(m => m.name).join(' & ');
+        } else {
+          const mc = (state.merchClients || []).find(c => c.id === famId);
+          if (mc) { label = mc.name; address = mc.address || ''; phone = mc.phone || ''; }
+        }
+      }
+      return { label, address, phone };
+    };
+
+    for (const [monthKey, r] of Array.from(results.entries())) {
+      for (const inv of r.totals.invoices) {
+        if (onlyFamilyId && inv.familyId !== onlyFamilyId) continue;
+
+        const { data: rows } = await supabase.from('payments').select('*')
+          .eq('invoice_id', monthKey).eq('family_id', inv.familyId).eq('user_id', ownerId);
+        const clientRows = (rows || []).filter((p: any) => !p.is_expense);
+
+        if (clientRows.length > 0) {
+          const sorted = [...clientRows].sort((a: any, b: any) =>
+            Number(!!b.is_paid) - Number(!!a.is_paid) ||
+            String(a.created_at || '').localeCompare(String(b.created_at || ''))
+          );
+          const keep: any = sorted[0];
+          const extras = sorted.slice(1).map((p: any) => p.id);
+          if (extras.length > 0) {
+            await supabase.from('payments').delete().in('id', extras).eq('user_id', ownerId);
+          }
+          const before = Number(keep.amount_due || 0);
+          if (Math.abs(before - inv.amount) >= 0.005) {
+            const moreBilled = inv.amount > before + 0.005;
+            await supabase.from('payments').update({
+              amount_due: inv.amount,
+              ...(keep.is_paid && moreBilled ? { is_paid: false, paid_at: null } : {})
+            }).eq('id', keep.id);
+          }
+        } else {
+          const snap = snapshotFor(inv.familyId);
+          const { error } = await supabase.from('payments').insert({
+            id: crypto.randomUUID ? crypto.randomUUID() : `uid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            invoice_id: monthKey,
+            family_id: inv.familyId,
+            client_name: snap.label,
+            bill_to_address: snap.address || null,
+            bill_to_phone: snap.phone || null,
+            amount_due: inv.amount,
+            due_date: dueDateStr,
+            user_id: ownerId
+          });
+          if (error) console.error('Invoice row failed for ' + snap.label, error);
+        }
+      }
+    }
+  }, [user, state.profile.role, state.profile.owner_id, state.gyms, state.students, state.merchClients]);
+
+  /** Coach payout (expense) rows, derived the same way. Returns true if `is_expense` is missing. */
+  const settleCoachPayouts = useCallback(async (results: Map<string, MonthResult>): Promise<boolean> => {
+    if (!user) return false;
+    const ownerId = state.profile.role === 'owner' ? user.id : state.profile.owner_id;
+    if (!ownerId) return false;
+    const dueDateStr = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 3).toISOString().split('T')[0];
+    let expenseColumnMissing = false;
+
+    for (const [monthKey, r] of Array.from(results.entries())) {
+      for (const payout of r.totals.coachPayouts) {
+        const coach = (state.staff || []).find(st => st.id === payout.coachId);
+        if (!coach) continue;
+
+        const { data: rows } = await supabase.from('payments').select('*')
+          .eq('invoice_id', monthKey).eq('family_id', payout.coachId).eq('user_id', ownerId);
+        const sorted = [...(rows || [])].sort((a: any, b: any) =>
+          Number(!!b.is_paid) - Number(!!a.is_paid) ||
+          String(a.created_at || '').localeCompare(String(b.created_at || '')));
+        const keep: any = sorted[0];
+        const extras = sorted.slice(1).map((p: any) => p.id);
+        if (extras.length > 0) await supabase.from('payments').delete().in('id', extras).eq('user_id', ownerId);
+
+        const write = async (withFlag: boolean) => {
+          const flag = withFlag ? { is_expense: true } : {};
+          if (keep) {
+            return (await supabase.from('payments').update({ amount_due: payout.amount, ...flag }).eq('id', keep.id)).error;
+          }
+          return (await supabase.from('payments').insert({
+            id: crypto.randomUUID ? crypto.randomUUID() : `uid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            invoice_id: monthKey,
+            family_id: payout.coachId,
+            client_name: coach.name || 'Coach',
+            amount_due: payout.amount,
+            due_date: dueDateStr,
+            user_id: ownerId,
+            ...flag
+          })).error;
+        };
+
+        let err = await write(true);
+        if (err && err.message?.includes('is_expense')) { expenseColumnMissing = true; err = await write(false); }
+        if (err) console.error('Coach payout row failed for ' + (coach.name || payout.coachId), err);
+      }
+    }
+    return expenseColumnMissing;
+  }, [user, state.profile.role, state.profile.owner_id, state.staff]);
+
+  /**
+   * ONE PAYSLIP PER COACH PER MONTH. Built from the month's full archive and
+   * written over any existing one, so resetting twice can never stack copies.
+   * Duplicates already in the table are collapsed; a paid one is kept first.
+   */
+  const settlePayslips = useCallback(async (results: Map<string, MonthResult>): Promise<void> => {
+    if (!user) return;
+    const ownerId = state.profile.role === 'owner' ? user.id : state.profile.owner_id;
+    if (!ownerId) return;
+
+    for (const [monthKey, r] of Array.from(results.entries())) {
+      const byCoach = new Map<string, PricedCoachLine[]>();
+      r.coachLines.forEach(cl => {
+        if (!cl.coachId) return;
+        const list = byCoach.get(cl.coachId) || [];
+        list.push(cl);
+        byCoach.set(cl.coachId, list);
+      });
+
+      for (const [coachId, lines] of Array.from(byCoach.entries())) {
+        const coach: any = (state.staff || []).find(st => st.id === coachId) || { id: coachId, name: lines[0]?.targetName || 'Coach' };
+        const refId = `PAY-${r.year}-${r.monthName.slice(0, 3).toUpperCase()}-${coachId.slice(0, 6).toUpperCase()}`;
+        const fields = {
+          total_hours: Math.round(lines.reduce((a, l) => a + Number(l.hours || 0), 0) * 10) / 10,
+          total_sessions: new Set(lines.map(l => l.groupId)).size,
+          gross_amount: Math.round(lines.reduce((a, l) => a + Number(l.amount || 0), 0) * 100) / 100,
+          snapshot_data: { coach, lines, archived_at: new Date().toISOString() }
+        };
+
+        const { data: rows, error: readErr } = await supabase.from('staff_payslips').select('*')
+          .eq('owner_id', ownerId).eq('coach_id', coachId).eq('period_month', monthKey);
+        if (readErr) { console.warn('staff_payslips unavailable:', readErr.message); return; }
+
+        const rank = (p: any) => (p.status === 'paid' ? 0 : p.status === 'processing' ? 1 : 2);
+        const sorted = [...(rows || [])].sort((a: any, b: any) =>
+          rank(a) - rank(b) || String(a.created_at || '').localeCompare(String(b.created_at || '')));
+        const keep: any = sorted[0];
+        const extras = sorted.slice(1).map((p: any) => p.id);
+        if (extras.length > 0) await supabase.from('staff_payslips').delete().in('id', extras).eq('owner_id', ownerId);
+
+        const { error } = keep
+          ? await supabase.from('staff_payslips').update(fields).eq('id', keep.id)
+          : await supabase.from('staff_payslips').insert({
+              id: crypto.randomUUID ? crypto.randomUUID() : `uid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+              coach_id: coachId,
+              owner_id: ownerId,
+              period_month: monthKey,
+              status: 'unpaid',
+              notes: refId,
+              ...fields
+            });
+        if (error) console.warn('Payslip write failed for ' + coach.name, error.message);
+      }
+    }
+  }, [user, state.profile.role, state.profile.owner_id, state.staff]);
 
   /**
    * REDUNDANCY, DELETION SIDE
@@ -3350,7 +3568,6 @@ const App: React.FC = () => {
       const { clientLines, coachLines } = priceSessions(sessionsToReset, pricingContext);
 
       const familyRevByMonth = new Map<string, { monthLabel: string, famId: string, revenue: number, snapAddress: string, snapPhone: string, currentLabel: string }>();
-      const coachRevByMonth = new Map<string, { monthLabel: string, coachId: string, revenue: number, currentLabel: string }>();
 
       // Each priced line already knows which month it files under, so never
       // recompute it from the bare date here.
@@ -3407,24 +3624,6 @@ const App: React.FC = () => {
       // never looking at — and would put goods into a month-end figure the
       // client's coaching invoice never showed.
 
-      // -- Coach turn-in expense (what JFlips owes each coach) --
-      // Cheer/school coach lines are deliberately NOT written as payment rows:
-      // they are a per-coach breakdown of the school's master invoice, which is
-      // already recorded above, so writing them would double-count the revenue.
-      // Staff only — never the owner. The owner is not paid a turn-in fee by
-      // their own business, so an expense row for them would be fictional.
-      coachLines.filter(line => line.orgId === null && line.coachId !== state.profile.id).forEach(line => {
-        if (line.amount <= 0) return;
-        const coach = (state.staff || []).find(s => s.id === line.coachId);
-        if (!coach) return;
-        const { key } = monthKeyFor(line);
-        const coachKey = `${line.coachId}_${key}`;
-        if (!coachRevByMonth.has(coachKey)) {
-          coachRevByMonth.set(coachKey, { monthLabel: key, coachId: line.coachId, revenue: 0, currentLabel: coach.name || 'Coach' });
-        }
-        coachRevByMonth.get(coachKey)!.revenue += line.amount;
-      });
-
       // 2. History — written by the ONE derived writer.
       //    Everything the old block here did by hand (per-stream sums, then
       //    `existing + new` updates and a blind session concatenation) now
@@ -3432,154 +3631,17 @@ const App: React.FC = () => {
       //    recomputes every total from the merged set. That is what makes
       //    archiving idempotent: a class already archived for one family cannot
       //    be counted a second time when the rest of the month is archived.
-      await writeHistoryMonths(sessionsToReset);
+      const monthResults = await writeHistoryMonths(sessionsToReset);
 
-      // 2b. Auto-Save Permanent Snapshot Payslips into staff_payslips
-      const newPayslips: StaffPayslip[] = [];
-      const coachesInSessions = new Map<string, {
-        coach: any;
-        lines: PricedCoachLine[];
-        totalHours: number;
-        grossAmount: number;
-        monthKey: string;
-        year: number;
-        monthName: string;
-      }>();
-
-      coachLines.forEach(cl => {
-        if (!cl.coachId) return;
-        const coach = (state.staff || []).find(s => s.id === cl.coachId) || { id: cl.coachId, name: cl.targetName || 'Coach' };
-        const key = cl.billingMonthKey;
-        const coachMonthKey = `${cl.coachId}_${key}`;
-
-        if (!coachesInSessions.has(coachMonthKey)) {
-          coachesInSessions.set(coachMonthKey, {
-            coach,
-            lines: [],
-            totalHours: 0,
-            grossAmount: 0,
-            monthKey: key,
-            year: cl.billingYear,
-            monthName: cl.billingMonthName
-          });
-        }
-        const entry = coachesInSessions.get(coachMonthKey)!;
-        entry.lines.push(cl);
-        entry.totalHours += Number(cl.hours || 0);
-        entry.grossAmount += Number(cl.amount || 0);
-      });
-
-      for (const entry of Array.from(coachesInSessions.values())) {
-        const coachId = entry.coach.id;
-        const sessionCount = new Set(entry.lines.map(l => l.groupId)).size;
-        const refId = `PAY-${entry.year}-${entry.monthName.slice(0, 3).toUpperCase()}-${coachId.slice(0, 6).toUpperCase()}`;
-        const payslipRecord: StaffPayslip = {
-          id: crypto.randomUUID ? crypto.randomUUID() : `uid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-          reference_id: refId,
-          coach_id: coachId,
-          owner_id: user.id,
-          period_month: entry.monthKey,
-          total_hours: Math.round(entry.totalHours * 10) / 10,
-          total_sessions: sessionCount,
-          gross_amount: Math.round(entry.grossAmount * 100) / 100,
-          status: 'unpaid',
-          snapshot_data: {
-            coach: entry.coach,
-            lines: entry.lines,
-            archived_at: new Date().toISOString()
-          },
-          created_at: new Date().toISOString()
-        };
-        newPayslips.push(payslipRecord);
-
-        try {
-          await supabase.from('staff_payslips').insert({
-            id: payslipRecord.id,
-            coach_id: payslipRecord.coach_id,
-            owner_id: payslipRecord.owner_id,
-            period_month: payslipRecord.period_month,
-            total_hours: payslipRecord.total_hours,
-            total_sessions: payslipRecord.total_sessions,
-            gross_amount: payslipRecord.gross_amount,
-            status: payslipRecord.status,
-            snapshot_data: payslipRecord.snapshot_data,
-            notes: refId
-          });
-        } catch (slipErr) {
-          console.warn('Could not write to staff_payslips table:', slipErr);
-        }
-      }
-
-      if (newPayslips.length > 0) {
-        setState(prev => {
-          const existing = prev.payslips || [];
-          const combined = [...existing.filter(e => !newPayslips.some(n => n.coach_id === e.coach_id && n.period_month === e.period_month)), ...newPayslips];
-          try {
-            localStorage.setItem(`jflips_staff_payslips_${user.id}`, JSON.stringify(combined));
-          } catch {}
-          return { ...prev, payslips: combined };
-        });
-      }
-
-      // 3. Family Payments
-      for (const data of Array.from(familyRevByMonth.values())) {
-        const { data: existingPay } = await supabase.from('payments').select('*').eq('invoice_id', data.monthLabel).eq('family_id', data.famId).eq('user_id', user.id);
-        if (existingPay && existingPay.length > 0) {
-          await supabase.from('payments').update({ amount_due: Number(existingPay[0].amount_due || 0) + data.revenue }).eq('id', existingPay[0].id);
-        } else {
-          await supabase.from('payments').insert({
-            id: crypto.randomUUID ? crypto.randomUUID() : `uid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-            invoice_id: data.monthLabel,
-            family_id: data.famId,
-            client_name: data.currentLabel,
-            bill_to_address: data.snapAddress || null,
-            bill_to_phone: data.snapPhone || null,
-            amount_due: data.revenue,
-            due_date: dueDateStr,
-            user_id: user.id
-          });
-        }
-      }
-
-      // 4. Coach Payments
-      //    These writes used to discard their error. On a database without the
-      //    `is_expense` column every one of them failed and nothing said so, so
-      //    coach payout rows simply went missing and net profit read too high.
-      //    The retry keeps the payout recorded on such a database instead of
-      //    losing it, and the warning names the file that fixes it properly.
-      let expenseColumnMissing = false;
-      for (const data of Array.from(coachRevByMonth.values())) {
-        const { data: existingCoachPay } = await supabase.from('payments').select('*').eq('invoice_id', data.monthLabel).eq('family_id', data.coachId).eq('user_id', user.id);
-
-        const writeCoachPay = async (withExpenseFlag: boolean) => {
-          const flag = withExpenseFlag ? { is_expense: true } : {};
-          if (existingCoachPay && existingCoachPay.length > 0) {
-            return (await supabase.from('payments')
-              .update({ amount_due: Number(existingCoachPay[0].amount_due || 0) + data.revenue, ...flag })
-              .eq('id', existingCoachPay[0].id)).error;
-          }
-          return (await supabase.from('payments').insert({
-            id: crypto.randomUUID ? crypto.randomUUID() : `uid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-            invoice_id: data.monthLabel,
-            family_id: data.coachId,
-            client_name: data.currentLabel,
-            amount_due: data.revenue,
-            due_date: dueDateStr,
-            user_id: user.id,
-            ...flag
-          })).error;
-        };
-
-        let payErr = await writeCoachPay(true);
-        if (payErr && payErr.message?.includes('is_expense')) {
-          expenseColumnMissing = true;
-          payErr = await writeCoachPay(false);
-        }
-        if (payErr) console.error('Coach payout row failed for ' + data.currentLabel, payErr);
-      }
+      // 2b / 3 / 4. Payslips, client invoices and coach payouts: each taken from
+      //    the archive's figures and written as an absolute value, so a repeated
+      //    run cannot duplicate or inflate anything.
+      await settlePayslips(monthResults);
+      await settleInvoicePayments(monthResults);
+      const expenseColumnMissing = await settleCoachPayouts(monthResults);
 
       if (expenseColumnMissing) {
-        alert("Coach payouts were recorded, but they can't be told apart from client invoices until history_and_banking.sql is run in your Supabase SQL Editor. Until then, History will count them as income.");
+        alert("Coach payouts were recorded, but they can't be told apart from client invoices until history_redundancy.sql is run in your Supabase SQL Editor. Until then, History will count them as income.");
       }
 
       // 5. Delete active pay if migrating? For simplicity, we just delete the 'Active' ones if we are resetting globally.
@@ -3840,61 +3902,6 @@ const App: React.FC = () => {
       revenueByMonth.get(entry.monthKey)!.revenue += entry.amount;
     });
 
-    for (const [monthLabelFull, data] of Array.from(revenueByMonth.entries())) {
-      // 1. Handle Payment Record
-      const { data: existingPay } = await supabase.from('payments')
-        .select('*')
-        .eq('invoice_id', monthLabelFull)
-        .eq('family_id', familyId)
-        .eq('user_id', user.id);
-
-      if (existingPay && existingPay.length > 0) {
-        const pay = existingPay[0];
-        await supabase.from('payments').update({
-          amount_due: Number(pay.amount_due || 0) + data.revenue,
-          // More has been billed onto an invoice that may already be ticked
-          // off, so it is no longer fully paid. Only sent when the column exists.
-          ...('is_paid' in pay ? { is_paid: false, paid_at: null } : {})
-        }).eq('id', pay.id);
-      } else {
-        let snapAddress = '';
-        let snapPhone = '';
-        const gym = (state.gyms || []).find(g => g.id === familyId);
-        if (gym) {
-          snapAddress = gym.bill_to_address || '';
-          snapPhone = gym.bill_to_phone || '';
-        } else {
-          // A merchandise client's details live only on their own record, so
-          // snapshot them here or the archived invoice loses its Bill To block.
-          const mc = (state.merchClients || []).find(c => c.id === familyId);
-          if (mc) {
-            snapAddress = mc.address || '';
-            snapPhone = mc.phone || '';
-          }
-        }
-
-
-        await supabase.from('payments').insert({
-          id: crypto.randomUUID ? crypto.randomUUID() : `uid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-          invoice_id: monthLabelFull,
-          family_id: familyId,
-          client_name: label,
-          bill_to_address: snapAddress || null,
-          bill_to_phone: snapPhone || null,
-          amount_due: data.revenue,
-          due_date: dueDateStr,
-          user_id: user.id
-        });
-      }
-
-      // 2. History is NOT written here.
-      //    It used to be, with per-stream sums built by an `if / else if` chain
-      //    that silently dropped every stream but the first (so a school that
-      //    also ran classes lost its class revenue), then applied as
-      //    `existing + new`. Both problems are gone: history is written once,
-      //    below, by the derived writer.
-    }
-
     // 2. History — one derived write for every month this reset touched.
     //    A class shared with other families is archived as THIS family's slice
     //    of the roster, so the month never counts revenue for a family that has
@@ -3922,9 +3929,31 @@ const App: React.FC = () => {
     // Merchandise months are named explicitly: a merch-only reset has no
     // sessions to file, so without this the month would never be rewritten and
     // its merch revenue would never reach History.
-    await writeHistoryMonths(familySlices, {
+    const familyResults = await writeHistoryMonths(familySlices, {
       touchMonthKeys: (merchByClient.get(familyId) || []).map(e => e.monthKey)
     });
+
+    // The invoice for each month is the ARCHIVE's figure for this client,
+    // written absolute, so pressing reset twice can never double what they owe.
+    await settleInvoicePayments(familyResults, familyId);
+
+    // Safety net: if a month's history write failed there is no archive figure,
+    // so make sure the invoice row at least exists (never added onto).
+    for (const [monthLabelFull, data] of Array.from(revenueByMonth.entries())) {
+      if (familyResults.has(monthLabelFull)) continue;
+      const { data: existingPay } = await supabase.from('payments').select('id')
+        .eq('invoice_id', monthLabelFull).eq('family_id', familyId).eq('user_id', user.id);
+      if (existingPay && existingPay.length > 0) continue;
+      await supabase.from('payments').insert({
+        id: crypto.randomUUID ? crypto.randomUUID() : `uid_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        invoice_id: monthLabelFull,
+        family_id: familyId,
+        client_name: label,
+        amount_due: Math.round(data.revenue * 100) / 100,
+        due_date: dueDateStr,
+        user_id: user.id
+      });
+    }
 
     // 3. Retire the billed work for THIS client only.
     //    A class session shared with other families must NOT be deleted outright
@@ -4018,6 +4047,25 @@ const App: React.FC = () => {
       alert(missing
         ? 'Paid tracking needs one database update. Run add_invoice_paid_tracking.sql in the Supabase SQL Editor, then try again.'
         : 'Could not save payment status: ' + error.message);
+    }
+  };
+
+  /** Set an invoice's amount to the figure the archive derived for it. */
+  const handleFixInvoiceAmount = async (paymentId: string, amount: number) => {
+    if (!user) return;
+    const ownerId = state.profile.role === 'owner' ? user.id : state.profile.owner_id;
+    const previous = state.payments;
+    setState(prev => ({
+      ...prev,
+      payments: (prev.payments || []).map(p => p.id === paymentId ? { ...p, amount_due: amount } : p)
+    }));
+    const { error } = await supabase.from('payments')
+      .update({ amount_due: amount })
+      .eq('id', paymentId)
+      .eq('user_id', ownerId || user.id);
+    if (error) {
+      setState(prev => ({ ...prev, payments: previous }));
+      alert('Could not correct the invoice amount: ' + error.message);
     }
   };
 
@@ -4281,6 +4329,7 @@ const App: React.FC = () => {
           onRecalculate={recalculateHistory}
           isRecalculating={isSyncing}
           onSetInvoicePaid={handleSetInvoicePaid}
+          onFixInvoiceAmount={handleFixInvoiceAmount}
         />
       )}
       {activeView === View.ROSTER && (

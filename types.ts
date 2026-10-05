@@ -144,6 +144,8 @@ export interface HistoryMonth {
     staff?: any[];
     classTypes: ClassType[];
     payments: Payment[];
+    /** What each client's invoice should total for this month, from the archive. */
+    invoices?: { familyId: string; amount: number; kind: string }[];
   };
 }
 

@@ -60,6 +60,8 @@ export interface MonthTotals {
   invoiceCount: number;
   /** Per-client invoice breakdown, so the total can be audited on screen. */
   invoices: ArchivedInvoice[];
+  /** What each STAFF coach is owed for the month (never the owner). */
+  coachPayouts: { coachId: string; amount: number }[];
 }
 
 export interface ArchivedInvoice {
@@ -85,7 +87,8 @@ export const EMPTY_MONTH_TOTALS: MonthTotals = {
   sessionCount: 0,
   invoicesTotal: 0,
   invoiceCount: 0,
-  invoices: []
+  invoices: [],
+  coachPayouts: []
 };
 
 /**
@@ -195,7 +198,7 @@ export function computeMonthTotals(
   const hasSessions = sessions && sessions.length > 0;
   const hasMerch = ctx?.merchOrders && ctx.merchOrders.length > 0;
   if (!hasSessions && !hasMerch) {
-    return { ...EMPTY_MONTH_TOTALS, invoices: [] };
+    return { ...EMPTY_MONTH_TOTALS, invoices: [], coachPayouts: [] };
   }
 
   const { clientLines, coachLines } = priceSessions(sessions || [], ctx);
@@ -234,6 +237,15 @@ export function computeMonthTotals(
   });
   const invoices = Array.from(perClient.values()).filter(i => i.amount > 0);
 
+  const perCoach = new Map<string, number>();
+  coachLines.filter(isStaffTurnIn).forEach(l => {
+    if (!l.coachId) return;
+    perCoach.set(l.coachId, money((perCoach.get(l.coachId) || 0) + l.amount));
+  });
+  const coachPayouts = Array.from(perCoach.entries())
+    .map(([coachId, amount]) => ({ coachId, amount }))
+    .filter(c => c.amount > 0);
+
   return {
     tumblingGross,
     tumblingCoachPay,
@@ -251,7 +263,8 @@ export function computeMonthTotals(
     sessionCount: (sessions || []).length,
     invoicesTotal: money(invoices.reduce((a, i) => a + i.amount, 0)),
     invoiceCount: invoices.length,
-    invoices
+    invoices,
+    coachPayouts
   };
 }
 
