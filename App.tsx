@@ -3547,7 +3547,22 @@ const App: React.FC = () => {
     }
   }, [user, state.profile.role, state.history, writeHistoryMonths, loadCloudData]);
 
+  // Only ONE reset may run at a time. A double-tap or a slow screen used to start
+  // the same reset two or three times at once, and each run billed the whole
+  // month again. Any press while one is running is ignored.
+  const resetLock = useRef(false);
+
   const resetMonth = async (selectedIds: string[]) => {
+    if (resetLock.current) return;
+    resetLock.current = true;
+    try {
+      await runResetMonth(selectedIds);
+    } finally {
+      resetLock.current = false;
+    }
+  };
+
+  const runResetMonth = async (selectedIds: string[]) => {
     if (!user) return; if (state.sessions.length === 0 || selectedIds.length === 0) { setIsResetConfirming(false); return; }
     setIsSyncing(true);
     try {
@@ -3805,6 +3820,20 @@ const App: React.FC = () => {
    * because someone bought a shirt.
    */
   const executeResetSingleInvoice = async (
+    familyId: string,
+    label: string,
+    mode: 'coaching' | 'merch' = 'coaching'
+  ) => {
+    if (resetLock.current) return;
+    resetLock.current = true;
+    try {
+      await runResetSingleInvoice(familyId, label, mode);
+    } finally {
+      resetLock.current = false;
+    }
+  };
+
+  const runResetSingleInvoice = async (
     familyId: string,
     label: string,
     mode: 'coaching' | 'merch' = 'coaching'

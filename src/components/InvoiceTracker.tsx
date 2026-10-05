@@ -25,6 +25,7 @@ const rand = (n: number) =>
 export const InvoiceTracker: React.FC<InvoiceTrackerProps> = ({ state, onSetInvoicePaid, onFixInvoiceAmount }) => {
   const [unpaidOnly, setUnpaidOnly] = useState(false);
   const [confirmAll, setConfirmAll] = useState(false);
+  const [confirmFix, setConfirmFix] = useState(false);
   const [viewing, setViewing] = useState<Payment | null>(null);
 
   // Client invoices only — coach payouts are expenses, 'Active' is the live invoice.
@@ -139,6 +140,12 @@ export const InvoiceTracker: React.FC<InvoiceTrackerProps> = ({ state, onSetInvo
   const outstanding = cents(invoiced - paid);
   const unpaidRows = rows.filter(r => !r.is_paid);
 
+  // Every invoice in this month whose amount disagrees with the archive.
+  const drifted = rows.filter(r => {
+    const a = archiveAmounts.get(`${r.invoice_id}|${r.family_id}`);
+    return a !== undefined && Math.abs(a - Number(r.amount_due || 0)) >= 1;
+  });
+
   const viewLines = viewing ? linesFor(viewing) : [];
   const viewLinesTotal = cents(viewLines.reduce((a, l) => a + l.amount, 0));
 
@@ -154,7 +161,7 @@ export const InvoiceTracker: React.FC<InvoiceTrackerProps> = ({ state, onSetInvo
           </div>
           <select
             value={year}
-            onChange={e => { setYear(Number(e.target.value)); setConfirmAll(false); }}
+            onChange={e => { setYear(Number(e.target.value)); setConfirmAll(false); setConfirmFix(false); }}
             className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-black dark:text-white outline-none"
           >
             {years.map(y => <option key={y} value={y}>{y}</option>)}
@@ -170,7 +177,7 @@ export const InvoiceTracker: React.FC<InvoiceTrackerProps> = ({ state, onSetInvo
             return (
               <button
                 key={name}
-                onClick={() => { setMonth(idx); setConfirmAll(false); }}
+                onClick={() => { setMonth(idx); setConfirmAll(false); setConfirmFix(false); }}
                 className={`relative shrink-0 px-3.5 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${
                   active
                     ? 'bg-[#1e4da1] text-white shadow-md'
@@ -207,6 +214,41 @@ export const InvoiceTracker: React.FC<InvoiceTrackerProps> = ({ state, onSetInvo
             <span className="text-sm font-[1000] text-amber-600 dark:text-amber-400 tabular-nums">{rand(outstanding)}</span>
           </div>
         </div>
+
+        {drifted.length > 0 && onFixInvoiceAmount && (
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 rounded-2xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40">
+            <span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-amber-700 dark:text-amber-300">
+              <AlertTriangle size={14} />
+              {drifted.length} {drifted.length === 1 ? 'invoice does' : 'invoices do'} not match the archive
+            </span>
+            {confirmFix ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    drifted.forEach(r => onFixInvoiceAmount(r.id, archiveAmounts.get(`${r.invoice_id}|${r.family_id}`)!));
+                    setConfirmFix(false);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-[10px] font-black uppercase tracking-wider"
+                >
+                  Yes, correct {drifted.length}
+                </button>
+                <button
+                  onClick={() => setConfirmFix(false)}
+                  className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-black uppercase tracking-wider"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmFix(true)}
+                className="px-3 py-1.5 rounded-lg bg-amber-500 text-white text-[10px] font-black uppercase tracking-wider"
+              >
+                Fix all to archive amounts
+              </button>
+            )}
+          </div>
+        )}
 
         {rows.length > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-2">
