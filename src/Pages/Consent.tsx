@@ -34,7 +34,6 @@ export default function Consent() {
   const [invalid, setInvalid] = useState(false);
 
   const [parent, setParent] = useState({ name: '', relationship: '', phone: '', email: '' });
-  const [schoolGrade, setSchoolGrade] = useState('');
 
   const [gAgreed, setGAgreed] = useState(false);
   const [gSig, setGSig] = useState('');
@@ -64,7 +63,6 @@ export default function Consent() {
       phone: p.phone || any.parent_phone || '',
       email: p.email || any.parent_email || ''
     }));
-    if (byKind.media?.details?.school_grade) setSchoolGrade(g => g || byKind.media.details!.school_grade || '');
     if (byKind.media?.status === 'signed' || byKind.media?.status === 'withdrawn') {
       const c: Partial<Record<MediaKey, boolean>> = {};
       MEDIA_KEYS.forEach(k => { if (typeof byKind.media.choices?.[k] === 'boolean') c[k] = byKind.media.choices![k]; });
@@ -100,7 +98,7 @@ export default function Consent() {
     const { error: e } = await supabase.rpc('submit_consent', {
       p_token: token, p_kind: kind,
       p_parent_name: parent.name.trim(), p_parent_phone: parent.phone.trim(), p_parent_email: parent.email.trim(),
-      p_details: { relationship: parent.relationship.trim(), school_grade: schoolGrade.trim() },
+      p_details: { relationship: parent.relationship.trim() },
       p_choices: choices, p_signature: sig, p_language: 'en',
       p_form_version: kind === 'general' ? GENERAL_VERSION : MEDIA_VERSION, p_withdraw: false
     });
@@ -131,7 +129,7 @@ export default function Consent() {
     generateConsentPdf({
       kind, lang: 'en', childNames,
       parentName: parent.name, parentPhone: parent.phone, parentEmail: parent.email,
-      relationship: parent.relationship, schoolGrade,
+      relationship: parent.relationship,
       choices: kind === 'media' ? (mChoices as Record<string, boolean>) : { agreed: true },
       signature: js?.sig, signedAt: js?.at || row?.signed_at,
       version: row?.form_version, status: row?.status
@@ -211,7 +209,6 @@ export default function Consent() {
           {rows.media.status !== 'pending' && <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>{ui.changeChoices}</p>}
           <MediaConsentSection
             choices={mChoices} onChoice={(k, v) => setMChoices(c => ({ ...c, [k]: v }))}
-            schoolGrade={schoolGrade} onSchoolGrade={setSchoolGrade}
             signed={!!mSig} onSign={d => setMSig(d)} clearKey={mClear} onClear={() => { setMSig(''); setMClear(c => c + 1); }}
             errorChoices={errs.choices} errorSignature={errs['sig-media']}
           />

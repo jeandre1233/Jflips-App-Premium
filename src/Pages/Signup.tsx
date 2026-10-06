@@ -238,7 +238,6 @@ export default function Signup() {
   const [mChoices, setMChoices] = useState<Partial<Record<MediaKey, boolean>>>({});
   const [mSig, setMSig] = useState('');
   const [mClear, setMClear] = useState(0);
-  const [schoolGrade, setSchoolGrade] = useState('');
   const [consentErrs, setConsentErrs] = useState<Record<string, boolean>>({});
   const [consentSaved, setConsentSaved] = useState(false);
 
@@ -440,7 +439,7 @@ export default function Signup() {
           p_parent_name: form.parent1Name.trim(),
           p_parent_phone: form.parent1Phone.trim(),
           p_parent_email: form.parent1Email.trim(),
-          p_details: { relationship: 'Parent or legal guardian', school_grade: schoolGrade.trim() },
+          p_details: { relationship: 'Parent or legal guardian' },
           p_general_signature: gSig,
           p_media_choices: mChoices,
           p_media_signature: mSig,
@@ -546,7 +545,7 @@ export default function Signup() {
                   kind, lang: 'en',
                   childNames: `${submittedForm.studentFirstName} ${submittedForm.studentLastName}`.trim(),
                   parentName: submittedForm.parent1Name, parentPhone: submittedForm.parent1Phone, parentEmail: submittedForm.parent1Email,
-                  relationship: 'Parent or legal guardian', schoolGrade,
+                  relationship: 'Parent or legal guardian',
                   choices: kind === 'media' ? (mChoices as Record<string, boolean>) : { agreed: true },
                   signature: kind === 'media' ? mSig : gSig, signedAt: new Date().toISOString(),
                   version: kind === 'media' ? MEDIA_VERSION : GENERAL_VERSION, status: 'signed'
@@ -665,7 +664,6 @@ export default function Signup() {
           <Section label="Photo & Video Consent (POPIA)" icon="📸" color="#0891b2">
             <MediaConsentSection
               choices={mChoices} onChoice={(k, v) => { setMChoices(c => ({ ...c, [k]: v })); if (error) setError(''); }}
-              schoolGrade={schoolGrade} onSchoolGrade={setSchoolGrade}
               signed={!!mSig} onSign={d => setMSig(d)} clearKey={mClear} onClear={() => { setMSig(''); setMClear(c => c + 1); }}
               errorChoices={consentErrs.choices} errorSignature={consentErrs.msig}
             />

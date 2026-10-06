@@ -159,7 +159,7 @@ export const ConsentManager: React.FC<{ state: AppState }> = ({ state }) => {
     generateConsentPdf({
       kind: r.kind, lang: 'en', childNames: f.kids.join(' & '),
       parentName: r.parent_name || f.parent, parentPhone: r.parent_phone || '', parentEmail: r.parent_email || '',
-      relationship: r.details?.relationship, schoolGrade: r.details?.school_grade,
+      relationship: r.details?.relationship,
       choices: r.choices, signature: r.signature_data, signedAt: r.signed_at,
       version: r.form_version, status: r.status
     });

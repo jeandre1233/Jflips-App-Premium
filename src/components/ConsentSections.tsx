@@ -63,10 +63,9 @@ export const GeneralConsentSection: React.FC<{
 
 export const MediaConsentSection: React.FC<{
   choices: Partial<Record<MediaKey, boolean>>; onChoice: (k: MediaKey, v: boolean) => void;
-  schoolGrade: string; onSchoolGrade: (v: string) => void;
   signed: boolean; onSign: (d: string) => void; clearKey: number; onClear: () => void;
   errorChoices?: boolean; errorSignature?: boolean;
-}> = ({ choices, onChoice, schoolGrade, onSchoolGrade, signed, onSign, clearKey, onClear, errorChoices, errorSignature }) => {
+}> = ({ choices, onChoice, signed, onSign, clearKey, onClear, errorChoices, errorSignature }) => {
   const f = MEDIA_FORM.en; const ui = UI.en;
   return (
     <>
@@ -74,11 +73,6 @@ export const MediaConsentSection: React.FC<{
         <p style={{ margin: '0 0 6px', fontWeight: 800, color: '#1e293b', fontSize: '13px' }}>{f.title}</p>
         <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#94a3b8' }}>{f.subtitle}</p>
         <p style={{ margin: 0, color: '#1e293b' }}>{f.intro}</p>
-      </div>
-
-      <div>
-        <label style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', color: '#64748b', display: 'block', marginBottom: '4px' }}>{ui.schoolGrade}</label>
-        <input value={schoolGrade} onChange={e => onSchoolGrade(e.target.value)} style={{ width: '100%', padding: '12px 14px', border: '1.5px solid #e2e8f0', borderRadius: '10px', fontSize: '14px', boxSizing: 'border-box' }} />
       </div>
 
       <p style={{ ...h, margin: '4px 0 0' }}>{f.useHeading}</p>

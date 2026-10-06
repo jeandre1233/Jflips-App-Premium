@@ -136,15 +136,14 @@ export const GENERAL_FORM: Record<Lang, {
       {
         heading: 'Who can see it',
         items: [
-          'Only JFlips and the coaches who need it to do their work.',
-          'Secure service providers that store and send information for us, such as our database, email and messaging services. Some of them may keep data outside South Africa. We choose providers that protect it.',
+          'Only JFlips management.',
           'We do not sell your information, and we do not share it with anyone else unless the law requires it or a doctor needs it in an emergency.'
         ]
       },
       {
         heading: 'How long we keep it',
         items: [
-          'While your child is at JFlips, and afterwards only for as long as needed, for example for financial records the law requires. We then delete it or make it anonymous.'
+          'We will delete all of your and your child\'s information when your child chooses to leave the club, once you have told us so and all accounts are paid.'
         ]
       },
       {
@@ -166,7 +165,7 @@ export const GENERAL_FORM: Record<Lang, {
 // ── Page strings (not part of the legal wording) ────────────────────────────
 export const UI: Record<Lang, Record<string, string>> = {
   en: {
-    pageTitle: 'JFlips forms', childrenLabel: 'Children', schoolGrade: 'School and grade (optional)',
+    pageTitle: 'JFlips forms', childrenLabel: 'Children',
     parentHeading: 'Parent or guardian details', fullName: 'Full name', relationship: 'Relationship to the child (parent or legal guardian)',
     cell: 'Cell number', email: 'Email address', signHere: 'Signature', clear: 'Clear',
     signatureCaptured: 'Signature captured', submitGeneral: 'Sign privacy notice', submitMedia: 'Sign photo and video consent',
@@ -212,7 +211,6 @@ export interface ConsentPdfInput {
   parentPhone?: string;
   parentEmail?: string;
   relationship?: string;
-  schoolGrade?: string;
   choices?: Record<string, boolean> | null;
   signature?: string | null;
   signedAt?: string | null;
@@ -287,7 +285,6 @@ export function generateConsentPdf(input: ConsentPdfInput, opts: { save?: boolea
 
   heading(ui.childrenLabel);
   field(ui.childrenLabel, input.childNames);
-  if (input.schoolGrade) field(ui.schoolGrade.replace(' (optional)', ''), input.schoolGrade);
 
   heading(ui.parentHeading);
   field(ui.fullName, input.parentName);
