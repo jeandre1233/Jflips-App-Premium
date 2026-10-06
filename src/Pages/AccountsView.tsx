@@ -232,6 +232,7 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
   const handleZoomIn = () => setManualZoom(prev => Math.min((prev || scale) + 0.1, 2));
   const handleZoomOut = () => setManualZoom(prev => Math.max((prev || scale) - 0.1, 0.3));
   const handleZoomReset = () => setManualZoom(null);
+  const handleZoom100 = () => setManualZoom(1.0);
 
   // Pricing context
   const pricingContext: PricingContext = useMemo(() => ({
@@ -1172,7 +1173,10 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
             </motion.button>
             <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
             <motion.button whileTap={{ scale: 0.9 }} onClick={handleZoomReset} className="px-2.5 py-1.5 text-[9px] font-black uppercase text-white bg-[#1e4da1] rounded-lg shadow-sm">
-              Reset
+              Fit
+            </motion.button>
+            <motion.button whileTap={{ scale: 0.9 }} onClick={handleZoom100} className="px-2.5 py-1.5 text-[9px] font-black uppercase text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-lg shadow-sm hover:bg-slate-200 dark:hover:bg-slate-700">
+              100%
             </motion.button>
           </div>
 

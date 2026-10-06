@@ -4843,7 +4843,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-1 px-6 pb-28 relative z-0 print:p-0 print:m-0 print:overflow-visible overflow-x-hidden min-h-[50vh]">
+      <main className="flex-1 px-2.5 sm:px-6 pb-28 relative z-0 print:p-0 print:m-0 print:overflow-visible overflow-x-hidden min-h-[50vh]">
         <div className="w-full">
           {viewContent}
         </div>
@@ -7567,7 +7567,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
   return (
     <div className="space-y-6 mt-4">
       {/* Tabs */}
-      <div className="flex items-center gap-6 sm:gap-8 border-b border-slate-100 dark:border-slate-800 pb-0 overflow-x-auto no-scrollbar scroll-smooth -mx-2 px-2 sm:mx-0 sm:px-0">
+      <div className="flex items-center gap-5 sm:gap-8 border-b border-slate-100 dark:border-slate-800 pb-0 overflow-x-auto no-scrollbar scroll-smooth touch-pan-x -mx-3 px-3 sm:mx-0 sm:px-0">
         <button 
           onClick={() => setActiveTab('roster')}
           className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative shrink-0 whitespace-nowrap cursor-pointer ${activeTab === 'roster' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}

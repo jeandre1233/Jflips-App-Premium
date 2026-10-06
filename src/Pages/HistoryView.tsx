@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   History,
@@ -7,6 +7,7 @@ import {
   Users,
   Calendar,
   ChevronRight,
+  ChevronLeft,
   ChevronDown,
   Download,
   FileSpreadsheet,
@@ -23,7 +24,10 @@ import {
   X,
   Wallet,
   FileText,
-  Loader2
+  Loader2,
+  ZoomIn,
+  ZoomOut,
+  Eye
 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
@@ -52,6 +56,230 @@ interface HistoryViewProps {
   isRecalculating?: boolean;
 }
 
+interface ArchivedPayslipA4DocProps {
+  payslip: {
+    monthName: string;
+    year: number;
+    reference: string;
+    coach: any;
+    allLines: PricedCoachLine[];
+    totalHours: number;
+    totalEarnings: number;
+    sessionCount: number;
+  };
+  profile: any;
+  gyms: any[];
+  innerRef?: React.Ref<HTMLDivElement>;
+}
+
+const ArchivedPayslipA4Doc: React.FC<ArchivedPayslipA4DocProps> = ({ payslip, profile, gyms, innerRef }) => {
+  return (
+    <div
+      ref={innerRef}
+      style={{
+        width: 794,
+        padding: '48px 56px',
+        fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif"
+      }}
+      className="relative bg-white dark:bg-[#0f172a]"
+    >
+      {/* Top blue bar */}
+      <div className="absolute top-0 left-0 right-0 h-2 bg-[#1e4da1]" />
+
+      {/* Header */}
+      <div className="flex justify-between items-start mb-6">
+        <div>
+          <img
+            src="/Invoice.png"
+            alt="JFLIPS"
+            className="h-16 md:h-20 object-contain rounded-xl mb-1"
+            onError={(e) => {
+              (e.target as HTMLElement).style.display = 'none';
+            }}
+          />
+          <p className="text-base font-black uppercase tracking-[0.25em] text-[#1e4da1] dark:text-blue-400 mt-1">
+            PAYSLIP
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Pay Period</p>
+          <p className="text-xl font-black text-slate-900 dark:text-slate-100">{payslip.monthName} {payslip.year}</p>
+          <p className="text-[11px] text-slate-400 mt-1 font-bold">
+            Date Issued: {new Date().toLocaleDateString('en-GB')}
+          </p>
+          <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+            REF: {payslip.reference}
+          </p>
+        </div>
+      </div>
+
+      <div className="w-full h-px bg-slate-200 dark:bg-slate-700 mb-6" />
+
+      {/* Recipient & Employer */}
+      <div className="grid grid-cols-2 gap-8 mb-8">
+        <div className="space-y-1">
+          <p className="text-[11px] font-black uppercase tracking-[0.25em] text-[#1e4da1]">
+            Employer
+          </p>
+          <p className="text-base font-black uppercase italic text-slate-900 dark:text-slate-100">
+            {profile?.businessName || 'JFLIPS'}
+          </p>
+          {profile?.email && <p className="text-[11px] text-slate-500">{profile.email}</p>}
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-[11px] font-black uppercase tracking-[0.25em] text-[#1e4da1]">
+            Coach
+          </p>
+          <p className="text-lg font-black uppercase italic text-slate-900 dark:text-slate-100">
+            {payslip.coach?.name || 'Coach'}
+          </p>
+          {payslip.coach?.email && <p className="text-[11px] text-slate-500">{payslip.coach.email}</p>}
+          {payslip.coach?.phone && <p className="text-[11px] text-slate-500">{payslip.coach.phone}</p>}
+        </div>
+      </div>
+
+      {/* Banking Details */}
+      <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/60 rounded-2xl p-4 mb-6">
+        <div className="mb-2">
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#1e4da1] dark:text-blue-400">
+            Banking Details
+          </p>
+        </div>
+        <div className="grid grid-cols-4 gap-4">
+          <div>
+            <p className="text-[9px] font-black text-slate-400 uppercase">Bank Name</p>
+            <p className="text-[12px] font-black uppercase text-slate-800 dark:text-slate-200">
+              {payslip.coach?.bankName || 'Not Provided'}
+            </p>
+          </div>
+          <div>
+            <p className="text-[9px] font-black text-slate-400 uppercase">Account Number</p>
+            <p className="text-[12px] font-black font-mono text-slate-800 dark:text-slate-200">
+              {payslip.coach?.accountNumber || '—'}
+            </p>
+          </div>
+          <div>
+            <p className="text-[9px] font-black text-slate-400 uppercase">Branch Code</p>
+            <p className="text-[12px] font-black font-mono text-slate-800 dark:text-slate-200">
+              {payslip.coach?.branchCode || 'Default'}
+            </p>
+          </div>
+          <div>
+            <p className="text-[9px] font-black text-slate-400 uppercase">Account Type</p>
+            <p className="text-[12px] font-black uppercase text-slate-800 dark:text-slate-200">
+              {payslip.coach?.accountType || 'Current'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 5-Column Table */}
+      <div className="mb-2">
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '95px 1fr 100px 95px 110px',
+            gap: '10px'
+          }}
+          className="px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-t-xl"
+        >
+          <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Date</span>
+          <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Session or Class</span>
+          <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider text-right">Hourly Rate</span>
+          <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider text-right">Hours Coached</span>
+          <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider text-right">Total Earnings</span>
+        </div>
+
+        <div className="border border-slate-200 dark:border-slate-700/80 rounded-b-xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800">
+          {payslip.allLines && payslip.allLines.length > 0 ? (
+            payslip.allLines.map((line, idx) => {
+              const isEven = idx % 2 === 0;
+              const org = line.orgId ? gyms.find(g => g.id === line.orgId) : null;
+              const subText = org ? `${org.name}` : 'Tumbling Class';
+
+              return (
+                <div
+                  key={`arch-coach-line-doc-${idx}`}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '95px 1fr 100px 95px 110px',
+                    gap: '10px'
+                  }}
+                  className={`items-center px-3 py-2.5 ${
+                    isEven ? 'bg-white dark:bg-slate-900/40' : 'bg-slate-50/70 dark:bg-slate-800/20'
+                  }`}
+                >
+                  <span className="text-[11px] font-bold text-slate-500 tabular-nums">
+                    {new Date(line.date).toLocaleDateString('en-GB')}
+                  </span>
+                  <div className="min-w-0 pr-2">
+                    <p className="text-[12px] font-black text-slate-900 dark:text-slate-100 uppercase italic truncate">
+                      {line.description}
+                    </p>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider truncate">
+                      {subText}
+                      {line.splitCount > 1 ? ` · Split (${line.splitCount} coaches)` : ''}
+                    </p>
+                  </div>
+                  <span className="text-[12px] font-bold text-slate-600 dark:text-slate-300 text-right tabular-nums">
+                    R{Number(line.rate || 0).toFixed(2)}/hr
+                  </span>
+                  <span className="text-[12px] font-black text-slate-800 dark:text-slate-200 text-right tabular-nums">
+                    {Number(line.hours || 0).toFixed(1)} hrs
+                  </span>
+                  <span className="text-[13px] font-black text-slate-900 dark:text-slate-100 text-right tabular-nums">
+                    R{Number(line.amount || 0).toFixed(2)}
+                  </span>
+                </div>
+              );
+            })
+          ) : (
+            <div className="py-12 text-center">
+              <p className="text-[11px] text-slate-400 font-black uppercase tracking-wider">
+                No coaching sessions recorded for this period
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Summary & Footer */}
+      <div className="mt-8 pt-4 border-t-2 border-slate-200 dark:border-slate-700">
+        <div className="flex justify-between items-end">
+          <div className="space-y-2">
+            <div className="flex items-center gap-6">
+              <div>
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Total Sessions</p>
+                <p className="text-xl font-black text-slate-800 dark:text-slate-200">{payslip.sessionCount}</p>
+              </div>
+              <div className="w-px h-8 bg-slate-200 dark:bg-slate-700" />
+              <div>
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Total Hours Coached</p>
+                <p className="text-xl font-black text-slate-800 dark:text-slate-200">{Number(payslip.totalHours || 0).toFixed(1)} hrs</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-right">
+            <p className="text-[12px] font-black uppercase tracking-[0.2em] text-[#1e4da1] dark:text-blue-400 mb-1">
+              Total Remuneration Due
+            </p>
+            <p className="text-5xl font-black italic text-[#1e4da1] dark:text-blue-400 leading-none tabular-nums">
+              R{Number(payslip.totalEarnings || 0).toFixed(2)}
+            </p>
+          </div>
+        </div>
+
+        <div className="w-full h-px bg-slate-100 dark:bg-slate-800 mt-8 mb-3" />
+        <p className="text-[9px] text-slate-300 dark:text-slate-600 font-bold uppercase text-center tracking-widest">
+          Official Remuneration Advice · Generated by JFLIPS Gymnastics
+        </p>
+      </div>
+    </div>
+  );
+};
+
 export const HistoryView: React.FC<HistoryViewProps> = ({
   state,
   onShowRecovery,
@@ -79,6 +307,40 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   } | null>(null);
   const [isGeneratingPayslipPdf, setIsGeneratingPayslipPdf] = useState(false);
   const payslipDocRef = React.useRef<HTMLDivElement>(null);
+  const payslipContainerRef = useRef<HTMLDivElement>(null);
+  const [payslipScale, setPayslipScale] = useState(1);
+  const [payslipManualZoom, setPayslipManualZoom] = useState<number | null>(null);
+
+  // Auto-scale payslip preview for mobile (identical to AccountsView)
+  useEffect(() => {
+    const updateScale = () => {
+      if (payslipManualZoom !== null) {
+        setPayslipScale(payslipManualZoom);
+        return;
+      }
+      if (payslipContainerRef.current) {
+        const width = payslipContainerRef.current.offsetWidth;
+        const targetWidth = 820;
+        if (width < targetWidth) {
+          setPayslipScale(width / targetWidth);
+        } else {
+          setPayslipScale(1);
+        }
+      }
+    };
+    updateScale();
+    const timer = setTimeout(updateScale, 100);
+    window.addEventListener('resize', updateScale);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', updateScale);
+    };
+  }, [selectedArchivedPayslip, payslipManualZoom]);
+
+  const handlePayslipZoomIn = () => setPayslipManualZoom(prev => Math.min((prev || payslipScale) + 0.1, 2));
+  const handlePayslipZoomOut = () => setPayslipManualZoom(prev => Math.max((prev || payslipScale) - 0.1, 0.3));
+  const handlePayslipZoomReset = () => setPayslipManualZoom(null);
+  const handlePayslipZoom100 = () => setPayslipManualZoom(1.0);
 
   const pricingContext: PricingContext = useMemo(() => ({
     gyms: state.gyms || [],
@@ -193,19 +455,53 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         bestByCoach.set(p.coach_id, p);
       }
     });
+
+    // Compute session coach lines for this month as fallback if saved snapshot has empty lines
+    let fallbackCoachLines: PricedCoachLine[] = [];
+    if (m.sessions && m.sessions.length > 0) {
+      try {
+        const res = priceSessions(m.sessions, pricingContext);
+        fallbackCoachLines = res.coachLines || [];
+      } catch (_) {}
+    }
+
     const matchingSaved = Array.from(bestByCoach.values());
     if (matchingSaved.length > 0) {
       return matchingSaved.map(p => {
-        const snap = p.snapshot_data || {};
-        const staffObj = (state.staff || []).find(st => st.id === p.coach_id) || snap.coach || { id: p.coach_id, name: 'Coach' };
+        let snap: any = p.snapshot_data || {};
+        if (typeof snap === 'string') {
+          try { snap = JSON.parse(snap); } catch {}
+        }
+        const staffObj = (state.staff || []).find(st => st.id === p.coach_id);
+        const snapCoach = snap?.coach || {};
+        const combinedCoach = {
+          id: p.coach_id,
+          name: staffObj?.name || staffObj?.username || snapCoach?.name || 'Coach',
+          email: staffObj?.email || snapCoach?.email || '',
+          phone: staffObj?.phone || snapCoach?.phone || '',
+          bankName: staffObj?.bankName || staffObj?.bank_name || snapCoach?.bankName || snapCoach?.bank_name || '',
+          accountNumber: staffObj?.accountNumber || staffObj?.account_number || snapCoach?.accountNumber || snapCoach?.account_number || '',
+          branchCode: staffObj?.branchCode || staffObj?.branch_code || snapCoach?.branchCode || snapCoach?.branch_code || '',
+          accountType: staffObj?.accountType || staffObj?.account_type || snapCoach?.accountType || snapCoach?.account_type || 'Current'
+        };
+
+        let lines: PricedCoachLine[] = Array.isArray(snap?.lines) ? snap.lines : [];
+        if (lines.length === 0 && fallbackCoachLines.length > 0) {
+          lines = fallbackCoachLines.filter(l => l.coachId === p.coach_id);
+        }
+
+        const totalHours = Number(p.total_hours || (lines.length > 0 ? Math.round(lines.reduce((a, l) => a + Number(l.hours || 0), 0) * 10) / 10 : 0));
+        const totalEarnings = Number(p.gross_amount || (lines.length > 0 ? Math.round(lines.reduce((a, l) => a + Number(l.amount || 0), 0) * 100) / 100 : 0));
+        const sessionCount = Number(p.total_sessions || (lines.length > 0 ? new Set(lines.map(l => l.groupId)).size : 0));
+
         return {
           id: p.id,
           reference: p.reference_id || `PAY-${m.year}-${m.monthName.slice(0, 3).toUpperCase()}-${p.coach_id.slice(0, 6).toUpperCase()}`,
-          coach: staffObj,
-          totalHours: p.total_hours,
-          totalEarnings: p.gross_amount,
-          sessionCount: p.total_sessions,
-          allLines: snap.lines || []
+          coach: combinedCoach,
+          totalHours,
+          totalEarnings,
+          sessionCount,
+          allLines: lines
         };
       });
     }
@@ -517,6 +813,90 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     link.click();
     document.body.removeChild(link);
   };
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // RENDER: ARCHIVED COACH PAYSLIP VIEWER (Identical to AccountsView)
+  // ════════════════════════════════════════════════════════════════════════════
+  if (selectedArchivedPayslip) {
+    return (
+      <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-6 mt-4 pb-32 w-full px-2">
+        {/* Top bar controls */}
+        <div className="flex flex-wrap justify-between items-center gap-3 mb-2">
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => setSelectedArchivedPayslip(null)}
+              className="text-slate-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-1 hover:text-[#1e4da1] cursor-pointer"
+            >
+              <ChevronLeft size={14} /> Back to History
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={handleDownloadArchivedPdf}
+              disabled={isGeneratingPayslipPdf}
+              className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-3.5 py-2 rounded-xl font-black text-[10px] uppercase tracking-wider shadow-lg flex items-center gap-1.5 disabled:opacity-70 transition-all cursor-pointer"
+            >
+              {isGeneratingPayslipPdf ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />}
+              <span>Download PDF</span>
+            </motion.button>
+
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={handleDownloadArchivedPng}
+              disabled={isGeneratingPayslipPdf}
+              className="bg-[#1e4da1] text-white px-3.5 py-2 rounded-xl font-black text-[10px] uppercase tracking-wider shadow-lg flex items-center gap-1.5 disabled:opacity-70 transition-all cursor-pointer"
+            >
+              {isGeneratingPayslipPdf ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+              <span>Download PNG</span>
+            </motion.button>
+          </div>
+        </div>
+
+        {/* Payslip Document Preview */}
+        <div ref={payslipContainerRef} className="w-full overflow-x-auto no-scrollbar py-4 -mx-2 px-2 relative">
+          {/* Zoom controls */}
+          <div className="sticky left-4 bottom-6 z-40 flex items-center gap-3 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md p-3 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 w-fit mb-4">
+            <motion.button whileTap={{ scale: 0.9 }} onClick={handlePayslipZoomOut} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-400 cursor-pointer">
+              <ZoomOut size={16} />
+            </motion.button>
+            <span className="text-xs font-black tabular-nums text-slate-700 dark:text-slate-200 w-12 text-center">
+              {Math.round(payslipScale * 100)}%
+            </span>
+            <motion.button whileTap={{ scale: 0.9 }} onClick={handlePayslipZoomIn} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-400 cursor-pointer">
+              <ZoomIn size={16} />
+            </motion.button>
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+            <motion.button whileTap={{ scale: 0.9 }} onClick={handlePayslipZoomReset} className="px-2.5 py-1.5 text-[9px] font-black uppercase text-white bg-[#1e4da1] rounded-lg shadow-sm cursor-pointer">
+              Fit
+            </motion.button>
+            <motion.button whileTap={{ scale: 0.9 }} onClick={handlePayslipZoom100} className="px-2.5 py-1.5 text-[9px] font-black uppercase text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-lg shadow-sm hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer">
+              100%
+            </motion.button>
+          </div>
+
+          {/* ════ THE CLEAN PAYSLIP DOCUMENT ════ */}
+          <div
+            style={{
+              width: 794,
+              zoom: payslipScale,
+              fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif"
+            }}
+            className="bg-white dark:bg-[#0f172a] shadow-2xl mx-auto origin-top"
+          >
+            <div ref={payslipDocRef}>
+              <ArchivedPayslipA4Doc
+                payslip={selectedArchivedPayslip}
+                profile={state.profile}
+                gyms={state.gyms || []}
+              />
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <div className="space-y-8 animate-fade-in pb-16">
@@ -1012,7 +1392,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                                   </h4>
                                 </div>
                                 <span className="text-[10px] font-bold text-slate-400 uppercase">
-                                  Total: R{monthPayslips.reduce((s, p) => s + p.totalEarnings, 0).toFixed(2)}
+                                  Total: R{monthPayslips.reduce((s, p) => s + Number(p.totalEarnings || 0), 0).toFixed(2)}
                                 </span>
                               </div>
 
@@ -1030,7 +1410,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                                         {p.reference}
                                       </p>
                                       <p className="text-[10px] font-bold text-purple-600 dark:text-purple-400 mt-0.5">
-                                        R{p.totalEarnings.toFixed(2)} · {p.totalHours} hrs ({p.sessionCount} sessions)
+                                        R{Number(p.totalEarnings || 0).toFixed(2)} · {Number(p.totalHours || 0).toFixed(1)} hrs ({p.sessionCount} sessions)
                                       </p>
                                     </div>
                                     <button
@@ -1057,7 +1437,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
                         {/* Actions for Month */}
                         <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <button
                               onClick={() => exportSingleMonthCSV(m)}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-[10px] font-black uppercase tracking-wider transition-all"
@@ -1106,21 +1486,21 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       {/* Drill-down Session Inspector Modal */}
       <AnimatePresence>
         {selectedMonth && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-2.5 sm:p-4 bg-black/60 backdrop-blur-sm">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl max-h-[85vh] flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800"
+              className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl shadow-2xl max-h-[88vh] flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800"
             >
               {/* Modal Header */}
-              <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-between p-4 sm:p-6 border-b border-slate-100 dark:border-slate-800">
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-black uppercase px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
                       Archived Cycle
                     </span>
-                    <h3 className="text-lg font-black uppercase text-slate-800 dark:text-white">
+                    <h3 className="text-base sm:text-lg font-black uppercase text-slate-800 dark:text-white">
                       {selectedMonth.monthName} {selectedMonth.year}
                     </h3>
                   </div>
@@ -1137,7 +1517,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               </div>
 
               {/* Sessions List */}
-              <div className="p-6 overflow-y-auto flex-1 space-y-3">
+              <div className="p-3.5 sm:p-6 overflow-y-auto flex-1 space-y-2.5">
                 {(!selectedMonth.sessions || selectedMonth.sessions.length === 0) ? (
                   <div className="text-center py-8 text-slate-400 text-xs font-medium">
                     No raw session records preserved in this month's archive snapshot.
@@ -1201,262 +1581,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Archived Staff Payslip Viewer Modal */}
-      <AnimatePresence>
-        {selectedArchivedPayslip && (
-          <div className="fixed inset-0 z-[250] flex items-center justify-center p-2 sm:p-4 bg-black/75 backdrop-blur-md overflow-y-auto">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-4xl bg-slate-100 dark:bg-slate-900 rounded-3xl shadow-2xl flex flex-col my-auto border border-slate-200 dark:border-slate-800 overflow-hidden"
-            >
-              {/* Modal Top Bar */}
-              <div className="flex items-center justify-between p-4 px-6 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-[#1e4da1] dark:text-blue-400">
-                    <FileText size={20} />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black uppercase tracking-wider text-slate-800 dark:text-white">
-                      Archived Staff Payslip
-                    </h3>
-                    <p className="text-[10px] font-mono text-slate-400">
-                      {selectedArchivedPayslip.coach.name} · {selectedArchivedPayslip.reference}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleDownloadArchivedPdf}
-                    disabled={isGeneratingPayslipPdf}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1e4da1] hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-sm cursor-pointer disabled:opacity-50"
-                  >
-                    {isGeneratingPayslipPdf ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                    Download PDF
-                  </button>
-                  <button
-                    onClick={handleDownloadArchivedPng}
-                    disabled={isGeneratingPayslipPdf}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-black uppercase tracking-wider shadow-sm cursor-pointer disabled:opacity-50"
-                  >
-                    <Download size={14} />
-                    Download PNG
-                  </button>
-                  <button
-                    onClick={() => setSelectedArchivedPayslip(null)}
-                    className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 ml-2"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Payslip Document Preview */}
-              <div className="p-4 sm:p-6 overflow-y-auto max-h-[75vh] flex justify-center bg-slate-100 dark:bg-slate-950">
-                <div
-                  ref={payslipDocRef}
-                  style={{ width: 794, minHeight: 850, padding: '48px 56px', fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif" }}
-                  className="relative bg-white text-slate-900 shadow-xl rounded-xl"
-                >
-                  {/* Top blue bar */}
-                  <div className="absolute top-0 left-0 right-0 h-2 bg-[#1e4da1] rounded-t-xl" />
-
-                  {/* Header */}
-                  <div className="flex justify-between items-start mb-6">
-                    <div>
-                      <img
-                        src="/Invoice.png"
-                        alt="JFLIPS"
-                        className="h-16 md:h-20 object-contain rounded-xl mb-1"
-                        onError={(e) => {
-                          (e.target as HTMLElement).style.display = 'none';
-                        }}
-                      />
-                      <p className="text-base font-black uppercase tracking-[0.25em] text-[#1e4da1] mt-1">
-                        PAYSLIP
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">Pay Period</p>
-                      <p className="text-xl font-black text-slate-900">{selectedArchivedPayslip.monthName} {selectedArchivedPayslip.year}</p>
-                      <p className="text-[11px] text-slate-400 mt-1 font-bold">
-                        Archive Record
-                      </p>
-                      <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                        REF: {selectedArchivedPayslip.reference}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="w-full h-px bg-slate-200 mb-6" />
-
-                  {/* Recipient & Employer */}
-                  <div className="grid grid-cols-2 gap-8 mb-8">
-                    <div className="space-y-1">
-                      <p className="text-[11px] font-black uppercase tracking-[0.25em] text-[#1e4da1]">
-                        Employer
-                      </p>
-                      <p className="text-base font-black uppercase italic text-slate-900">
-                        {state.profile.businessName || 'JFLIPS'}
-                      </p>
-                      {state.profile.email && <p className="text-[11px] text-slate-500">{state.profile.email}</p>}
-                    </div>
-
-                    <div className="space-y-1">
-                      <p className="text-[11px] font-black uppercase tracking-[0.25em] text-[#1e4da1]">
-                        Coach
-                      </p>
-                      <p className="text-lg font-black uppercase italic text-slate-900">
-                        {selectedArchivedPayslip.coach.name}
-                      </p>
-                      {selectedArchivedPayslip.coach.email && <p className="text-[11px] text-slate-500">{selectedArchivedPayslip.coach.email}</p>}
-                      {selectedArchivedPayslip.coach.phone && <p className="text-[11px] text-slate-500">{selectedArchivedPayslip.coach.phone}</p>}
-                    </div>
-                  </div>
-
-                  {/* Banking Details */}
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-6">
-                    <div className="mb-2">
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#1e4da1]">
-                        Banking Details
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-4 gap-4">
-                      <div>
-                        <p className="text-[9px] font-black text-slate-400 uppercase">Bank Name</p>
-                        <p className="text-[12px] font-black uppercase text-slate-800">
-                          {selectedArchivedPayslip.coach.bankName || 'Not Provided'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] font-black text-slate-400 uppercase">Account Number</p>
-                        <p className="text-[12px] font-black font-mono text-slate-800">
-                          {selectedArchivedPayslip.coach.accountNumber || '—'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] font-black text-slate-400 uppercase">Branch Code</p>
-                        <p className="text-[12px] font-black font-mono text-slate-800">
-                          {selectedArchivedPayslip.coach.branchCode || 'Default'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[9px] font-black text-slate-400 uppercase">Account Type</p>
-                        <p className="text-[12px] font-black uppercase text-slate-800">
-                          {selectedArchivedPayslip.coach.accountType || 'Current'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 5-Column Table */}
-                  <div className="mb-2">
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '95px 1fr 100px 95px 110px',
-                        gap: '10px'
-                      }}
-                      className="px-3 py-2 bg-slate-100 rounded-t-xl"
-                    >
-                      <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Date</span>
-                      <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Session or Class</span>
-                      <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider text-right">Hourly Rate</span>
-                      <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider text-right">Hours Coached</span>
-                      <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider text-right">Total Earnings</span>
-                    </div>
-
-                    <div className="border border-slate-200 rounded-b-xl overflow-hidden divide-y divide-slate-100">
-                      {selectedArchivedPayslip.allLines && selectedArchivedPayslip.allLines.length > 0 ? (
-                        selectedArchivedPayslip.allLines.map((line, idx) => {
-                          const isEven = idx % 2 === 0;
-                          const org = line.orgId ? state.gyms.find(g => g.id === line.orgId) : null;
-                          const subText = org ? `${org.name}` : 'Tumbling Class';
-
-                          return (
-                            <div
-                              key={`arch-coach-line-${idx}`}
-                              style={{
-                                display: 'grid',
-                                gridTemplateColumns: '95px 1fr 100px 95px 110px',
-                                gap: '10px'
-                              }}
-                              className={`items-center px-3 py-2.5 ${isEven ? 'bg-white' : 'bg-slate-50/70'}`}
-                            >
-                              <span className="text-[11px] font-bold text-slate-500 tabular-nums">
-                                {new Date(line.date).toLocaleDateString('en-GB')}
-                              </span>
-                              <div className="min-w-0 pr-2">
-                                <p className="text-[12px] font-black text-slate-900 uppercase italic truncate">
-                                  {line.description}
-                                </p>
-                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider truncate">
-                                  {subText}
-                                  {line.splitCount > 1 ? ` · Split (${line.splitCount} coaches)` : ''}
-                                </p>
-                              </div>
-                              <span className="text-[12px] font-bold text-slate-600 text-right tabular-nums">
-                                R{Number(line.rate || 0).toFixed(2)}/hr
-                              </span>
-                              <span className="text-[12px] font-black text-slate-800 text-right tabular-nums">
-                                {Number(line.hours || 0).toFixed(1)} hrs
-                              </span>
-                              <span className="text-[13px] font-black text-slate-900 text-right tabular-nums">
-                                R{Number(line.amount || 0).toFixed(2)}
-                              </span>
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <div className="py-12 text-center">
-                          <p className="text-[11px] text-slate-400 font-black uppercase tracking-wider">
-                            No coaching sessions recorded for this period
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Summary & Footer */}
-                  <div className="mt-8 pt-4 border-t-2 border-slate-200">
-                    <div className="flex justify-between items-end">
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-6">
-                          <div>
-                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Total Sessions</p>
-                            <p className="text-xl font-black text-slate-800">{selectedArchivedPayslip.sessionCount}</p>
-                          </div>
-                          <div className="w-px h-8 bg-slate-200" />
-                          <div>
-                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Total Hours Coached</p>
-                            <p className="text-xl font-black text-slate-800">{selectedArchivedPayslip.totalHours} hrs</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <p className="text-[12px] font-black uppercase tracking-[0.2em] text-[#1e4da1] mb-1">
-                          Total Remuneration Due
-                        </p>
-                        <p className="text-5xl font-black italic text-[#1e4da1] leading-none tabular-nums">
-                          R{selectedArchivedPayslip.totalEarnings.toFixed(2)}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="w-full h-px bg-slate-100 mt-8 mb-3" />
-                    <p className="text-[9px] text-slate-300 font-bold uppercase text-center tracking-widest">
-                      Official Remuneration Advice · Generated by JFLIPS Gymnastics
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };
