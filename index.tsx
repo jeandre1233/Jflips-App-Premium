@@ -5,6 +5,7 @@ import './src/index.css';
 import App from './App';
 import Signup from './src/Pages/Signup';
 import SignupCheer from './src/Pages/SignupCheer';
+import Consent from './src/Pages/Consent';
 import { MotionConfig } from 'framer-motion';
 
 import { HashRouter, Routes, Route } from 'react-router-dom';
@@ -23,6 +24,7 @@ root.render(
         <Routes>
           <Route path="/signup" element={<Signup />} />
           <Route path="/signup-cheer" element={<SignupCheer />} />
+          <Route path="/consent/:token" element={<Consent />} />
           <Route path="*" element={<App />} />
         </Routes>
       </HashRouter>

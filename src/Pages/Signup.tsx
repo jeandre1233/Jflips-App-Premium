@@ -4,6 +4,11 @@ import { ClassType } from '../../types';
 import { sendNewSignupNotification } from '../utils/discordNotifications';
 import { notifyUser } from '../utils/notifications';
 import jsPDF from 'jspdf';
+import { SignaturePad } from '../components/SignaturePad';
+import { GeneralConsentSection, MediaConsentSection } from '../components/ConsentSections';
+import {
+  GENERAL_VERSION, MEDIA_KEYS, MEDIA_VERSION, MediaKey, generateConsentPdf, newConsentToken
+} from '../utils/consentForms';
 
 declare const window: any;
 
@@ -27,77 +32,6 @@ const EMPTY_FORM: FormData = {
   medicalNotes: '', parent1Name: '', parent1Phone: '', parent1Email: '',
   parent2Name: '', parent2Phone: '', classId: '', indemnityAgreed: false,
 };
-
-// ── Signature Pad ─────────────────────────────────────────────
-const getPos = (e: MouseEvent | TouchEvent, canvas: HTMLCanvasElement) => {
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  if ('touches' in e) {
-    return { x: (e.touches[0].clientX - rect.left) * scaleX, y: (e.touches[0].clientY - rect.top) * scaleY };
-  }
-  return { x: ((e as MouseEvent).clientX - rect.left) * scaleX, y: ((e as MouseEvent).clientY - rect.top) * scaleY };
-};
-
-function SignaturePad({ onSign, cleared }: { onSign: (dataUrl: string) => void; cleared: number }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawing = useRef(false);
-  const lastPos = useRef<{ x: number; y: number } | null>(null);
-  const hasDrawn = useRef(false);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    hasDrawn.current = false;
-  }, [cleared]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    const start = (e: MouseEvent | TouchEvent) => {
-      if (!('touches' in e)) {
-        e.preventDefault();
-      }
-      drawing.current = true;
-      lastPos.current = getPos(e, canvas);
-    };
-    const move = (e: MouseEvent | TouchEvent) => {
-      if (!('touches' in e)) {
-        e.preventDefault();
-      }
-      if (!drawing.current || !lastPos.current) return;
-      const pos = getPos(e, canvas);
-      ctx.beginPath(); ctx.moveTo(lastPos.current.x, lastPos.current.y); ctx.lineTo(pos.x, pos.y); ctx.stroke();
-      lastPos.current = pos; hasDrawn.current = true;
-    };
-    const end = () => { drawing.current = false; lastPos.current = null; if (hasDrawn.current) onSign(canvas.toDataURL('image/png')); };
-
-    canvas.addEventListener('mousedown', start); canvas.addEventListener('mousemove', move); canvas.addEventListener('mouseup', end);
-    canvas.addEventListener('touchstart', start, { passive: true }); canvas.addEventListener('touchmove', move, { passive: true }); canvas.addEventListener('touchend', end);
-    return () => {
-      canvas.removeEventListener('mousedown', start); canvas.removeEventListener('mousemove', move); canvas.removeEventListener('mouseup', end);
-      canvas.removeEventListener('touchstart', start, { passive: true } as any); canvas.removeEventListener('touchmove', move, { passive: true } as any); canvas.removeEventListener('touchend', end);
-    };
-  }, [onSign]);
-
-  return (
-    <div style={{ position: 'relative' }}>
-      <canvas ref={canvasRef} width={600} height={160}
-        style={{ width: '100%', height: '160px', border: '2px dashed #cbd5e1', borderRadius: '12px', background: '#fafafa', cursor: 'crosshair', touchAction: 'none', display: 'block' }} />
-      <div style={{ position: 'absolute', bottom: '10px', left: '50%', transform: 'translateX(-50%)', pointerEvents: 'none' }}>
-        <span style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: 600, whiteSpace: 'nowrap' }}>Sign here with your finger or mouse</span>
-      </div>
-    </div>
-  );
-}
 
 // ── PDF Generator ─────────────────────────────────────────────
 async function generateIndemnityPDF(form: FormData, signatureDataUrl: string, className: string) {
@@ -270,6 +204,18 @@ export default function Signup() {
   const [submittedClassName, setSubmittedClassName] = useState('');
   const [defaultGroupRate, setDefaultGroupRate] = useState<number | null>(null);
 
+  // POPIA: two further forms, each with its own signature. Never pre-answered,
+  // and a "No" to any photo/video use never blocks the registration.
+  const [gAgreed, setGAgreed] = useState(false);
+  const [gSig, setGSig] = useState('');
+  const [gClear, setGClear] = useState(0);
+  const [mChoices, setMChoices] = useState<Partial<Record<MediaKey, boolean>>>({});
+  const [mSig, setMSig] = useState('');
+  const [mClear, setMClear] = useState(0);
+  const [schoolGrade, setSchoolGrade] = useState('');
+  const [consentErrs, setConsentErrs] = useState<Record<string, boolean>>({});
+  const [consentSaved, setConsentSaved] = useState(false);
+
   useEffect(() => {
     async function loadClasses() {
       // Parse parameters from standard query search
@@ -384,6 +330,11 @@ export default function Signup() {
     if (!/\S+@\S+\.\S+/.test(form.parent1Email.trim())) return 'Please enter a valid email address.';
     if (!form.indemnityAgreed) return 'Please confirm that you have read and agree to the indemnity declaration.';
     if (!signatureDataUrl) { setSignatureError(true); return 'Please sign the form before submitting.'; }
+    if (!gAgreed) { setConsentErrs({ agree: true }); return 'Please tick the box to confirm you agree to the privacy notice.'; }
+    if (!gSig) { setConsentErrs({ gsig: true }); return 'Please sign the privacy notice before submitting.'; }
+    if (!MEDIA_KEYS.every(k => typeof mChoices[k] === 'boolean')) { setConsentErrs({ choices: true }); return 'Please answer Yes or No for every photo and video use.'; }
+    if (!mSig) { setConsentErrs({ msig: true }); return 'Please sign the photo and video consent before submitting.'; }
+    setConsentErrs({});
     return '';
   };
 
@@ -449,6 +400,33 @@ export default function Signup() {
         submitted_at: new Date().toISOString(), user_id: ownerUserId,
         signature_data: signatureDataUrl
       });
+
+      // POPIA consent records. Saved as their own rows, never inside the
+      // indemnity. The child already exists at this point, so a failure here must
+      // not undo or repeat the registration: the owner can send the family its
+      // personal consent link instead.
+      try {
+        const { error: consentErr } = await supabase.rpc('create_signup_consents', {
+          p_owner_id: ownerUserId,
+          p_family_key: studentId,
+          p_family_label: form.parent1Name.trim(),
+          p_child_first_names: [form.studentFirstName.trim()],
+          p_parent_name: form.parent1Name.trim(),
+          p_parent_phone: form.parent1Phone.trim(),
+          p_parent_email: form.parent1Email.trim(),
+          p_details: { relationship: 'Parent or legal guardian', school_grade: schoolGrade.trim() },
+          p_general_signature: gSig,
+          p_media_choices: mChoices,
+          p_media_signature: mSig,
+          p_general_version: GENERAL_VERSION,
+          p_media_version: MEDIA_VERSION,
+          p_token: newConsentToken()
+        });
+        if (consentErr) throw consentErr;
+        setConsentSaved(true);
+      } catch (consentError) {
+        console.error('Consent records were not saved:', consentError);
+      }
 
       // Alert the owner: in-app bell + device push (Firebase).
       await notifyUser({
@@ -535,6 +513,23 @@ export default function Signup() {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             {generatingPdf ? 'Generating PDF...' : 'Download Indemnity Form (PDF)'}
           </button>
+          {consentSaved && (
+            <>
+              {([['general', 'Download Privacy Notice (PDF)'], ['media', 'Download Photo & Video Consent (PDF)']] as const).map(([kind, text]) => (
+                <button key={kind} onClick={() => generateConsentPdf({
+                  kind, lang: 'en',
+                  childNames: `${submittedForm.studentFirstName} ${submittedForm.studentLastName}`.trim(),
+                  parentName: submittedForm.parent1Name, parentPhone: submittedForm.parent1Phone, parentEmail: submittedForm.parent1Email,
+                  relationship: 'Parent or legal guardian', schoolGrade,
+                  choices: kind === 'media' ? (mChoices as Record<string, boolean>) : { agreed: true },
+                  signature: kind === 'media' ? mSig : gSig, signedAt: new Date().toISOString(),
+                  version: kind === 'media' ? MEDIA_VERSION : GENERAL_VERSION, status: 'signed'
+                })} style={{ width: '100%', padding: '14px', background: 'white', color: '#1e4da1', border: '2px solid #1e4da1', borderRadius: '14px', fontSize: '12px', fontWeight: 900, fontStyle: 'italic', textTransform: 'uppercase', cursor: 'pointer', marginBottom: '10px' }}>
+                  {text}
+                </button>
+              ))}
+            </>
+          )}
           <p style={{ fontSize: '11px', color: '#cbd5e1' }}>Keep this for your records. See you on the mat! 🤸</p>
           <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid #f1f5f9' }}>
             <span style={{ fontSize: '20px', fontWeight: 900, fontStyle: 'italic', color: '#1e4da1' }}>JFLIPS</span>
@@ -625,6 +620,24 @@ export default function Signup() {
                 </p>
               )}
             </div>
+          </Section>
+
+          {/* POPIA: privacy notice, then photo and video consent. Separate forms, separate signatures. */}
+          <Section label="Privacy Notice (POPIA)" icon="🔒" color="#7c3aed">
+            <GeneralConsentSection
+              agreed={gAgreed} onAgree={v => { setGAgreed(v); if (error) setError(''); }}
+              signed={!!gSig} onSign={d => setGSig(d)} clearKey={gClear} onClear={() => { setGSig(''); setGClear(c => c + 1); }}
+              errorAgree={consentErrs.agree} errorSignature={consentErrs.gsig}
+            />
+          </Section>
+
+          <Section label="Photo & Video Consent (POPIA)" icon="📸" color="#0891b2">
+            <MediaConsentSection
+              choices={mChoices} onChoice={(k, v) => { setMChoices(c => ({ ...c, [k]: v })); if (error) setError(''); }}
+              schoolGrade={schoolGrade} onSchoolGrade={setSchoolGrade}
+              signed={!!mSig} onSign={d => setMSig(d)} clearKey={mClear} onClear={() => { setMSig(''); setMClear(c => c + 1); }}
+              errorChoices={consentErrs.choices} errorSignature={consentErrs.msig}
+            />
           </Section>
 
           <div style={{ padding: '24px' }}>

@@ -48,6 +48,7 @@ import {
   syncSchedulesToCalendar, 
   syncFinancesToGoogleSheet 
 } from '../utils/googleWorkspace';
+import { ConsentManager } from '../components/ConsentManager';
 import { getDiscordWebhookUrl, setDiscordWebhookUrl, isDiscordNotificationsEnabled, setDiscordNotificationsEnabled } from '../utils/discordNotifications';
 
 const athleteItemVariants = {
@@ -1485,6 +1486,8 @@ export const RosterView = memo(({
                     </button>
                   </div>
                 </div>
+
+                {entityType === 'athletes' && isOwner && <ConsentManager state={state} />}
               </div>
             )}
 
