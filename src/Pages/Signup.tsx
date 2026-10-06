@@ -5,6 +5,7 @@ import { sendNewSignupNotification } from '../utils/discordNotifications';
 import { notifyUser } from '../utils/notifications';
 import jsPDF from 'jspdf';
 import { SignaturePad } from '../components/SignaturePad';
+import { INDEMNITY_CLAUSES, INDEMNITY_VERSION } from '../utils/indemnityText';
 import { GeneralConsentSection, MediaConsentSection } from '../components/ConsentSections';
 import {
   GENERAL_VERSION, MEDIA_KEYS, MEDIA_VERSION, MediaKey, generateConsentPdf, newConsentToken
@@ -72,7 +73,25 @@ async function generateIndemnityPDF(form: FormData, signatureDataUrl: string, cl
   doc.text(bodyLines, margin, y);
   y += bodyLines.length * 6 + 6;
 
+  // Page-safe layout: the added clauses make this longer than one page.
+  const ensure = (need: number) => {
+    if (y + need > 276) { doc.addPage(); y = 20; }
+  };
+
+  // Additional clauses (risk, responsibility, first aid and emergencies, health information)
+  INDEMNITY_CLAUSES.forEach(c => {
+    const lines = doc.splitTextToSize(c.text, contentW);
+    ensure(lines.length * 5 + 10);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...rgb('#1e4da1'));
+    doc.text(c.heading, margin, y); y += 5.5;
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(...rgb('#1e293b'));
+    doc.text(lines, margin, y);
+    y += lines.length * 5 + 4;
+  });
+  y += 2;
+
   // Medical notes heading
+  ensure(45);
   doc.setFont('helvetica', 'bold');
   const medLabel = 'Please list any physical disabilities, history of illness, or allergies the enrolled child has which we should be aware of (e.g. previous fractures, muscle tone, asthma, etc.):';
   const medLabelLines = doc.splitTextToSize(medLabel, contentW);
@@ -91,6 +110,7 @@ async function generateIndemnityPDF(form: FormData, signatureDataUrl: string, cl
   doc.setDrawColor(...rgb('#e2e8f0')); doc.line(margin, y, pageW - margin, y); y += 8;
 
   // Student details section
+  ensure(50);
   doc.setFillColor(248, 250, 252); doc.rect(margin, y, contentW, 6, 'F');
   doc.setTextColor(...rgb('#1e4da1')); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
   doc.text('STUDENT DETAILS', margin + 3, y + 4.5); y += 10;
@@ -110,6 +130,7 @@ async function generateIndemnityPDF(form: FormData, signatureDataUrl: string, cl
   y += 4;
 
   // Parent details section
+  ensure(50);
   doc.setFillColor(248, 250, 252); doc.rect(margin, y, contentW, 6, 'F');
   doc.setTextColor(...rgb('#1e4da1')); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
   doc.text('PARENT / GUARDIAN DETAILS', margin + 3, y + 4.5); y += 10;
@@ -132,6 +153,7 @@ async function generateIndemnityPDF(form: FormData, signatureDataUrl: string, cl
   doc.setDrawColor(...rgb('#e2e8f0')); doc.line(margin, y, pageW - margin, y); y += 8;
 
   // Signature section
+  ensure(62);
   doc.setFillColor(248, 250, 252); doc.rect(margin, y, contentW, 6, 'F');
   doc.setTextColor(...rgb('#1e4da1')); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
   doc.text('SIGNATURE', margin + 3, y + 4.5); y += 12;
@@ -150,10 +172,14 @@ async function generateIndemnityPDF(form: FormData, signatureDataUrl: string, cl
   doc.setFont('helvetica', 'bold'); doc.text('Date:', margin + 100, y + 5);
   doc.setFont('helvetica', 'normal'); doc.text(new Date().toLocaleDateString('en-ZA'), margin + 114, y + 5);
 
-  // Footer
-  doc.setFillColor(30, 77, 161); doc.rect(0, 287, pageW, 10, 'F');
-  doc.setTextColor(255, 255, 255); doc.setFontSize(7); doc.setFont('helvetica', 'normal');
-  doc.text('JFLIPS TUMBLING  |  This document serves as an official indemnity declaration.', pageW / 2, 293, { align: 'center' });
+  // Footer on every page
+  const pageCount = doc.getNumberOfPages();
+  for (let p = 1; p <= pageCount; p++) {
+    doc.setPage(p);
+    doc.setFillColor(30, 77, 161); doc.rect(0, 287, pageW, 10, 'F');
+    doc.setTextColor(255, 255, 255); doc.setFontSize(7); doc.setFont('helvetica', 'normal');
+    doc.text(`JFLIPS TUMBLING  |  This document serves as an official indemnity declaration.  |  v${INDEMNITY_VERSION}  |  ${p}/${pageCount}`, pageW / 2, 293, { align: 'center' });
+  }
 
   const filename = `JFLIPS_Indemnity_${studentName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.pdf`;
   doc.save(filename);
@@ -590,6 +616,11 @@ export default function Signup() {
                 <strong style={{ color: '#1e4da1', textDecoration: 'underline', textUnderlineOffset: '2px' }}>{`${form.studentFirstName} ${form.studentLastName}`.trim() || '___________________'}</strong>,
                 hereby indemnify and confirm that my child is physically, medically and mentally fit to become a member of <strong>JFLIPS TUMBLING</strong> and to participate in the sport of tumbling. I hereby acknowledge the possibility of injury occurring whilst doing tumbling.
               </p>
+              {INDEMNITY_CLAUSES.map(c => (
+                <p key={c.heading} style={{ margin: '0 0 10px', color: '#1e293b', fontSize: '12px' }}>
+                  <strong style={{ color: '#1e4da1' }}>{c.heading}.</strong> {c.text}
+                </p>
+              ))}
               <p style={{ margin: 0, fontWeight: 700, color: '#1e293b', fontSize: '11px' }}>
                 Please list any physical disabilities, history of illness, or allergies the enrolled child has which we should be aware of (e.g. previous fractures, muscle tone, asthma, etc.):
               </p>

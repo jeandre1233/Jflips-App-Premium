@@ -106,6 +106,7 @@ import type { MerchOrderDraft } from './src/components/MerchOrderModal';
 import { MerchItemModal } from './src/components/MerchItemModal';
 import { addToQueue, getPendingItems, updateItemStatus, deleteSyncedItems } from './src/utils/offlineQueue';
 import { AccountsView } from './src/Pages/AccountsView';
+import { IncidentLog } from './src/components/IncidentLog';
 import { priceSessions, priceMerch, openMerchOrders, merchOrdersForMonth, sumLines, billingMonthFor } from './src/utils/pricing';
 import type { PricingContext, PricedCoachLine } from './src/utils/pricing';
 import {
@@ -7078,7 +7079,7 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
   /** Saves the payout-account defaults and per-client overrides to the database. */
   onSaveAllocations?: (next: { allocations?: InvoiceAllocations; groupDefaults?: GroupDefaults }) => Promise<boolean>
 }) => {
-  const [activeTab, setActiveTab] = useState<'roster' | 'competitions' | 'registrations' | 'payouts' | 'staff'>('roster');
+  const [activeTab, setActiveTab] = useState<'roster' | 'competitions' | 'registrations' | 'payouts' | 'staff' | 'incidents'>('roster');
   const [subTab, setSubTab] = useState<'roster' | 'attendance'>('roster');
   const [selectedMainId, setSelectedMainId] = useState<string | null>(null);
   const [selectedSubId, setSelectedSubId] = useState<string | null>(null);
@@ -7605,7 +7606,18 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
           Staff & Coaches
           {activeTab === 'staff' && <motion.div layoutId="tm-tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#1e4da1] dark:bg-blue-400" />}
         </button>
+        <button
+          onClick={() => setActiveTab('incidents')}
+          className={`text-[10px] font-black uppercase tracking-[0.2em] pb-4 transition-all relative shrink-0 whitespace-nowrap cursor-pointer ${activeTab === 'incidents' ? 'text-[#1e4da1] dark:text-blue-400' : 'text-slate-400 hover:text-slate-600'}`}
+        >
+          Incidents
+          {activeTab === 'incidents' && <motion.div layoutId="tm-tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#1e4da1] dark:bg-blue-400" />}
+        </button>
       </div>
+
+      {activeTab === 'incidents' && (
+        <IncidentLog state={state} userId={state.profile.id} />
+      )}
 
       {activeTab === 'payouts' && onSaveAllocations && (
         <PayoutAccountsPanel state={state} onSaveAllocations={onSaveAllocations} />
