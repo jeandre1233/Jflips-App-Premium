@@ -60,7 +60,9 @@ export const ConsentManager: React.FC<{ state: AppState }> = ({ state }) => {
 
   const families = useMemo<Family[]>(() => {
     const map = new Map<string, Student[]>();
-    (state.students || []).forEach(s => {
+    // Tumbling clients only: exactly the people listed under Clients. School and
+    // team athletes (is_gym_member) belong to the schools, not to JFlips.
+    (state.students || []).filter(s => !s.is_gym_member).forEach(s => {
       const key = s.groupKey || s.id;
       map.set(key, [...(map.get(key) || []), s]);
     });
