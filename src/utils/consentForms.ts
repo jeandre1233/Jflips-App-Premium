@@ -116,11 +116,23 @@ export const GENERAL_FORM: Record<Lang, {
     intro: "JFlips is the responsible party for your family's personal information. This notice explains what we collect, why we collect it, who can see it and what your rights are. Please read it and confirm below.",
     sections: [
       {
+        heading: 'Who is responsible for your information',
+        items: [
+          'JFlips (Jeandre Blacquiere). You can contact us on WhatsApp 069 040 3387 or at jflipsinc@gmail.com.'
+        ]
+      },
+      {
         heading: 'What we collect',
         items: [
           "About your child: name, date of birth and age, class or team, attendance, and any medical conditions, injuries or allergies you tell us about.",
           'About you: name, relationship to the child, cell number, email address and your signature.',
           'Billing: invoices, the amounts owed and whether they have been paid. We do not store card details.'
+        ]
+      },
+      {
+        heading: 'Is giving us your information voluntary?',
+        items: [
+          'Yes, but we need your details, an emergency contact and your child\'s health information to enrol your child and keep them safe. Without them we cannot enrol your child. Giving us photo and video consent is a separate choice and is always optional.'
         ]
       },
       {
