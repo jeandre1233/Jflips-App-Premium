@@ -27,7 +27,8 @@ import {
   Loader2,
   ZoomIn,
   ZoomOut,
-  Eye
+  Eye,
+  Search
 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
@@ -54,6 +55,7 @@ interface HistoryViewProps {
    */
   onRecalculate?: (historyId?: string) => void;
   isRecalculating?: boolean;
+  user?: any;
 }
 
 interface ArchivedPayslipA4DocProps {
@@ -287,7 +289,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onRecalculate,
   isRecalculating,
   onSetInvoicePaid,
-  onFixInvoiceAmount
+  onFixInvoiceAmount,
+  user
 }) => {
   const [selectedMonth, setSelectedMonth] = useState<HistoryMonth | null>(null);
   const [expandedMonthId, setExpandedMonthId] = useState<string | null>(null);
@@ -575,6 +578,124 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     });
   }, [state.history]);
 
+  const isOwner = state.profile.role === 'owner';
+
+  // Identity of the coach viewing the history (if logged in as staff)
+  const myStaff = useMemo(() => {
+    return (state.staff || []).find(st =>
+      st.id === user?.id ||
+      (st.email && user?.email && st.email.toLowerCase() === user.email.toLowerCase())
+    );
+  }, [state.staff, user]);
+
+  const currentCoachId = myStaff?.id || user?.id || state.profile.id;
+  const coachName = myStaff?.name || state.profile.name || 'Staff Coach';
+
+  // All archived payslips specific to this coach across previous months
+  const coachArchivedPayslips = useMemo(() => {
+    if (isOwner) return [];
+
+    const list: Array<{
+      monthId: string;
+      monthName: string;
+      year: number;
+      payslip: {
+        id: string;
+        reference: string;
+        coach: any;
+        totalHours: number;
+        totalEarnings: number;
+        sessionCount: number;
+        allLines: PricedCoachLine[];
+      };
+      status?: string;
+      paidAt?: string;
+    }> = [];
+
+    const seenMonthKeys = new Set<string>();
+
+    // 1. From historyRecords (newest first)
+    (historyRecords || []).forEach(m => {
+      const monthKey = `${m.monthName} ${m.year}`;
+      seenMonthKeys.add(monthKey);
+      const mPayslips = getArchivedMonthPayslips(m);
+      const mine = mPayslips.find(p =>
+        p.coach.id === currentCoachId ||
+        p.coach.id === user?.id ||
+        (myStaff && p.coach.id === myStaff.id) ||
+        (user?.email && p.coach.email && p.coach.email.toLowerCase() === user.email.toLowerCase()) ||
+        (state.profile.email && p.coach.email && p.coach.email.toLowerCase() === state.profile.email.toLowerCase())
+      );
+      if (mine) {
+        const saved = (state.payslips || []).find(sp =>
+          sp.period_month === monthKey &&
+          (sp.coach_id === currentCoachId || sp.coach_id === user?.id || (myStaff && sp.coach_id === myStaff.id))
+        );
+        list.push({
+          monthId: m.id,
+          monthName: m.monthName,
+          year: m.year,
+          payslip: mine,
+          status: saved?.status || (mine as any).status || 'unpaid',
+          paidAt: saved?.paid_at || (mine as any).paidAt
+        });
+      }
+    });
+
+    // 2. From state.payslips for any month not in historyRecords
+    (state.payslips || []).forEach(p => {
+      if (
+        p.coach_id !== currentCoachId &&
+        p.coach_id !== user?.id &&
+        (!myStaff || p.coach_id !== myStaff.id)
+      ) return;
+      if (seenMonthKeys.has(p.period_month)) return;
+      seenMonthKeys.add(p.period_month);
+
+      const parts = p.period_month.split(' ');
+      const mName = parts[0] || 'Period';
+      const mYear = parts[1] ? parseInt(parts[1], 10) : new Date().getFullYear();
+
+      let snap: any = p.snapshot_data || {};
+      if (typeof snap === 'string') {
+        try { snap = JSON.parse(snap); } catch {}
+      }
+      const snapCoach = snap?.coach || {};
+      const staffObj = myStaff || (state.staff || []).find(st => st.id === p.coach_id);
+      const combinedCoach = {
+        id: p.coach_id,
+        name: staffObj?.name || staffObj?.username || snapCoach?.name || coachName,
+        email: staffObj?.email || snapCoach?.email || '',
+        phone: staffObj?.phone || snapCoach?.phone || '',
+        bankName: staffObj?.bankName || staffObj?.bank_name || snapCoach?.bankName || snapCoach?.bank_name || '',
+        accountNumber: staffObj?.accountNumber || staffObj?.account_number || snapCoach?.accountNumber || snapCoach?.account_number || '',
+        branchCode: staffObj?.branchCode || staffObj?.branch_code || snapCoach?.branchCode || snapCoach?.branch_code || '',
+        accountType: staffObj?.accountType || staffObj?.account_type || snapCoach?.accountType || snapCoach?.account_type || 'Current'
+      };
+
+      const lines: PricedCoachLine[] = Array.isArray(snap?.lines) ? snap.lines : [];
+
+      list.push({
+        monthId: p.id,
+        monthName: mName,
+        year: mYear,
+        payslip: {
+          id: p.id,
+          reference: p.reference_id || `PAY-${mYear}-${mName.slice(0, 3).toUpperCase()}-${p.coach_id.slice(0, 6).toUpperCase()}`,
+          coach: combinedCoach,
+          totalHours: Number(p.total_hours || (lines.length > 0 ? Math.round(lines.reduce((a, l) => a + Number(l.hours || 0), 0) * 10) / 10 : 0)),
+          totalEarnings: Number(p.gross_amount || (lines.length > 0 ? Math.round(lines.reduce((a, l) => a + Number(l.amount || 0), 0) * 100) / 100 : 0)),
+          sessionCount: Number(p.total_sessions || (lines.length > 0 ? new Set(lines.map(l => l.groupId)).size : 0)),
+          allLines: lines
+        },
+        status: p.status || 'unpaid',
+        paidAt: p.paid_at
+      });
+    });
+
+    return list;
+  }, [isOwner, historyRecords, state.history, state.payslips, currentCoachId, myStaff, coachName, getArchivedMonthPayslips, user, state.profile.email]);
+
   /**
    * WHAT THE CLIENTS WERE ACTUALLY INVOICED, cross-checked two ways.
    *
@@ -827,7 +948,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               onClick={() => setSelectedArchivedPayslip(null)}
               className="text-slate-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-1 hover:text-[#1e4da1] cursor-pointer"
             >
-              <ChevronLeft size={14} /> Back to History
+              <ChevronLeft size={14} /> {isOwner ? 'Back to History' : 'Back to My Payslips'}
             </button>
           </div>
 
@@ -895,6 +1016,167 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           </div>
         </div>
       </motion.div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // RENDER: COACH / STAFF PAYSLIP HISTORY (When logged in as staff)
+  // ════════════════════════════════════════════════════════════════════════════
+  if (!isOwner) {
+    const totalPastEarnings = coachArchivedPayslips.reduce((s, item) => s + (Number(item.payslip.totalEarnings) || 0), 0);
+    const totalPastHours = coachArchivedPayslips.reduce((s, item) => s + (Number(item.payslip.totalHours) || 0), 0);
+
+    const filteredPayslips = coachArchivedPayslips.filter(item => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
+      return (
+        item.monthName.toLowerCase().includes(q) ||
+        String(item.year).includes(q) ||
+        item.payslip.reference.toLowerCase().includes(q)
+      );
+    });
+
+    return (
+      <div className="space-y-6 animate-fade-in pb-24 px-1 sm:px-2">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-br from-[#1e3a6e] to-[#0f1d38] p-6 md:p-8 rounded-3xl text-white shadow-xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
+          <div className="relative z-10 space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="px-2.5 py-1 rounded-full bg-blue-400/20 text-blue-300 font-mono text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 border border-blue-400/30">
+                <Sparkles size={12} />
+                Staff Remuneration Records
+              </div>
+            </div>
+            <h1 className="text-2xl md:text-3xl font-[1000] italic uppercase tracking-tight text-white">
+              My Payslip History
+            </h1>
+            <p className="text-xs text-blue-200/80 font-bold max-w-xl">
+              Access and download your official payslips from previous months. Only your individual coaching records are shown here.
+            </p>
+          </div>
+        </div>
+
+        {/* Quick Summary Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="bg-gradient-to-br from-blue-500/10 to-indigo-500/10 dark:from-blue-950/40 dark:to-indigo-950/40 p-4 rounded-2xl border border-blue-200/60 dark:border-blue-900/40 shadow-sm">
+            <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Total Past Earnings</p>
+            <p className="text-2xl font-black italic text-[#1e4da1] dark:text-blue-400 mt-0.5 tabular-nums">
+              R{totalPastEarnings.toFixed(2)}
+            </p>
+          </div>
+          <div className="bg-white dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 shadow-sm">
+            <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Total Hours Coached</p>
+            <p className="text-2xl font-black italic text-slate-800 dark:text-slate-200 mt-0.5 tabular-nums">
+              {totalPastHours.toFixed(1)} hrs
+            </p>
+          </div>
+          <div className="bg-white dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 shadow-sm">
+            <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Completed Months</p>
+            <p className="text-2xl font-black italic text-slate-800 dark:text-slate-200 mt-0.5">
+              {coachArchivedPayslips.length}
+            </p>
+          </div>
+        </div>
+
+        {/* Search */}
+        {coachArchivedPayslips.length > 2 && (
+          <div className="relative">
+            <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search previous payslips by month or year..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-[#1e4da1] dark:text-white"
+            />
+          </div>
+        )}
+
+        {/* List of Previous Payslips */}
+        {filteredPayslips.length === 0 ? (
+          <div className="bg-white dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 rounded-3xl p-10 text-center shadow-sm space-y-3">
+            <Wallet className="mx-auto text-slate-300 dark:text-slate-600" size={44} />
+            <p className="text-slate-700 dark:text-slate-300 text-sm font-black uppercase tracking-wider">
+              {searchQuery ? 'No Matching Payslips Found' : 'No Previous Payslips Available Yet'}
+            </p>
+            <p className="text-[11px] text-slate-400 font-bold max-w-md mx-auto leading-relaxed">
+              {searchQuery
+                ? 'Try searching with a different month name or year.'
+                : 'Your payslips from previous months will appear here once archived by your gym administrator. You can also view your active coaching period in My Pay.'}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filteredPayslips.map(item => {
+              const p = item.payslip;
+              const isPaid = item.status === 'paid' || (p as any).status === 'paid';
+              return (
+                <div
+                  key={`coach-hist-card-${item.monthId}-${p.id}`}
+                  className="p-4 sm:p-5 bg-white dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-blue-300 dark:hover:border-blue-800 transition-all"
+                >
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#1e4da1] to-blue-700 flex items-center justify-center font-black text-white shrink-0 shadow-md">
+                      <FileText size={20} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-base font-black text-slate-900 dark:text-slate-100 uppercase italic">
+                          {item.monthName} {item.year}
+                        </p>
+                        {isPaid && (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                            Paid
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-mono mt-0.5 truncate">
+                        {p.reference}
+                      </p>
+                      <div className="flex items-center gap-3 mt-1 text-[11px] text-slate-500 dark:text-slate-400 font-bold">
+                        <span>{p.sessionCount} sessions</span>
+                        <span>·</span>
+                        <span>{Number(p.totalHours || 0).toFixed(1)} hrs coached</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between sm:justify-end gap-4 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-700/60">
+                    <div className="text-left sm:text-right">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                        Remuneration Due
+                      </p>
+                      <p className="text-xl font-black italic text-[#1e4da1] dark:text-blue-400 tabular-nums">
+                        R{Number(p.totalEarnings || 0).toFixed(2)}
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() =>
+                        setSelectedArchivedPayslip({
+                          monthName: item.monthName,
+                          year: item.year,
+                          reference: p.reference,
+                          coach: p.coach,
+                          allLines: p.allLines,
+                          totalHours: p.totalHours,
+                          totalEarnings: p.totalEarnings,
+                          sessionCount: p.sessionCount
+                        })
+                      }
+                      className="px-4 py-2.5 bg-[#1e4da1] hover:bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-md flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shrink-0"
+                    >
+                      <FileText size={14} />
+                      <span>View Payslip</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     );
   }
 

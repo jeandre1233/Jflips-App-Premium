@@ -509,7 +509,7 @@ const DesktopSidebar: React.FC<{
     { view: View.LOG_SESSION,     icon: <ClipboardCheck size={20} />,  label: 'Log Session' },
     { view: View.TEAM_MANAGEMENT, icon: <Settings size={20} />,          label: 'Management' },
     { view: View.INVOICES,        icon: <FileText size={20} />,        label: isOwner ? 'Accounts' : 'My Pay' },
-    ...(isOwner ? [{ view: View.HISTORY, icon: <History size={20} />, label: 'History' }] : []),
+    { view: View.HISTORY,         icon: <History size={20} />,         label: isOwner ? 'History' : 'Past Payslips' },
     { view: View.ROSTER,          icon: <Settings2 size={20} />,       label: 'Setup' },
   ];
 
@@ -4196,10 +4196,6 @@ const App: React.FC = () => {
   };
 
   const handleViewChange = (view: View) => {
-    if (view === View.HISTORY && !isOwner) {
-      setActiveView(View.DASHBOARD);
-      return;
-    }
     setActiveView(view);
     if (view === View.ROSTER) {
       setRosterTab('students');
@@ -4351,7 +4347,7 @@ const App: React.FC = () => {
         />
       )}
       {activeView === View.INVOICES && <AccountsView state={state} user={user} onUpdatePayment={handleUpdatePayment} onResetInvoice={resetSingleInvoice} onShowRecovery={() => setShowRecoveryModal(true)} onSaveAllocations={saveBankAllocations} onAddMerch={(fixedBillTo) => setMerchOrderModal({ fixedBillTo })} onDeleteMerchOrder={handleDeleteMerchOrder} onSetMerchStatus={handleSetMerchOrderStatus} />}
-      {activeView === View.HISTORY && isOwner && (
+      {activeView === View.HISTORY && (
         <HistoryView 
           state={state} 
           onShowRecovery={() => setShowRecoveryModal(true)}
@@ -4360,6 +4356,7 @@ const App: React.FC = () => {
           isRecalculating={isSyncing}
           onSetInvoicePaid={handleSetInvoicePaid}
           onFixInvoiceAmount={handleFixInvoiceAmount}
+          user={user}
         />
       )}
       {activeView === View.ROSTER && (
@@ -4738,7 +4735,7 @@ const App: React.FC = () => {
                   activeView === View.GYM_ATTENDANCE ? 'Gym Attendance' :
                   activeView === View.TEAM_MANAGEMENT ? 'Team Management' :
                   activeView === View.INVOICES ? (isOwner ? 'Accounts' : 'My Pay') :
-                  activeView === View.HISTORY ? (selectedHistoryMonth ? `${selectedHistoryMonth.monthName} ${selectedHistoryMonth.year}` : 'History') :
+                  activeView === View.HISTORY ? (isOwner ? (selectedHistoryMonth ? `${selectedHistoryMonth.monthName} ${selectedHistoryMonth.year}` : 'History') : 'Past Payslips') :
                   activeView === View.STATISTICS ? 'Statistics' :
                   activeView === View.ROSTER ? 'Setup' : ''}
               </h2>
@@ -4856,9 +4853,7 @@ const App: React.FC = () => {
         <NavButton active={activeView === View.TEAM_MANAGEMENT} icon={<Settings size={18} />} label="Mgmt" onClick={() => handleViewChange(View.TEAM_MANAGEMENT)} />
         {/* Coaches see their own invoice tab; owners see accounts */}
         <NavButton active={activeView === View.INVOICES} icon={<FileText size={18} />} label={isOwner ? "Accounts" : "My Pay"} onClick={() => handleViewChange(View.INVOICES)} />
-        {isOwner && (
-          <NavButton active={activeView === View.HISTORY} icon={<History size={18} />} label="History" onClick={() => handleViewChange(View.HISTORY)} />
-        )}
+        <NavButton active={activeView === View.HISTORY} icon={<History size={18} />} label={isOwner ? "History" : "Past Pay"} onClick={() => handleViewChange(View.HISTORY)} />
         <NavButton active={activeView === View.ROSTER} icon={<Settings2 size={18} />} label="Setup" onClick={() => handleViewChange(View.ROSTER)} />
       </nav>
 

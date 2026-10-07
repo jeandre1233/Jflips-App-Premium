@@ -168,6 +168,7 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
 
   // ── Historical continuity for payslips (My Pay & Owner lookup) ──
   const [selectedHistoryMonthKey, setSelectedHistoryMonthKey] = useState<string>('active');
+  const [coachViewTab, setCoachViewTab] = useState<'current' | 'past'>('current');
 
   const availablePayslipPeriods = useMemo(() => {
     const list = [{ key: 'active', label: 'Current Period (Active)' }];
@@ -177,8 +178,13 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
         list.push({ key, label: `${h.monthName} ${h.year}` });
       }
     });
+    (state.payslips || []).forEach(p => {
+      if (p.period_month && !list.some(item => item.key === p.period_month)) {
+        list.push({ key: p.period_month, label: p.period_month });
+      }
+    });
     return list;
-  }, [state.history]);
+  }, [state.history, state.payslips]);
 
   // Filtering & Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -523,14 +529,34 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
     }>();
 
     coachesRoster.forEach(coach => {
-      const coachLines = effectiveCoachLines.filter(l =>
+      let coachLines = effectiveCoachLines.filter(l =>
         l.coachId === coach.id &&
         (!monthLabel || l.billingMonthKey === activeMonthKey)
       );
 
-      const totalHours = coachLines.reduce((acc, curr) => acc + (Number(curr.hours) || 0), 0);
-      const totalEarnings = coachLines.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-      const sessionCount = new Set(coachLines.map(l => l.groupId)).size;
+      let totalHours = coachLines.reduce((acc, curr) => acc + (Number(curr.hours) || 0), 0);
+      let totalEarnings = coachLines.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+      let sessionCount = new Set(coachLines.map(l => l.groupId)).size;
+
+      // When viewing past archived month, check saved staff_payslips records for exact snapshot
+      if (selectedHistoryMonthKey !== 'active') {
+        const saved = (state.payslips || []).find(p =>
+          p.period_month === selectedHistoryMonthKey &&
+          (p.coach_id === coach.id || (coach.email && p.coach_id === coach.id))
+        );
+        if (saved) {
+          let snap: any = saved.snapshot_data || {};
+          if (typeof snap === 'string') {
+            try { snap = JSON.parse(snap); } catch {}
+          }
+          if (Array.isArray(snap?.lines) && snap.lines.length > 0) {
+            coachLines = snap.lines;
+          }
+          if (saved.total_hours != null) totalHours = Number(saved.total_hours);
+          if (saved.gross_amount != null) totalEarnings = Number(saved.gross_amount);
+          if (saved.total_sessions != null) sessionCount = Number(saved.total_sessions);
+        }
+      }
 
       dataMap.set(coach.id, {
         coach,
@@ -542,13 +568,89 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
     });
 
     return dataMap;
-  }, [coachesRoster, effectiveCoachLines, monthLabel, activeMonthKey]);
+  }, [coachesRoster, effectiveCoachLines, monthLabel, activeMonthKey, selectedHistoryMonthKey, state.payslips]);
 
   // Active selected coach payslip
   const selectedCoachPayslip = useMemo(() => {
     if (!activeCoachId) return null;
     return coachesPayslipData.get(activeCoachId) || null;
   }, [coachesPayslipData, activeCoachId]);
+
+  // All previous payslips specific to the logged-in coach (for My Pay past view)
+  const coachPastPayslips = useMemo(() => {
+    if (!isCoach) return [];
+    const list: Array<{
+      key: string;
+      label: string;
+      hours: number;
+      earnings: number;
+      sessionCount: number;
+      reference?: string;
+      status?: string;
+    }> = [];
+
+    const seen = new Set<string>();
+
+    (state.history || []).forEach(h => {
+      const key = `${h.monthName} ${h.year}`;
+      seen.add(key);
+
+      const saved = (state.payslips || []).find(p =>
+        p.period_month === key &&
+        (p.coach_id === currentCoachId || (currentCoachStaff && p.coach_id === currentCoachStaff.id))
+      );
+
+      if (saved) {
+        list.push({
+          key,
+          label: key,
+          hours: Number(saved.total_hours || 0),
+          earnings: Number(saved.gross_amount || 0),
+          sessionCount: Number(saved.total_sessions || 0),
+          reference: saved.reference_id,
+          status: saved.status
+        });
+      } else if (h.sessions && h.sessions.length > 0) {
+        try {
+          const pricedHist = priceSessions(h.sessions, pricingContext);
+          const lines = pricedHist.coachLines.filter(l =>
+            l.coachId === currentCoachId || (currentCoachStaff && l.coachId === currentCoachStaff.id)
+          );
+          if (lines.length > 0) {
+            const hours = lines.reduce((acc, curr) => acc + (Number(curr.hours) || 0), 0);
+            const earnings = lines.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+            const sessionCount = new Set(lines.map(l => l.groupId)).size;
+            list.push({
+              key,
+              label: key,
+              hours: Math.round(hours * 10) / 10,
+              earnings: Math.round(earnings * 100) / 100,
+              sessionCount,
+              status: 'unpaid'
+            });
+          }
+        } catch {}
+      }
+    });
+
+    (state.payslips || []).forEach(p => {
+      if (p.coach_id !== currentCoachId && (!currentCoachStaff || p.coach_id !== currentCoachStaff.id)) return;
+      if (seen.has(p.period_month)) return;
+      seen.add(p.period_month);
+
+      list.push({
+        key: p.period_month,
+        label: p.period_month,
+        hours: Number(p.total_hours || 0),
+        earnings: Number(p.gross_amount || 0),
+        sessionCount: Number(p.total_sessions || 0),
+        reference: p.reference_id,
+        status: p.status
+      });
+    });
+
+    return list;
+  }, [isCoach, state.history, state.payslips, currentCoachId, currentCoachStaff, pricingContext]);
 
   // ════════════════════════════════════════════════════════════════════════════
   // 3. EXPORT HANDLERS (PDF, PNG)
@@ -1097,6 +1199,119 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
   }
 
   // ════════════════════════════════════════════════════════════════════════════
+  // RENDER: COACH PAST PAYSLIPS LIST (When coach switches to past payslips tab)
+  // ════════════════════════════════════════════════════════════════════════════
+  if (isCoach && coachViewTab === 'past') {
+    return (
+      <div className="space-y-6 mt-4 px-2 pb-24">
+        {/* Top Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <button
+                onClick={() => setCoachViewTab('current')}
+                className="text-slate-500 hover:text-[#1e4da1] text-[10px] font-black uppercase tracking-widest flex items-center gap-1 cursor-pointer"
+              >
+                <ChevronLeft size={14} /> Back to Current Period
+              </button>
+            </div>
+            <h2 className="text-2xl font-black text-slate-900 dark:text-slate-100 uppercase italic tracking-tight">
+              Previous Payslips
+            </h2>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mt-0.5">
+              Access your previous months' coaching payslips and remuneration records
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setSelectedHistoryMonthKey('active');
+                setCoachViewTab('current');
+              }}
+              className="px-3.5 py-2 bg-[#1e4da1] text-white rounded-xl text-[10px] font-black uppercase tracking-wider shadow-md hover:bg-blue-600 transition-all cursor-pointer"
+            >
+              Current Period
+            </button>
+          </div>
+        </div>
+
+        {coachPastPayslips.length === 0 ? (
+          <div className="bg-white dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-3xl p-10 text-center shadow-sm space-y-2">
+            <Wallet className="mx-auto text-slate-300 dark:text-slate-600 mb-2" size={44} />
+            <p className="text-slate-500 dark:text-slate-300 text-xs font-black uppercase">No Previous Payslips Available</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">
+              Your payslips from completed months will be archived and accessible here.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {coachPastPayslips.map(item => {
+              const isPaid = item.status === 'paid';
+              return (
+                <div
+                  key={`past-coach-pay-${item.key}`}
+                  className="p-4 sm:p-5 bg-white dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-blue-200 dark:hover:border-blue-900/60 transition-all"
+                >
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#1e4da1] to-blue-700 flex items-center justify-center font-black text-white shrink-0 shadow-md">
+                      <FileText size={20} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-base font-black text-slate-900 dark:text-slate-100 uppercase italic">
+                          {item.label}
+                        </p>
+                        {isPaid && (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                            Paid
+                          </span>
+                        )}
+                      </div>
+                      {item.reference && (
+                        <p className="text-[10px] text-slate-400 font-mono mt-0.5 truncate">
+                          {item.reference}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-3 mt-1 text-[11px] text-slate-500 dark:text-slate-400 font-bold">
+                        <span>{item.sessionCount} sessions</span>
+                        <span>·</span>
+                        <span>{item.hours.toFixed(1)} hrs coached</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between sm:justify-end gap-4 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-slate-800">
+                    <div className="text-left sm:text-right">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                        Total Remuneration
+                      </p>
+                      <p className="text-xl font-black italic text-[#1e4da1] dark:text-blue-400 tabular-nums">
+                        R{item.earnings.toFixed(2)}
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setSelectedHistoryMonthKey(item.key);
+                        setCoachViewTab('current');
+                      }}
+                      className="px-4 py-2.5 bg-[#1e4da1] hover:bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-md flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shrink-0"
+                    >
+                      <FileText size={14} />
+                      <span>View Payslip</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
   // RENDER: 2. UNIFIED COACH PAYSLIP VIEWER (When a coach payslip is open)
   // ════════════════════════════════════════════════════════════════════════════
   if (selectedCoachPayslip && (activeCoachId || isCoach)) {
@@ -1110,12 +1325,19 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
         {/* Top bar controls */}
         <div className="flex flex-wrap justify-between items-center gap-3 mb-2">
           <div className="flex items-center gap-2.5">
-            {isOwner && (
+            {isOwner ? (
               <button
                 onClick={() => setSelectedCoachId(null)}
                 className="text-slate-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-1 hover:text-[#1e4da1]"
               >
                 <ChevronLeft size={14} /> Back to Staff Roster
+              </button>
+            ) : (
+              <button
+                onClick={() => setCoachViewTab(prev => prev === 'past' ? 'current' : 'past')}
+                className="text-slate-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-1 hover:text-[#1e4da1] cursor-pointer"
+              >
+                <History size={13} /> {selectedHistoryMonthKey !== 'active' ? 'Back to Past Payslips' : 'Past Payslips'}
               </button>
             )}
             {/* Historical period selector for coach/owner continuity */}
@@ -1132,6 +1354,14 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
                   </option>
                 ))}
               </select>
+              {isCoach && selectedHistoryMonthKey !== 'active' && (
+                <button
+                  onClick={() => setSelectedHistoryMonthKey('active')}
+                  className="text-[#1e4da1] hover:underline text-[10px] font-black uppercase tracking-wider ml-1 cursor-pointer"
+                >
+                  Active
+                </button>
+              )}
             </div>
           </div>
 
