@@ -2466,7 +2466,31 @@ const App: React.FC = () => {
     loadCloudData(true);
   };
 
+  // Only ONE log may be saving at a time. Tapping Confirm Log repeatedly used to
+  // start the save again and again, and every run invented brand-new session ids,
+  // so each tap saved another copy of the same register. While a save is running
+  // further taps are ignored, and a screen shows that it is saving.
+  const logLock = useRef(false);
+  const [isLoggingSession, setIsLoggingSession] = useState(false);
+  // Ids are remembered for 90 seconds per identical submission, so a retry (a slow
+  // network, a tap after an error, an offline queue) saves over the SAME rows
+  // instead of adding new ones. A genuinely separate class is a different
+  // submission and gets its own ids.
+  const recentLogs = useRef(new Map<string, { stamp: string; at: number }>());
+
   const handleLogSession = async (classTypeIdOrData: any, studentIds?: string[], date?: string, hours?: number, coachId?: string, isCompetition?: boolean) => {
+    if (logLock.current) return;
+    logLock.current = true;
+    setIsLoggingSession(true);
+    try {
+      await runLogSession(classTypeIdOrData, studentIds, date, hours, coachId, isCompetition);
+    } finally {
+      logLock.current = false;
+      setIsLoggingSession(false);
+    }
+  };
+
+  const runLogSession = async (classTypeIdOrData: any, studentIds?: string[], date?: string, hours?: number, coachId?: string, isCompetition?: boolean) => {
     if (!user) return;
     const isOwner = state.profile.role === 'owner';
     const targetUserId = isOwner ? user.id : state.profile.owner_id;
@@ -2503,7 +2527,19 @@ const App: React.FC = () => {
     // pricing engine tell "one practice, two coaches" (split the team rate)
     // apart from "two separate practices" (each coach earns full rate).
     // Editing an existing session keeps whatever group it was already in.
-    const logStamp = `${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const fingerprint = JSON.stringify(
+      (Array.isArray(classTypeIdOrData)
+        ? classTypeIdOrData.map((r: any) => [r.classTypeId, r.date, r.coachId || finalCoachId, [...(r.studentIds || [])].sort(), r.customEventName || '', r.isCompetition || isCompetition ? 1 : 0, r.hours || 0])
+        : [[classTypeIdOrData, date || '', finalCoachId, [...(studentIds || [])].sort(), editingSession?.custom_event_name || '', isCompetition ? 1 : 0, hours || 0]])
+    );
+    const nowMs = Date.now();
+    recentLogs.current.forEach((v, k) => { if (nowMs - v.at > 90000) recentLogs.current.delete(k); });
+    let recent = recentLogs.current.get(fingerprint);
+    if (!recent) {
+      recent = { stamp: `${nowMs}_${Math.random().toString(36).substr(2, 6)}`, at: nowMs };
+      recentLogs.current.set(fingerprint, recent);
+    }
+    const logStamp = recent.stamp;
     const logGroupIds = new Map<string, string>();
 
     /**
@@ -2528,7 +2564,7 @@ const App: React.FC = () => {
 
     if (Array.isArray(classTypeIdOrData)) {
       sessionsToUpsert = classTypeIdOrData.map((s, idx) => ({
-        id: s.id || `sess_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`,
+        id: s.id || `sess_${logStamp}_${idx}`,
         date: s.date,
         class_type_id: s.classTypeId,
         student_ids: s.studentIds,
@@ -2541,7 +2577,7 @@ const App: React.FC = () => {
         session_group_id: groupIdFor(s)
       }));
     } else {
-      const sessionId = (editingSession && editingSession.id) ? editingSession.id : `sess_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      const sessionId = (editingSession && editingSession.id) ? editingSession.id : `sess_${logStamp}`;
       sessionsToUpsert = [{
         id: sessionId,
         date: date || new Date().toISOString().split('T')[0],
@@ -4665,6 +4701,14 @@ const App: React.FC = () => {
             )}
           </div>
         </Modal>
+      )}
+      {isLoggingSession && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/30 backdrop-blur-sm" role="status" aria-live="polite">
+          <div className="px-6 py-4 rounded-2xl bg-white dark:bg-slate-800 shadow-2xl text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-100 flex items-center gap-3">
+            <span className="w-4 h-4 rounded-full border-2 border-[#1e4da1] border-t-transparent animate-spin" />
+            Saving session...
+          </div>
+        </div>
       )}
       <AnimatePresence>
         {toast && (
