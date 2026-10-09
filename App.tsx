@@ -107,6 +107,7 @@ import { MerchItemModal } from './src/components/MerchItemModal';
 import { addToQueue, getPendingItems, updateItemStatus, deleteSyncedItems } from './src/utils/offlineQueue';
 import { AccountsView } from './src/Pages/AccountsView';
 import { IncidentLog } from './src/components/IncidentLog';
+import { parentMustStay } from './src/utils/youngAthlete';
 import { priceSessions, priceMerch, openMerchOrders, merchOrdersForMonth, sumLines, billingMonthFor } from './src/utils/pricing';
 import type { PricingContext, PricedCoachLine } from './src/utils/pricing';
 import {
@@ -9581,6 +9582,9 @@ const RegisterView = memo(({
                     <div className="flex items-center gap-2 min-w-0">
                       <User size={14} className="opacity-50 shrink-0" />
                       <span className="font-black uppercase italic text-[13px] truncate">{entity.name}</span>
+                      {parentMustStay(entity) && (
+                        <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-orange-500 text-white text-[7px] font-black uppercase tracking-wider not-italic">Parent must stay</span>
+                      )}
                     </div>
                     {entity.parent1_phone && (
                       <span className="text-[9px] text-slate-400 dark:text-slate-500 font-bold ml-5">

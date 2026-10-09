@@ -40,3 +40,43 @@ export const INDEMNITY_CLAUSES: { heading: string; text: string }[] = [
     text: 'I have given accurate information about my child\'s health below, and I will tell JFLIPS about any change in my child\'s health, or any injury or illness, as soon as I can.'
   }
 ];
+
+/**
+ * ADULT PARTICIPANT PATH (age 18 and over): the participant signs for themselves,
+ * not a parent. Same clauses, rewritten in the first person. DRAFT, for the lawyer.
+ */
+export type Audience = 'minor' | 'adult';
+
+export const INDEMNITY_INTRO_ADULT = (name: string): string =>
+  `I, ${name || '___________________'}, hereby indemnify and confirm that I am physically, medically and mentally fit to become a member of JFLIPS TUMBLING and to participate in the sport of tumbling. I hereby acknowledge the possibility of injury occurring whilst doing tumbling.`;
+
+export const INDEMNITY_CLAUSES_ADULT: { heading: string; text: string }[] = [
+  {
+    heading: 'Risk',
+    text: 'I understand that tumbling and stunting involve jumping, flipping, balancing and falling, and contact with equipment and other participants. Injuries, from small bruises to serious injury, can happen even when coaches take every reasonable care.'
+  },
+  {
+    heading: 'Responsibility',
+    text: 'I accept these risks. I agree that JFLIPS TUMBLING, its owner and its coaches will not be held responsible for any injury, loss or damage that happens in the normal course of classes, except where it is caused by their gross negligence or a deliberate act. I will follow the coaches\' instructions and the class rules.'
+  },
+  {
+    heading: 'First aid and emergencies',
+    text: 'JFLIPS will give basic first aid where possible and will call emergency services or a doctor when needed. Classes take place at a school where staff with first aid training may be on site, but JFLIPS cannot promise that they will be available. If I cannot respond, I authorise JFLIPS or its coaches to arrange emergency medical treatment or an ambulance for me, and I accept responsibility for the cost of that treatment.'
+  },
+  {
+    heading: 'Belongings',
+    text: 'I understand that JFLIPS TUMBLING, its owner and its coaches are not responsible for the loss, theft or damage of any belongings I bring to classes.'
+  },
+  {
+    heading: 'Health information',
+    text: 'I have given accurate information about my health below, and I will tell JFLIPS about any change in my health, or any injury or illness, as soon as I can.'
+  }
+];
+
+export const indemnityClausesFor = (a: Audience) => (a === 'adult' ? INDEMNITY_CLAUSES_ADULT : INDEMNITY_CLAUSES);
+
+/** Which path applies: 18 and over signs for themselves, under 18 a parent or guardian signs. */
+export function audienceForAge(age: number | string | null | undefined): Audience {
+  const n = typeof age === 'string' ? parseInt(age, 10) : age;
+  return typeof n === 'number' && Number.isFinite(n) && n >= 18 ? 'adult' : 'minor';
+}

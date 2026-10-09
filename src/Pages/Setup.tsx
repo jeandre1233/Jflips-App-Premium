@@ -49,6 +49,7 @@ import {
   syncFinancesToGoogleSheet 
 } from '../utils/googleWorkspace';
 import { ConsentManager } from '../components/ConsentManager';
+import { parentMustStay } from '../utils/youngAthlete';
 import { getDiscordWebhookUrl, setDiscordWebhookUrl, isDiscordNotificationsEnabled, setDiscordNotificationsEnabled } from '../utils/discordNotifications';
 
 const athleteItemVariants = {
@@ -1567,6 +1568,9 @@ export const RosterView = memo(({
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <p className="text-sm font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic truncate">{student.name}</p>
+                            {parentMustStay(student) && (
+                              <span className="px-1.5 py-0.5 rounded-md bg-orange-500 text-white text-[7px] font-black uppercase tracking-wider not-italic">Parent must stay</span>
+                            )}
                             {isTemp && (
                               <span className="inline-flex items-center gap-1 text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300/90 dark:border-amber-800 tracking-wider shrink-0">
                                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />

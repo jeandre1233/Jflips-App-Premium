@@ -30,6 +30,14 @@ export interface Student {
   trial_notes?: string;
   created_by_coach_id?: string;
   first_class_date?: string;
+  /** Worked out by the database for coach accounts, which do not receive the dob. */
+  parent_must_stay?: boolean;
+  /** Safety details collected for children aged 4 and under. */
+  young_athlete?: {
+    stays?: boolean; adultName?: string; adultPhone?: string;
+    collectors?: { name: string; phone: string }[];
+    toiletTrained?: '' | 'yes' | 'no' | 'mostly'; notes?: string; discretion?: boolean;
+  } | null;
 }
 
 export function getStudentSessionPrice(

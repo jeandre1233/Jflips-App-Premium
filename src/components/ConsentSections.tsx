@@ -1,6 +1,7 @@
 import React from 'react';
 import { SignaturePad } from './SignaturePad';
-import { GENERAL_FORM, MEDIA_FORM, MEDIA_KEYS, MediaKey, UI } from '../utils/consentForms';
+import { MEDIA_KEYS, MediaKey, generalFormFor, mediaFormFor, uiFor } from '../utils/consentForms';
+import type { Audience } from '../utils/indemnityText';
 
 /**
  * The two consent forms as they appear to a parent. Used by BOTH the signup page
@@ -33,9 +34,9 @@ const SignatureBlock: React.FC<{
 export const GeneralConsentSection: React.FC<{
   agreed: boolean; onAgree: (v: boolean) => void;
   signed: boolean; onSign: (d: string) => void; clearKey: number; onClear: () => void;
-  errorSignature?: boolean; errorAgree?: boolean;
-}> = ({ agreed, onAgree, signed, onSign, clearKey, onClear, errorSignature, errorAgree }) => {
-  const f = GENERAL_FORM.en; const ui = UI.en;
+  errorSignature?: boolean; errorAgree?: boolean; audience?: Audience;
+}> = ({ agreed, onAgree, signed, onSign, clearKey, onClear, errorSignature, errorAgree, audience = 'minor' }) => {
+  const f = generalFormFor(audience); const ui = uiFor(audience);
   return (
     <>
       <div style={card}>
@@ -64,9 +65,9 @@ export const GeneralConsentSection: React.FC<{
 export const MediaConsentSection: React.FC<{
   choices: Partial<Record<MediaKey, boolean>>; onChoice: (k: MediaKey, v: boolean) => void;
   signed: boolean; onSign: (d: string) => void; clearKey: number; onClear: () => void;
-  errorChoices?: boolean; errorSignature?: boolean;
-}> = ({ choices, onChoice, signed, onSign, clearKey, onClear, errorChoices, errorSignature }) => {
-  const f = MEDIA_FORM.en; const ui = UI.en;
+  errorChoices?: boolean; errorSignature?: boolean; audience?: Audience;
+}> = ({ choices, onChoice, signed, onSign, clearKey, onClear, errorChoices, errorSignature, audience = 'minor' }) => {
+  const f = mediaFormFor(audience); const ui = uiFor(audience);
   return (
     <>
       <div style={card}>

@@ -123,7 +123,7 @@ BEGIN
     parent_email = left(coalesce(p_parent_email, ''), 160),
     details = jsonb_build_object(
       'relationship', left(coalesce(p_details ->> 'relationship', ''), 80),
-      'school_grade', left(coalesce(p_details ->> 'school_grade', ''), 120)),
+      'audience', coalesce(r.details ->> 'audience', 'minor')),
     choices = new_choices,
     signature_data = p_signature,
     language = 'en',
@@ -182,7 +182,7 @@ BEGIN
 
   det := jsonb_build_object(
     'relationship', left(coalesce(p_details ->> 'relationship', ''), 80),
-    'school_grade', left(coalesce(p_details ->> 'school_grade', ''), 120));
+    'audience', CASE WHEN p_details ->> 'audience' = 'adult' THEN 'adult' ELSE 'minor' END);
 
   INSERT INTO consent_records (user_id, family_key, token, kind, status, family_label, child_first_names,
     parent_name, parent_phone, parent_email, details, choices, signature_data, language, form_version, signed_at, source)

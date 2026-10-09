@@ -46,7 +46,11 @@ $$;
 CREATE OR REPLACE FUNCTION coach_roster()
 RETURNS SETOF JSONB
 LANGUAGE sql SECURITY DEFINER STABLE SET search_path = public AS $$
-  SELECT to_jsonb(t) - 'signature_data' - 'parent1_email' - 'dob'
+  SELECT (to_jsonb(t) - 'signature_data' - 'parent1_email' - 'dob' - 'indemnity_record')
+         || jsonb_build_object('parent_must_stay',
+              CASE WHEN t.dob IS NOT NULL AND t.dob::text ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+                   THEN age(substring(t.dob::text from 1 for 10)::date) < interval '5 years'
+                   ELSE false END)
   FROM tumbling_students t
   JOIN staff_profiles sp
     ON sp.id = auth.uid()

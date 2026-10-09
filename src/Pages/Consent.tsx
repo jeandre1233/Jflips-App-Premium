@@ -3,8 +3,9 @@ import { useParams } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from '../../supabase';
 import { GeneralConsentSection, MediaConsentSection } from '../components/ConsentSections';
 import {
-  ConsentKind, GENERAL_VERSION, MEDIA_KEYS, MEDIA_VERSION, MediaKey, UI, generateConsentPdf
+  ConsentKind, GENERAL_VERSION, MEDIA_KEYS, MEDIA_VERSION, MediaKey, generateConsentPdf, uiFor
 } from '../utils/consentForms';
+import type { Audience } from '../utils/indemnityText';
 
 /**
  * Public page behind a family's personal link: /#/consent/<token>.
@@ -16,7 +17,7 @@ interface Row {
   kind: ConsentKind; status: 'pending' | 'signed' | 'withdrawn';
   child_first_names: string[] | null;
   parent_name: string | null; parent_phone: string | null; parent_email: string | null;
-  details: { relationship?: string; school_grade?: string } | null;
+  details: { relationship?: string; school_grade?: string; audience?: Audience } | null;
   choices: Record<string, boolean> | null;
   form_version: string | null; signed_at: string | null;
 }
@@ -27,11 +28,13 @@ const primary = (disabled: boolean): React.CSSProperties => ({ width: '100%', pa
 
 export default function Consent() {
   const { token = '' } = useParams();
-  const ui = UI.en;
-
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<Record<string, Row>>({});
   const [invalid, setInvalid] = useState(false);
+  // An adult participant (18+) signs for themselves; under 18 a parent or guardian signs.
+  const audience: Audience =
+    rows.general?.details?.audience === 'adult' || rows.media?.details?.audience === 'adult' ? 'adult' : 'minor';
+  const ui = uiFor(audience);
 
   const [parent, setParent] = useState({ name: '', relationship: '', phone: '', email: '' });
 
@@ -98,7 +101,7 @@ export default function Consent() {
     const { error: e } = await supabase.rpc('submit_consent', {
       p_token: token, p_kind: kind,
       p_parent_name: parent.name.trim(), p_parent_phone: parent.phone.trim(), p_parent_email: parent.email.trim(),
-      p_details: { relationship: parent.relationship.trim() },
+      p_details: { relationship: parent.relationship.trim() || (audience === 'adult' ? 'Self (adult participant)' : '') },
       p_choices: choices, p_signature: sig, p_language: 'en',
       p_form_version: kind === 'general' ? GENERAL_VERSION : MEDIA_VERSION, p_withdraw: false
     });
@@ -129,7 +132,8 @@ export default function Consent() {
     generateConsentPdf({
       kind, lang: 'en', childNames,
       parentName: parent.name, parentPhone: parent.phone, parentEmail: parent.email,
-      relationship: parent.relationship,
+      relationship: parent.relationship || (audience === 'adult' ? 'Self (adult participant)' : ''),
+      audience,
       choices: kind === 'media' ? (mChoices as Record<string, boolean>) : { agreed: true },
       signature: js?.sig, signedAt: js?.at || row?.signed_at,
       version: row?.form_version, status: row?.status
@@ -193,7 +197,7 @@ export default function Consent() {
           <GeneralConsentSection
             agreed={gAgreed} onAgree={setGAgreed}
             signed={!!gSig} onSign={d => { setGSig(d); }} clearKey={gClear} onClear={() => { setGSig(''); setGClear(c => c + 1); }}
-            errorAgree={errs.agree} errorSignature={errs['sig-general']}
+            errorAgree={errs.agree} errorSignature={errs['sig-general']} audience={audience}
           />
           <button style={primary(busy === 'general')} disabled={busy === 'general'} onClick={() => submit('general')}>
             {busy === 'general' ? '...' : ui.submitGeneral}
@@ -210,7 +214,7 @@ export default function Consent() {
           <MediaConsentSection
             choices={mChoices} onChoice={(k, v) => setMChoices(c => ({ ...c, [k]: v }))}
             signed={!!mSig} onSign={d => setMSig(d)} clearKey={mClear} onClear={() => { setMSig(''); setMClear(c => c + 1); }}
-            errorChoices={errs.choices} errorSignature={errs['sig-media']}
+            errorChoices={errs.choices} errorSignature={errs['sig-media']} audience={audience}
           />
           <button style={primary(busy === 'media')} disabled={busy === 'media'} onClick={() => submit('media')}>
             {busy === 'media' ? '...' : ui.submitMedia}

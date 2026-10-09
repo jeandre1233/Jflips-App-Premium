@@ -19,6 +19,8 @@ type Filter = 'all' | 'notSent' | 'waiting' | 'signed' | 'doNotPost' | 'photosOk
 
 interface Family {
   key: string;
+  /** True when every person in the family is 18 or over: they sign for themselves. */
+  adult: boolean;
   parent: string;
   phone: string;
   kids: string[];
@@ -69,8 +71,21 @@ export const ConsentManager: React.FC<{ state: AppState }> = ({ state }) => {
     return Array.from(map.entries()).map(([key, kids]) => {
       const withParent = kids.find(k => k.parent1_name) || kids[0];
       const phone = kids.map(k => k.parent1_phone || k.parent2_phone || k.phone).find(Boolean) || '';
+      const ageOf = (k: Student): number | null => {
+        const m = String(k.dob || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) {
+          const born = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+          const now = new Date();
+          let a = now.getFullYear() - born.getFullYear();
+          if (now.getMonth() < born.getMonth() || (now.getMonth() === born.getMonth() && now.getDate() < born.getDate())) a--;
+          return a;
+        }
+        return typeof k.age === 'number' ? k.age : null;
+      };
+      const adult = kids.length > 0 && kids.every(k => (ageOf(k) ?? 0) >= 18);
       return {
         key,
+        adult,
         parent: withParent.parent1_name || withParent.name,
         phone,
         kids: kids.map(k => k.name),
@@ -122,7 +137,8 @@ export const ConsentManager: React.FC<{ state: AppState }> = ({ state }) => {
     const base = {
       user_id: ownerId, family_key: f.key, token, status: 'pending',
       family_label: f.parent, child_first_names: f.firstNames,
-      parent_name: f.parent, parent_phone: f.phone, source: 'admin_link'
+      parent_name: f.parent, parent_phone: f.phone, source: 'admin_link',
+      details: { audience: f.adult ? 'adult' : 'minor' }
     };
     const { error } = await supabase.from('consent_records').insert([
       { ...base, kind: 'general' }, { ...base, kind: 'media' }
@@ -138,7 +154,9 @@ export const ConsentManager: React.FC<{ state: AppState }> = ({ state }) => {
     setBusyKey(null);
     if (!token) return;
     const link = consentUrl(token);
-    const text = `Hi ${f.parent}! 🤸\n\nJFlips needs your consent on two short POPIA forms for ${f.firstNames.join(' & ')}: our privacy notice, and permission for photos and videos. It takes about 2 minutes:\n\n${link}\n\nThank you!`;
+    const text = f.adult
+      ? `Hi ${f.parent}! 🤸\n\nJFlips needs your consent on two short POPIA forms: our privacy notice, and permission for photos and videos. It takes about 2 minutes:\n\n${link}\n\nThank you!`
+      : `Hi ${f.parent}! 🤸\n\nJFlips needs your consent on two short POPIA forms for ${f.firstNames.join(' & ')}: our privacy notice, and permission for photos and videos. It takes about 2 minutes:\n\n${link}\n\nThank you!`;
     const phone = f.phone ? cleanPhoneNumber(f.phone) : '';
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
   };
@@ -159,7 +177,7 @@ export const ConsentManager: React.FC<{ state: AppState }> = ({ state }) => {
     generateConsentPdf({
       kind: r.kind, lang: 'en', childNames: f.kids.join(' & '),
       parentName: r.parent_name || f.parent, parentPhone: r.parent_phone || '', parentEmail: r.parent_email || '',
-      relationship: r.details?.relationship,
+      relationship: r.details?.relationship, audience: r.details?.audience,
       choices: r.choices, signature: r.signature_data, signedAt: r.signed_at,
       version: r.form_version, status: r.status
     });

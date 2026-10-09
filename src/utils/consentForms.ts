@@ -14,6 +14,7 @@
  */
 
 import { jsPDF } from 'jspdf';
+import type { Audience } from './indemnityText';
 
 export type Lang = 'en';
 export type ConsentKind = 'general' | 'media';
@@ -43,7 +44,7 @@ export interface ConsentRecord {
   parent_name?: string | null;
   parent_phone?: string | null;
   parent_email?: string | null;
-  details?: { relationship?: string; school_grade?: string } | null;
+  details?: { relationship?: string; school_grade?: string; audience?: Audience } | null;
   choices?: Record<string, boolean> | null;
   signature_data?: string | null;
   language?: Lang | null;
@@ -174,6 +175,77 @@ export const GENERAL_FORM: Record<Lang, {
   }
 };
 
+// ── ADULT PARTICIPANT PATH (18 and over, signs for themselves). DRAFT for the lawyer. ──
+export function mediaFormFor(a: Audience) {
+  const base = MEDIA_FORM.en;
+  if (a !== 'adult') return base;
+  return {
+    ...base,
+    intro: "JFlips sometimes takes photos and videos during classes, practices and showcases. We would like to use them to promote the sport and show progress. A photo or video of you is personal information, and we may only use it with your consent. Please choose below, for each use, whether you give consent. It is voluntary, and a \"no\" has no effect on your place at JFlips.",
+    uses: {
+      instagramFacebookPhotos: "Photos of me on JFlips's Instagram and Facebook pages",
+      instagramFacebookVideos: "Videos of me on JFlips's Instagram and Facebook pages",
+      firstNameOnly: 'My first name with photos and videos (never my surname)',
+      website: "Photos and videos of me on JFlips's website (jflips.co.za)",
+      printedMaterial: 'Photos and videos of me in printed material and presentations to schools, such as brochures',
+      internalRecordings: 'Recordings of me during classes for coaching and progress, which are not made public'
+    },
+    promises: base.promises.map((p, i) => i === 1
+      ? 'We do not name your surname or address with photos and videos, and we do not tag you on social media.'
+      : p),
+    rights: base.rights.map((r, i) => i === 1
+      ? 'You can ask what information we hold about you, and ask for it to be corrected or deleted.'
+      : i === 3
+        ? 'If you feel your personal information has been mishandled, you can lodge a complaint with the Information Regulator: POPIAComplaints@inforegulator.org.za.'
+        : r),
+    declaration: 'I declare that I am 18 years or older and am competent to give this consent for myself. I have read and understood this form, and my choices are voluntary.'
+  };
+}
+
+export function generalFormFor(a: Audience) {
+  const base = GENERAL_FORM.en;
+  if (a !== 'adult') return base;
+  const swap: Record<string, string[]> = {
+    'What we collect': [
+      'About you: name, date of birth and age, class or team, attendance, and any medical conditions, injuries or allergies you tell us about.',
+      'Contact details: your cell number, email address and your signature.',
+      'Billing: invoices, the amounts owed and whether they have been paid. We do not store card details.'
+    ],
+    'Who can see it': [
+      "JFlips management. Your coaches can see your name, age, medical information and your cell number, so they can keep you safe and reach you in an emergency. Your signature, email address and billing details stay with management.",
+      'We do not sell your information, and we do not share it with anyone else unless the law requires it or a doctor needs it in an emergency.'
+    ],
+    'How long we keep it': [
+      'We will delete all of your information when you choose to leave the club, once you have told us so and all accounts are paid.'
+    ],
+    'Your rights': [
+      'You can ask what information we hold about you, and ask for it to be corrected or deleted.',
+      'You can object to how we use your information, or withdraw this consent, at any time by contacting us. We must keep some records by law, and without safety and contact details we may not be able to keep you enrolled.',
+      'If you feel your information has been mishandled, you can lodge a complaint with the Information Regulator: POPIAComplaints@inforegulator.org.za.'
+    ],
+    'Why we collect it': [
+      'To enrol you and run classes, teams and practices safely.',
+      'To contact you about classes, schedules, emergencies and payments.',
+      'To invoice you and record payments.',
+      'To keep the records the law requires, such as financial records.',
+      'Your medical information is special personal information. We use it only to keep you safe and to give the right information to a doctor or medical help in an emergency.'
+    ],
+    'Is giving us your information voluntary?': [
+      'Yes, but we need your details, an emergency contact and your health information to enrol you and keep you safe. Without them we cannot enrol you. Photo and video consent is a separate choice and is always optional.'
+    ]
+  };
+  return {
+    ...base,
+    sections: base.sections.map(s => (swap[s.heading] ? { ...s, items: swap[s.heading] } : s)),
+    declaration: 'I declare that I am 18 years or older and am competent to give consent for myself. I consent to JFlips processing my personal information, including my medical information, as described in this notice.'
+  };
+}
+
+export const uiFor = (a: Audience): Record<string, string> =>
+  a === 'adult'
+    ? { ...UI.en, childrenLabel: 'Participant', parentHeading: 'Your details', relationship: 'Capacity', familyOf: 'for' }
+    : UI.en;
+
 // ── Page strings (not part of the legal wording) ────────────────────────────
 export const UI: Record<Lang, Record<string, string>> = {
   en: {
@@ -228,6 +300,7 @@ export interface ConsentPdfInput {
   signedAt?: string | null;
   version?: string | null;
   status?: 'pending' | 'signed' | 'withdrawn';
+  audience?: Audience;
 }
 
 export function generateConsentPdf(input: ConsentPdfInput, opts: { save?: boolean } = { save: true }): jsPDF {
@@ -236,9 +309,10 @@ export function generateConsentPdf(input: ConsentPdfInput, opts: { save?: boolea
   const pageW = 210, margin = 20, contentW = pageW - margin * 2, bottom = 278;
   let y = 38;
 
-  const media = MEDIA_FORM[lang];
-  const general = GENERAL_FORM[lang];
-  const ui = UI[lang];
+  const aud: Audience = input.audience === 'adult' ? 'adult' : 'minor';
+  const media = mediaFormFor(aud);
+  const general = generalFormFor(aud);
+  const ui = uiFor(aud);
   const title = kind === 'media' ? media.title : general.title;
   const subtitle = kind === 'media' ? media.subtitle : general.subtitle;
 
