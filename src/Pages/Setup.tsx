@@ -52,6 +52,7 @@ import { ConsentManager } from '../components/ConsentManager';
 import { CoachStudentList } from '../components/CoachStudentList';
 import { parentMustStay } from '../utils/youngAthlete';
 import { sendWhatsAppTrialSignup } from '../utils/whatsapp';
+import { tumblingSignupLink } from '../utils/parentMessages';
 import { getDiscordWebhookUrl, setDiscordWebhookUrl, isDiscordNotificationsEnabled, setDiscordNotificationsEnabled } from '../utils/discordNotifications';
 
 const athleteItemVariants = {
@@ -1605,7 +1606,7 @@ export const RosterView = memo(({
                               childName: student.first_name || student.name,
                               className: student.class_name,
                               classDate: student.first_class_date,
-                              link: `${window.location.origin}/#/signup?ownerId=${state.profile.id || ''}`
+                              link: tumblingSignupLink(state.profile.id)
                             })}
                             title="Send the sign-up link to this child's parent on WhatsApp"
                             className="px-2.5 py-2 rounded-xl bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-900/50 text-[9px] font-black uppercase tracking-wider"

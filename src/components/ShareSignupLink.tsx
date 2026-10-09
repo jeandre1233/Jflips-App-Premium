@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { X, Copy, CheckCircle2 } from 'lucide-react';
+import { tumblingSignupLink } from '../utils/parentMessages';
 
 interface ShareSignupLinkProps {
   onClose: () => void;
@@ -9,7 +10,7 @@ interface ShareSignupLinkProps {
 
 const ShareSignupLink: React.FC<ShareSignupLinkProps> = ({ onClose, ownerId }) => {
   const [copied, setCopied] = useState(false);
-  const signupUrl = `${window.location.origin}/#/signup?ownerId=${ownerId || ''}`;
+  const signupUrl = tumblingSignupLink(ownerId);
 
   const handleCopy = async () => {
     try {

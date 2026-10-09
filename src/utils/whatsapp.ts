@@ -1,4 +1,5 @@
 import { Student } from '../../types';
+import { trialFollowUpMessage } from './parentMessages';
 
 /**
  * Format a phone number to standard international format without spaces, leading zeros, or symbols
@@ -51,22 +52,10 @@ export function sendWhatsAppTrialSignup(opts: {
     alert(`No phone number saved for ${opts.childName}'s parent.`);
     return;
   }
-  const when = opts.classDate
-    ? new Date(opts.classDate).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })
-    : '';
-  const lines = [
-    `Hi ${opts.parentName && opts.parentName !== 'Parent' ? opts.parentName : 'there'}! 🤸`,
-    '',
-    `${opts.childName} came to one of our JFlips classes${opts.className ? ` (${opts.className}${when ? `, ${when}` : ''})` : when ? ` on ${when}` : ''}. We loved having them!`,
-    '',
-    "If you're interested in continuing the classes, here is the link to sign up:",
-    opts.link,
-    '',
-    'Please fill in your details and sign the forms, then we will add your child to their class.',
-    '',
-    'Thank you!'
-  ];
-  window.open(`https://wa.me/${cleanPhoneNumber(opts.phone)}?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');
+  const text = trialFollowUpMessage({
+    parentName: opts.parentName, childName: opts.childName, classDate: opts.classDate, link: opts.link
+  });
+  window.open(`https://wa.me/${cleanPhoneNumber(opts.phone)}?text=${encodeURIComponent(text)}`, '_blank');
 }
 
 /** The message sent to the parents' WhatsApp group. */

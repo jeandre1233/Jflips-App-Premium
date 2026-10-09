@@ -78,7 +78,8 @@ import {
   BookOpen,
   Building,
   Globe,
-  Link
+  Link,
+  MessageCircle
 } from 'lucide-react';
 import { View, Student, Gym, ClassType, AttendanceSession, AppState, HistoryMonth, Profile, Payment, ClassSchedule, InvoiceSnapshot, AppNotification, Competition, getStudentSessionPrice, StaffProfile, OwnerProfile, MerchItem, MerchClient, MerchOrder, MerchOrderStatus, MerchBillToKind, resolveBillToId, StaffPayslip } from './types';
 import { toPng } from 'html-to-image';
@@ -134,6 +135,7 @@ import type { BankAllocation, ClientGroup, GroupDefaults, InvoiceAllocations } f
 import { OfflineBanner } from './src/components/OfflineBanner';
 import { SyncStatusBadge } from './src/components/SyncStatusBadge';
 import { sendWhatsAppAttendanceQuery, sendWhatsAppInvoiceReminder } from './src/utils/whatsapp';
+import { openClassEnquiryReply } from './src/utils/parentMessages';
 import { sendCycleMonthReminderNotification, sendTempAthleteFollowupDiscordNotification, getDiscordWebhookUrl, setDiscordWebhookUrl } from './src/utils/discordNotifications';
 import { notifyUser, describeSessionLog, NOTIFICATION_TITLES } from './src/utils/notifications';
 import { 
@@ -8300,6 +8302,15 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
           <div>
             <h3 className="text-2xl font-black uppercase italic text-[#1a1a1a] dark:text-white">Registration Portal</h3>
             <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-1">Manage public registrations and student signup links</p>
+            {state.profile?.role === 'owner' && (
+              <button
+                onClick={() => openClassEnquiryReply(ownerIdForSharing)}
+                title="Opens WhatsApp so you can choose a contact; the class enquiry reply is already typed"
+                className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 text-white text-[10px] font-black uppercase tracking-wider"
+              >
+                <MessageCircle size={14} /> Reply to a class enquiry
+              </button>
+            )}
           </div>
 
 
