@@ -24,12 +24,12 @@ export function tumblingSignupLink(ownerId: string | undefined | null): string {
 const classLines = () => CLASS_TIMES.map(t => `📅 ${t}`);
 
 const feeLines = () => [
-  `💰 Group classes are ${GROUP_FEE} per session per person.`,
-  `💰 Private lessons are ${PRIVATE_FEE} per session.`
+  `Group classes are ${GROUP_FEE} per session per person.`,
+  `Private lessons are ${PRIVATE_FEE} per session.`
 ];
 
 const afrikaansNote =
-  'Communication in the group is sent in Afrikaans, so please let me know if you are Afrikaans or if you do not understand it, so I can communicate accordingly. 🗣️';
+  'Communication in the group is sent in Afrikaans, so please let me know if you are Afrikaans or if you do not understand it, so I can communicate accordingly.';
 
 /** Sent from a trial athlete's card in Setup, after their free first class. */
 export function trialFollowUpMessage(opts: { parentName?: string; childName: string; classDate?: string; link: string }): string {
@@ -40,20 +40,20 @@ export function trialFollowUpMessage(opts: { parentName?: string; childName: str
   return [
     `Hi ${parent}! 🤸`,
     '',
-    `Thank you for bringing ${opts.childName} to JFlips${when ? ` on ${when}` : ''}. We loved having them in class, and their first class was on us! 🎉`,
+    `Thank you for bringing ${opts.childName} to JFlips${when ? ` on ${when}` : ''}. We loved having them in class, and their first class was on us!`,
     '',
     `If you would like ${opts.childName} to continue, these are our classes:`,
     ...classLines(),
     '',
     ...feeLines(),
     '',
-    `You can sign ${opts.childName} up using this link: 👇`,
+    `You can sign ${opts.childName} up using this link:`,
     opts.link,
     '',
-    'I will add you to the communications group. 💬',
+    'I will add you to the communications group.',
     afrikaansNote,
     '',
-    'Have a nice day! 🌟'
+    'Have a nice day!'
   ].join('\n');
 }
 
@@ -63,20 +63,20 @@ export function classEnquiryMessage(opts: { link: string }): string {
     'Hi 👋',
     '',
     'Thank you for your interest in JFlips! 🤸‍♀️',
-    'Your child is welcome to come and try a class. The first class is free! 🎉',
+    'Your child is welcome to come and try a class. The first class is free!',
     '',
     'Our classes:',
     ...classLines(),
     '',
     ...feeLines(),
     '',
-    'You can sign up using this link: 👇',
+    'You can sign up using this link:',
     opts.link,
     '',
-    'I will add you to the group. 💬',
+    'I will add you to the group.',
     afrikaansNote,
     '',
-    'Have a nice day! 🌟'
+    'Have a nice day!'
   ].join('\n');
 }
 
