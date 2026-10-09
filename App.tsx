@@ -108,6 +108,7 @@ import { addToQueue, getPendingItems, updateItemStatus, deleteSyncedItems } from
 import { AccountsView } from './src/Pages/AccountsView';
 import { IncidentLog } from './src/components/IncidentLog';
 import { parentMustStay } from './src/utils/youngAthlete';
+import { accessStateFor, loggingAccess } from './src/utils/access';
 import { priceSessions, priceMerch, openMerchOrders, merchOrdersForMonth, sumLines, billingMonthFor } from './src/utils/pricing';
 import type { PricingContext, PricedCoachLine } from './src/utils/pricing';
 import {
@@ -585,7 +586,7 @@ const DesktopSidebar: React.FC<{
 
         {/* Bottom actions */}
         <div className="px-2 pb-5 flex flex-col gap-1 mt-auto">
-          <button
+          {isOwner && (          <button
             onClick={onArchive}
             title={collapsed ? 'Archive Month' : undefined}
             className="flex items-center gap-3 rounded-xl px-3 py-2.5 w-full text-blue-300 hover:bg-white/10 hover:text-white transition-all"
@@ -593,6 +594,8 @@ const DesktopSidebar: React.FC<{
             <RotateCcw size={20} className="shrink-0" />
             {!collapsed && <span className="text-[11px] font-black uppercase tracking-widest">Archive</span>}
           </button>
+
+          )}
           <button
             onClick={onSettings}
             title={collapsed ? 'Settings' : undefined}
@@ -805,6 +808,14 @@ const App: React.FC = () => {
   const [rosterTab, setRosterTab] = useState<'students' | 'classes' | 'schedule' | 'staff' | 'merch' | 'profile'>('students');
   const [rosterEntityType, setRosterEntityType] = useState<'athletes' | 'gyms' | 'teams'>('athletes');
   const isOwner = state.profile.role === 'owner';
+
+  // WHAT THIS ACCOUNT MAY SEE of external gyms, schools and cheer teams. The owner
+  // sees everything. A coach sees an external gym or school only if the owner ticked
+  // "School Gym" on their profile, and a cheer team only if it is assigned to them.
+  // The same filtered view feeds the logging screens, Management, Setup and the
+  // schedule, so an organisation a coach has no access to also has no way to be
+  // logged against.
+  const accessState = useMemo<AppState>(() => accessStateFor(state), [state]);
 
   // Save this device's push token against the logged-in user, so the
   // send-push-notification Edge Function knows where to deliver alerts.
@@ -4352,7 +4363,7 @@ const App: React.FC = () => {
     <div className="w-full">
       {activeView === View.DASHBOARD && (
         <DashboardView
-          state={state}
+          state={{ ...state, schedules: accessState.schedules }}
           onEditSession={startEditSession}
           onRemoveSession={removeSession}
           onQuickLog={handleQuickLog}
@@ -4360,23 +4371,23 @@ const App: React.FC = () => {
           onShowAllLogs={setShowAllLogs}
         />
       )}
-      {activeView === View.LOG_SESSION && <LogSessionView state={state} onNavigate={handleViewChange} />}
+      {activeView === View.LOG_SESSION && <LogSessionView state={accessState} onNavigate={handleViewChange} />}
       {activeView === View.REGISTER && (
         <RegisterView 
-          state={state} 
+          state={accessState} 
           onSave={handleLogSession} 
           onCancel={() => handleViewChange(View.LOG_SESSION)} 
           initialSession={editingSession}
           onSaveStudent={handleSaveStudent}
         />
       )}
-      {activeView === View.TEAM_ATTENDANCE && <TeamAttendanceView state={state} onSave={handleLogSession} initialTeamIds={initialTeamIds} initialDate={initialDate} initialCoachId={initialCoachId} initialSession={editingSession} gymType="cheer" />}
-      {activeView === View.GYM_ATTENDANCE && <TeamAttendanceView state={state} onSave={handleLogSession} initialTeamIds={initialTeamIds} initialDate={initialDate} initialCoachId={initialCoachId} initialSession={editingSession} gymType="tumbling" />}
+      {activeView === View.TEAM_ATTENDANCE && <TeamAttendanceView state={accessState} onSave={handleLogSession} initialTeamIds={initialTeamIds} initialDate={initialDate} initialCoachId={initialCoachId} initialSession={editingSession} gymType="cheer" />}
+      {activeView === View.GYM_ATTENDANCE && <TeamAttendanceView state={accessState} onSave={handleLogSession} initialTeamIds={initialTeamIds} initialDate={initialDate} initialCoachId={initialCoachId} initialSession={editingSession} gymType="tumbling" />}
       {/* onSaveAllocations is owner-only — a coach has no business account of
           their own to point client invoices at, so they never see that tab. */}
       {activeView === View.TEAM_MANAGEMENT && (
         <TeamManagementView
-          state={state} 
+          state={accessState} 
           onRemoveStudent={removeStudent} 
           onUpdateSubTeams={handleUpdateStudentSubTeams}
           onUpdateCompetition={handleUpdateCompetition} 
@@ -4415,7 +4426,7 @@ const App: React.FC = () => {
       )}
       {activeView === View.ROSTER && (
         <RosterView
-          state={state}
+          state={accessState}
           activeTab={rosterTab}
           onTabChange={setRosterTab}
           entityType={rosterEntityType}
@@ -4582,6 +4593,7 @@ const App: React.FC = () => {
               initialData={editingStudent || undefined} 
               initialExtra={editingExtra}
               defaultGroupRate={state.profile.default_group_rate}
+              isOwner={isOwner}
               onSubmit={handleSaveStudent} 
               onDelete={removeStudent} 
               onCancel={() => setShowModal(null)} 
@@ -4891,7 +4903,7 @@ const App: React.FC = () => {
                 )}
               </motion.button>
             )}
-            <motion.button whileTap={{ scale: 0.9 }} onClick={() => { setArchiveMonth(MONTHS[new Date().getMonth()]); setArchiveYear(new Date().getFullYear()); setIsResetConfirming(true); }} className="w-10 h-10 flex items-center justify-center bg-white dark:bg-slate-800 text-[#94a3b8] rounded-full hover:bg-slate-50 dark:hover:bg-slate-700 transition-all shadow-sm border border-slate-100 dark:border-slate-700"><RotateCcw size={18} /></motion.button>
+            {isOwner && <motion.button whileTap={{ scale: 0.9 }} onClick={() => { setArchiveMonth(MONTHS[new Date().getMonth()]); setArchiveYear(new Date().getFullYear()); setIsResetConfirming(true); }} className="w-10 h-10 flex items-center justify-center bg-white dark:bg-slate-800 text-[#94a3b8] rounded-full hover:bg-slate-50 dark:hover:bg-slate-700 transition-all shadow-sm border border-slate-100 dark:border-slate-700"><RotateCcw size={18} /></motion.button>}
           </div>
         </div>
         <div className="flex items-center gap-1.5 mt-3 justify-between">
@@ -9133,6 +9145,9 @@ const CompetitionForm = ({ initialData, teams, onSubmit }: { initialData?: Compe
 };
 
 const LogSessionView = memo(({ state, onNavigate }: { state: AppState, onNavigate: (view: View) => void }) => {
+  // `state` is already the filtered view for coaches, so these only count what this
+  // account is allowed to log.
+  const { tumbling: canTumblingLog, cheer: canCheerLog, external: canExternalLog } = loggingAccess(state);
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-6">
       <div className="flex items-center gap-3 mb-6">
@@ -9145,8 +9160,12 @@ const LogSessionView = memo(({ state, onNavigate }: { state: AppState, onNavigat
         </div>
       </div>
 
+      {!canTumblingLog && !canCheerLog && !canExternalLog && (
+        <p className="text-sm font-bold text-slate-500">You have not been given access to log any sessions yet. Please ask the owner.</p>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <button 
+        {canTumblingLog && (        <button 
           onClick={() => onNavigate(View.REGISTER)}
           className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center gap-4 hover:scale-[1.02] transition-transform"
         >
@@ -9159,7 +9178,9 @@ const LogSessionView = memo(({ state, onNavigate }: { state: AppState, onNavigat
           </div>
         </button>
 
-        <button 
+        )}
+
+        {canCheerLog && (        <button 
           onClick={() => onNavigate(View.TEAM_ATTENDANCE)}
           className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center gap-4 hover:scale-[1.02] transition-transform"
         >
@@ -9172,7 +9193,9 @@ const LogSessionView = memo(({ state, onNavigate }: { state: AppState, onNavigat
           </div>
         </button>
 
-        <button 
+        )}
+
+        {canExternalLog && (        <button 
           onClick={() => onNavigate(View.GYM_ATTENDANCE)}
           className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center gap-4 hover:scale-[1.02] transition-transform"
         >
@@ -9184,6 +9207,8 @@ const LogSessionView = memo(({ state, onNavigate }: { state: AppState, onNavigat
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Log coaching hours at external partner gyms & school organizations</p>
           </div>
         </button>
+
+        )}
       </div>
     </div>
   );
@@ -10543,15 +10568,6 @@ const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetIn
                 <RefreshCw size={12} /> Reset
               </motion.button>
             )}
-            {!monthLabel && (
-              <motion.button
-                whileTap={{ scale: 0.95 }}
-                onClick={onShowRecovery}
-                className="bg-blue-50 dark:bg-blue-900/20 text-[#1e4da1] dark:text-blue-400 border border-blue-100 dark:border-blue-800 px-3 py-2 rounded-xl font-black text-[9px] uppercase shadow-md flex items-center gap-2"
-              >
-                <History size={12} /> Recover
-              </motion.button>
-            )}
             <motion.button whileTap={{ scale: 0.95 }} onClick={handleDownloadPdf} disabled={isGenerating} title="Download PDF" className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-3 py-2 rounded-xl font-black text-[9px] uppercase shadow-lg flex items-center gap-2 disabled:opacity-70 transition-all">{isGenerating ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}</motion.button>
             <motion.button whileTap={{ scale: 0.95 }} onClick={handleDownloadImage} disabled={isGenerating} title="Download PNG" className="bg-[#1e4da1] text-white px-3 py-2 rounded-xl font-black text-[9px] uppercase shadow-lg flex items-center gap-2 disabled:opacity-70 transition-all">{isGenerating ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}</motion.button>
           </div>
@@ -11238,7 +11254,7 @@ const BulkImportModal: React.FC<{ onImport: (names: string[]) => void, onCancel:
   );
 };
 
-const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubmit, onDelete, onCancel, initialExtra, defaultGroupRate }) => {
+const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubmit, onDelete, onCancel, initialExtra, defaultGroupRate, isOwner = false }) => {
   const [name, setName] = useState(initialData?.name || '');
 
   // Registration fields
@@ -11424,7 +11440,7 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
               </div>
             )}
 
-            {!isTeamOnly && (
+            {isOwner && !isTeamOnly && (
               <div className="grid grid-cols-1 gap-3">
                 <div className="space-y-2">
                   <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Link Sibling</label>
@@ -11499,8 +11515,8 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
               </div>
             )}
 
-            {/* Custom Athlete Pricing (Gauges) */}
-            {!isTeamOnly && (
+            {/* Custom Athlete Pricing (Gauges): owner only */}
+            {isOwner && !isTeamOnly && (
               <div className="p-4 bg-emerald-50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-100 dark:border-emerald-900/30 space-y-4">
                 <div>
                   <p className="text-[9px] font-black text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">Custom Athlete Session Rates (Rand)</p>
@@ -12428,13 +12444,6 @@ const AppSettingsModal: React.FC<any> = ({ state, toggleTheme, onLogout, onLinkG
         <button onClick={toggleTheme} className={`w-12 h-6 rounded-full p-1 transition-colors duration-300 ${state.theme === 'dark' ? 'bg-[#1e4da1]' : 'bg-slate-300'}`}><div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-300 ${state.theme === 'dark' ? 'translate-x-6' : 'translate-x-0'}`}></div></button>
       </div>
 
-      <button type="button" onClick={() => { onShowRecovery(); onClose(); }} className="w-full flex items-center justify-between p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl transition-colors">
-        <div className="flex items-center gap-3">
-          <History size={18} className="text-[#1e4da1] dark:text-blue-400" />
-          <span className="font-black uppercase text-[10px] text-[#1e4da1] dark:text-blue-400">Recover Invoice Data</span>
-        </div>
-        <ArrowRight size={14} className="text-[#1e4da1] dark:text-blue-400 opacity-50" />
-      </button>
 
       <div className="h-px bg-slate-100 dark:bg-slate-800 my-2"></div>
       <button type="button" onClick={onLogout} className="w-full flex items-center justify-between p-4 bg-slate-100 dark:bg-slate-800/80 rounded-xl transition-colors"><div className="flex items-center gap-3"><LogOut size={18} className="text-slate-600 dark:text-slate-400" /><span className="font-black uppercase text-[10px] text-slate-600 dark:text-slate-400">Log Out</span></div><ArrowRight size={14} className="text-slate-400 opacity-50" /></button>

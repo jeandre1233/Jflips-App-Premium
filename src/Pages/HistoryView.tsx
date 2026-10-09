@@ -1224,15 +1224,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             </button>
           )}
 
-          {onShowRecovery && (
-            <button
-              onClick={onShowRecovery}
-              className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-black uppercase tracking-wider transition-all"
-            >
-              <Layers size={14} />
-              Recovery & Snapshots
-            </button>
-          )}
         </div>
       </div>
 

@@ -49,6 +49,7 @@ import {
   syncFinancesToGoogleSheet 
 } from '../utils/googleWorkspace';
 import { ConsentManager } from '../components/ConsentManager';
+import { CoachStudentList } from '../components/CoachStudentList';
 import { parentMustStay } from '../utils/youngAthlete';
 import { getDiscordWebhookUrl, setDiscordWebhookUrl, isDiscordNotificationsEnabled, setDiscordNotificationsEnabled } from '../utils/discordNotifications';
 
@@ -1011,7 +1012,7 @@ export const RosterView = memo(({
       <div className="flex bg-slate-100/50 dark:bg-slate-800/40 p-1 rounded-xl relative overflow-x-auto no-scrollbar">
         {tabs.map((tab, idx) => (
           <button key={`${tab}-${idx}`} onClick={() => onTabChange(tab)} className={`flex-1 min-w-[55px] py-3 rounded-lg font-black text-[8px] uppercase tracking-widest transition-colors duration-300 relative z-10 ${activeTab === tab ? 'text-white' : 'text-[#94a3b8]'}`}>
-            {tab === 'students' ? 'Clients' : tab === 'schedule' ? 'Sched' : tab === 'merch' ? 'Merch' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === 'students' ? (isOwner ? 'Clients' : 'Students') : tab === 'schedule' ? 'Sched' : tab === 'merch' ? 'Merch' : tab.charAt(0).toUpperCase() + tab.slice(1)}
             {activeTab === tab && <motion.div layoutId="rosterTabBg" className="absolute inset-0 bg-[#1e4da1] dark:bg-blue-600 rounded-lg shadow-md -z-10" transition={{ type: "spring", bounce: 0.2, duration: 0.5 }} />}
           </button>
         ))}
@@ -1269,12 +1270,14 @@ export const RosterView = memo(({
               })}
             </motion.div>
           </div>
+        ) : (!isOwner && activeTab === 'students') ? (
+          <CoachStudentList state={state} />
         ) : activeTab === 'classes' ? (
           <div className="space-y-4">
             <div className="flex justify-between items-center mb-1">
               <div>
                 <h2 className="text-2xl font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">Class Types</h2>
-                <p className="text-[8px] font-black text-[#94a3b8] uppercase">Tumbling Hourly Fees</p>
+                <p className="text-[8px] font-black text-[#94a3b8] uppercase">{isOwner ? 'Tumbling Hourly Fees' : 'Class names'}</p>
               </div>
               {isOwner && (
                 <motion.button whileTap={{ scale: 0.8 }} onClick={onAddClass} className="w-10 h-10 bg-[#1e4da1] text-white rounded-xl flex items-center justify-center shadow-lg">
@@ -1297,7 +1300,7 @@ export const RosterView = memo(({
                     </div>
                     <div className="">
                       <p className="text-sm font-black text-[#1a1a1a] dark:text-slate-100 uppercase italic">{item.name}</p>
-                      <p className="text-[8px] text-[#94a3b8] font-bold uppercase">R{item.price}</p>
+                      {isOwner && <p className="text-[8px] text-[#94a3b8] font-bold uppercase">R{item.price}</p>}
                     </div>
                   </div>
                   {isOwner && (

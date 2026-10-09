@@ -907,15 +907,6 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
                 <RefreshCw size={12} /> Reset
               </motion.button>
             )}
-            {!monthLabel && (
-              <motion.button
-                whileTap={{ scale: 0.95 }}
-                onClick={onShowRecovery}
-                className="bg-blue-50 dark:bg-blue-900/20 text-[#1e4da1] dark:text-blue-400 border border-blue-100 dark:border-blue-800 px-3 py-2 rounded-xl font-black text-[9px] uppercase shadow-md flex items-center gap-1.5"
-              >
-                <History size={12} /> Recover
-              </motion.button>
-            )}
             <motion.button
               whileTap={{ scale: 0.95 }}
               onClick={handleDownloadInvoicePdf}
