@@ -2741,14 +2741,27 @@ const App: React.FC = () => {
     if (editedGroupId) {
       try {
         const keep = new Set(sessionsToUpsert.map(s => s.id));
-        const { data: siblings } = await supabase
-          .from('sessions')
-          .select('id')
-          .eq('session_group_id', editedGroupId)
-          .eq('user_id', targetUserId);
-        const stale = (siblings || []).map((r: any) => r.id).filter((id: string) => !keep.has(id));
+        // Coaches cannot delete sessions directly. This function removes ONLY the other
+        // rows of the session being edited, and only for the owner or a coach who is
+        // on that session, so removing a coach from a session still works.
+        const { data: removed, error: rmErr } = await supabase.rpc('remove_replaced_session_rows', {
+          p_group_id: editedGroupId,
+          p_keep_ids: Array.from(keep)
+        });
+        let stale: string[] = Array.isArray(removed) ? removed.map(String) : [];
+        if (rmErr) {
+          // The function is not installed yet: the owner can still clean up directly.
+          const { data: siblings } = await supabase
+            .from('sessions')
+            .select('id')
+            .eq('session_group_id', editedGroupId)
+            .eq('user_id', targetUserId);
+          stale = (siblings || []).map((r: any) => r.id).filter((id: string) => !keep.has(id));
+          if (stale.length > 0) {
+            await supabase.from('sessions').delete().in('id', stale).eq('user_id', targetUserId);
+          }
+        }
         if (stale.length > 0) {
-          await supabase.from('sessions').delete().in('id', stale).eq('user_id', targetUserId);
           // A swept-away row may already sit in an archived month, so history has
           // to lose it too or the month keeps billing a session that no longer exists.
           await syncHistoryForDeletedSessions(stale);

@@ -4,6 +4,7 @@ import { AppState, Payment } from '../../types';
 import { MONTH_NAMES, PricedClientLine, merchOrdersForMonth, priceSessions } from '../utils/pricing';
 import { parseMonthKey } from '../utils/historyEngine';
 import { sendWhatsAppGroupReminder, sendWhatsAppPaymentNudge } from '../utils/whatsapp';
+import { ArchivedInvoiceModal } from './ArchivedInvoiceModal';
 
 interface InvoiceTrackerProps {
   state: AppState;
@@ -146,8 +147,6 @@ export const InvoiceTracker: React.FC<InvoiceTrackerProps> = ({ state, onSetInvo
     return a !== undefined && Math.abs(a - Number(r.amount_due || 0)) >= 1;
   });
 
-  const viewLines = viewing ? linesFor(viewing) : [];
-  const viewLinesTotal = cents(viewLines.reduce((a, l) => a + l.amount, 0));
 
   return (
     <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm overflow-hidden">
@@ -409,66 +408,17 @@ export const InvoiceTracker: React.FC<InvoiceTrackerProps> = ({ state, onSetInvo
         )}
       </div>
 
-      {/* Archived invoice viewer */}
+      {/* The archived invoice, as the client received it, with ways to send it again */}
       {viewing && (
-        <div className="fixed inset-0 z-[220] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setViewing(null)}>
-          <div
-            className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl shadow-2xl max-h-[85vh] flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between p-5 border-b border-slate-100 dark:border-slate-800">
-              <div>
-                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Archived invoice · {viewing.invoice_id}</p>
-                <h3 className="text-base font-black uppercase text-slate-800 dark:text-white">{nameFor(viewing)}</h3>
-                {viewing.bill_to_address && (
-                  <p className="text-[10px] text-slate-400 mt-0.5">{viewing.bill_to_address}</p>
-                )}
-              </div>
-              <button onClick={() => setViewing(null)} className="p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-5 overflow-y-auto flex-1 space-y-2">
-              {viewLines.length === 0 ? (
-                <p className="py-6 text-center text-xs text-slate-400 font-medium">
-                  The line items for this invoice aren't in the archive (the month was archived before sessions were kept), but the amount recorded is {rand(Number(viewing.amount_due))}.
-                </p>
-              ) : viewLines.map((l, i) => (
-                <div key={`${l.sessionId}-${i}`} className="flex items-start justify-between gap-3 text-xs border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <div className="min-w-0">
-                    <p className="font-bold text-slate-800 dark:text-slate-100">{l.description}</p>
-                    <p className="text-[10px] text-slate-400">{l.date}{l.targetName ? ` · ${l.targetName}` : ''}</p>
-                  </div>
-                  <span className="font-black tabular-nums text-slate-800 dark:text-slate-100 shrink-0">{rand(l.amount)}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="p-5 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
-              <div className="flex justify-between text-sm">
-                <span className="font-black uppercase tracking-wider text-slate-500 text-[10px]">Amount on record</span>
-                <span className="font-[1000] tabular-nums text-slate-900 dark:text-white">{rand(Number(viewing.amount_due))}</span>
-              </div>
-              {viewLines.length > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="font-black uppercase tracking-wider text-slate-500 text-[10px]">Line items add up to</span>
-                  <span className={`font-[1000] tabular-nums ${Math.abs(viewLinesTotal - Number(viewing.amount_due)) >= 1 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                    {rand(viewLinesTotal)}
-                  </span>
-                </div>
-              )}
-              {viewLines.length > 0 && Math.abs(viewLinesTotal - Number(viewing.amount_due)) >= 1 && onFixInvoiceAmount && (
-                <button
-                  onClick={() => { onFixInvoiceAmount(viewing.id, viewLinesTotal); setViewing(null); }}
-                  className="w-full mt-1 px-3 py-2 rounded-lg bg-amber-500 text-white text-[10px] font-black uppercase tracking-wider"
-                >
-                  Set amount to {rand(viewLinesTotal)}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
+        <ArchivedInvoiceModal
+          state={state}
+          payment={viewing}
+          name={nameFor(viewing)}
+          phone={phoneFor(viewing)}
+          lines={linesFor(viewing)}
+          onClose={() => setViewing(null)}
+          onFixAmount={onFixInvoiceAmount ? (id, amt) => { onFixInvoiceAmount(id, amt); setViewing(null); } : undefined}
+        />
       )}
     </div>
   );

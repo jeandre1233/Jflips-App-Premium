@@ -136,6 +136,22 @@ export function billingMonthFor(
   return { monthName, year, key: `${monthName} ${year}` };
 }
 
+/**
+ * THE FREE TRIAL CLASS. A trial (temporary) athlete's FIRST class is free: the
+ * session on the date they were first logged. Any later class is charged at the
+ * normal rate, because by then the parent is expected to have signed up.
+ * Once the parent registers, the trial record is deleted and the registered child
+ * is billed normally from their next class.
+ */
+export function isFreeTrialSession(
+  s: { id?: string; is_temporary?: boolean; first_class_date?: string | null },
+  sessionDate: string
+): boolean {
+  const isTrial = !!s.is_temporary || String(s.id || '').startsWith('stu_temp_');
+  if (!isTrial || !s.first_class_date || !sessionDate) return false;
+  return String(s.first_class_date).slice(0, 10) === String(sessionDate).slice(0, 10);
+}
+
 export interface PricingContext {
   gyms: Gym[];
   classTypes: ClassType[];
@@ -543,7 +559,10 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
       .includes('private');
 
     for (const [famId, members] of attendeesByFamily) {
-      const gross = members.reduce(
+      // A trial athlete's first class costs nothing; everyone else pays as usual.
+      const freeMembers = members.filter(st => isFreeTrialSession(st, head.date));
+      const paidMembers = members.filter(st => !isFreeTrialSession(st, head.date));
+      const gross = paidMembers.reduce(
         (acc, st) => acc + getStudentSessionPrice(st, head, basePrice, className),
         0
       );
@@ -551,7 +570,7 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
       // ONE flat deduction per shared session, however many siblings attended —
       // three children in one class is still a single discount. Capped at the
       // line total so an oversized discount can never invoice a negative amount.
-      const discount = (!isPrivateSession && members.length > 1)
+      const discount = (!isPrivateSession && paidMembers.length > 1)
         ? Math.min(Math.max(num(ctx.siblingDiscount, 0), 0), gross)
         : 0;
 
@@ -564,7 +583,8 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
         // The discount itself is deliberately never itemised.
         targetName: members.map(m => m.name).join(' & '),
         // The parent's invoice shows the class and the hours trained.
-        description: describe(className, head, { hours: classHours }),
+        description: describe(className, head, { hours: classHours }) +
+          (freeMembers.length > 0 ? (paidMembers.length === 0 ? ' - FREE TRIAL CLASS' : ` - free trial: ${freeMembers.map(m => m.name).join(' & ')}`) : ''),
         amount: money(gross - discount),
         kind: 'class',
         ...monthStamp
