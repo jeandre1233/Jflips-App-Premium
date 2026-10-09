@@ -1275,7 +1275,14 @@ const App: React.FC = () => {
       const [studentsRes, gymsRes, classesRes, sessionsRes, historyRes, paymentsRes, schedulesRes, snapshotsRes, notificationsRes, competitionsRes, cheerRegistrationsRes, merchItemsRes, merchClientsRes, merchOrdersRes, payslipsRes] = await Promise.all([
         fetchStudents(),
         supabase.from('gyms').select('*').eq('user_id', targetUserId),
-        supabase.from('class_types').select('*').eq('user_id', targetUserId),
+        // Coaches get the class list WITHOUT the price (the fee parents pay is not theirs
+        // to see). Falls back to the direct read only if the function is not there yet.
+        isOwner
+          ? supabase.from('class_types').select('*').eq('user_id', targetUserId)
+          : supabase.rpc('coach_classes').then(async (r: any) =>
+              (!r.error && Array.isArray(r.data))
+                ? { data: r.data, error: null }
+                : await supabase.from('class_types').select('*').eq('user_id', targetUserId)),
         supabase.from('sessions').select('*').eq('user_id', targetUserId),
         supabase.from('history').select('*').eq('user_id', targetUserId),
         supabase.from('payments').select('*').eq('user_id', targetUserId),
@@ -1862,7 +1869,19 @@ const App: React.FC = () => {
       delete (payload as any).sub_team_ids;
     }
 
-    let { error } = await supabase.from(table).upsert(payload);
+    // A coach may only ADD an athlete (a trial or temporary one), never change an
+    // existing child, so for a coach this is a plain insert. The owner keeps the
+    // insert-or-update behaviour. (An insert-or-update also needs read access to the
+    // table, which coaches no longer have.)
+    const writeStudent = (row: any) => (!isOwnerRole && !editingStudent)
+      ? supabase.from(table).insert(row)
+      : supabase.from(table).upsert(row);
+    if (!isOwnerRole && editingStudent) {
+      alert("Only the owner can change a student's details.");
+      return;
+    }
+
+    let { error } = await writeStudent(payload);
     
     // If it fails on team_athletes (possibly due to sub_team_ids array/text type mismatch), retry with JSON string
     if (error && isGymMember && payload.sub_team_ids && Array.isArray(payload.sub_team_ids)) {
@@ -1870,7 +1889,7 @@ const App: React.FC = () => {
         ...payload,
         sub_team_ids: JSON.stringify(payload.sub_team_ids)
       };
-      const { error: retryError } = await supabase.from(table).upsert(fallbackPayload);
+      const { error: retryError } = await writeStudent(fallbackPayload);
       error = retryError;
     }
 
@@ -1881,7 +1900,7 @@ const App: React.FC = () => {
       delete safePayload.trial_notes;
       delete safePayload.created_by_coach_id;
       delete safePayload.first_class_date;
-      const { error: fallbackError } = await supabase.from(table).upsert(safePayload);
+      const { error: fallbackError } = await writeStudent(safePayload);
       error = fallbackError;
     }
 

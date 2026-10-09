@@ -71,6 +71,20 @@ LANGUAGE sql SECURITY DEFINER STABLE SET search_path = public AS $$
       WHERE me.id = auth.uid() AND me.status = 'approved' LIMIT 1);
 $$;
 
+-- 5. Coaches: the class list WITHOUT the price (the fee parents pay is not theirs to see).
+CREATE OR REPLACE FUNCTION coach_classes()
+RETURNS SETOF JSONB
+LANGUAGE sql SECURITY DEFINER STABLE SET search_path = public AS $
+  SELECT to_jsonb(ct) - 'price'
+  FROM class_types ct
+  JOIN staff_profiles sp
+    ON sp.id = auth.uid()
+   AND sp.status = 'approved'
+   AND sp.owner_id::text = ct.user_id::text;
+$;
+REVOKE ALL ON FUNCTION coach_classes() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION coach_classes() TO authenticated;
+
 REVOKE ALL ON FUNCTION get_signup_classes(TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION signup_enrol_student(TEXT, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION coach_roster() FROM PUBLIC;
