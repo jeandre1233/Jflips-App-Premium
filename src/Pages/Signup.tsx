@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from '../../supabase';
 import { ClassType } from '../../types';
-import { sendNewSignupNotification } from '../utils/discordNotifications';
 import { notifyUser } from '../utils/notifications';
 import jsPDF from 'jspdf';
 import { SignaturePad } from '../components/SignaturePad';
@@ -261,10 +260,12 @@ export default function Signup() {
         return;
       }
 
-      const { data, error } = await supabase.from('class_types').select('*').eq('user_id', gymOwnerId).order('name', { ascending: true });
-      if (!error && data) {
-        const allowedClasses = data.filter((ct: any) => ct.allow_signup !== false);
-        setClasses(allowedClasses.map((ct: any) => ({ ...ct, studentIds: ct.enrolled_student_ids || [] })));
+      // get_signup_classes returns only id, name and price. The old direct read of
+      // class_types also returned enrolled_student_ids, which put every enrolled
+      // child's id in public view.
+      const { data, error } = await supabase.rpc('get_signup_classes', { p_owner_id: gymOwnerId });
+      if (!error && Array.isArray(data)) {
+        setClasses(data.map((ct: any) => ({ id: ct.id, name: ct.name, price: Number(ct.price || 0), studentIds: [] })));
       }
 
       // The gym's default rate for a new athlete, so a child who registers here
@@ -410,10 +411,12 @@ export default function Signup() {
       if (studentError) throw new Error(studentError.message);
 
       if (selectedClass) {
-        const currentIds: string[] = selectedClass.studentIds || [];
-        if (!currentIds.includes(studentId)) {
-          await supabase.from('class_types').update({ enrolled_student_ids: [...currentIds, studentId] }).eq('id', form.classId);
-        }
+        // Done by a function on the server that appends this one child. The page no
+        // longer knows the class's other children, so it must never rewrite the list.
+        const { error: enrolErr } = await supabase.rpc('signup_enrol_student', {
+          p_owner_id: ownerUserId, p_class_id: form.classId, p_student_id: studentId
+        });
+        if (enrolErr) console.error('Could not add the child to the chosen class:', enrolErr.message);
       }
 
       await supabase.from('signup_submissions').insert({
@@ -468,21 +471,10 @@ export default function Signup() {
         }
       });
 
-      // Try sending Discord notification asynchronously without blocking UX
-      try {
-        await sendNewSignupNotification({
-          studentName,
-          dob: form.dob,
-          age: form.age,
-          className: selectedClass?.name || 'General Registration',
-          parentName: form.parent1Name,
-          phone: form.parent1Phone,
-          email: form.parent1Email,
-          medicalNotes: form.medicalNotes
-        });
-      } catch (discordErr) {
-        console.error('Discord notification failed:', discordErr);
-      }
+      // Registration details (including medical notes) are NOT sent to Discord,
+      // Google Sheets or any other service. They stay in the database. The owner
+      // is told through the in-app notification above, which carries no medical
+      // information.
 
       setSubmittedForm(form);
       setSubmittedClassName('General Registration');

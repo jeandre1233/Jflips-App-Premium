@@ -1105,11 +1105,17 @@ const App: React.FC = () => {
 
           // Load the coach's colleagues so they can pick who coached WITH them,
           // exactly as the owner can. Include the current coach with their details.
-          const { data: siblingStaff } = await supabase
-            .from('staff_profiles')
-            .select('id, name, username, status, bank_name, account_number, branch_code, account_type')
-            .eq('owner_id', staffP.owner_id)
-            .eq('status', 'approved');
+          // Names only. This used to ask for every colleague's bank details too, which
+          // then sat in the coach's browser even though nothing on screen used them.
+          let { data: siblingStaff, error: dirErr } = await supabase.rpc('coach_directory');
+          if (dirErr || !Array.isArray(siblingStaff)) {
+            const direct = await supabase
+              .from('staff_profiles')
+              .select('id, name, username, status')
+              .eq('owner_id', staffP.owner_id)
+              .eq('status', 'approved');
+            siblingStaff = direct.data;
+          }
 
           const meStaff: StaffProfile = {
             id: user.id,
@@ -1222,9 +1228,20 @@ const App: React.FC = () => {
         let teamAthletes: any[] = [];
 
         // Tumbling students gating
-        if (isOwner || canViewTumbling) {
+        if (isOwner) {
           const tumb = await supabase.from('tumbling_students').select('*').eq('user_id', targetUserId);
           tumblingStudents = (tumb.data || []).map(s => ({ ...s, is_gym_member: false }));
+        } else if (canViewTumbling) {
+          // Coaches get the roster through a function that leaves out the parent's
+          // signature image, email address and the child's date of birth. Falls
+          // back to the direct read only if the function has not been created yet.
+          const roster = await supabase.rpc('coach_roster');
+          if (!roster.error && Array.isArray(roster.data)) {
+            tumblingStudents = roster.data.map((s: any) => ({ ...s, is_gym_member: false }));
+          } else {
+            const tumb = await supabase.from('tumbling_students').select('*').eq('user_id', targetUserId);
+            tumblingStudents = (tumb.data || []).map(s => ({ ...s, is_gym_member: false }));
+          }
         }
 
         // Team athletes gating

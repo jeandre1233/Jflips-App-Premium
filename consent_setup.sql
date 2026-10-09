@@ -161,9 +161,12 @@ BEGIN
     RAISE EXCEPTION 'unknown child';
   END IF;
 
+  -- A family that already has records is left untouched. The existing link code is
+  -- NEVER returned: anyone who learned a child's id could otherwise open that
+  -- family's consent page.
   SELECT token INTO existing FROM consent_records
    WHERE user_id = p_owner_id AND family_key = p_family_key LIMIT 1;
-  IF existing IS NOT NULL THEN RETURN existing; END IF;
+  IF existing IS NOT NULL THEN RETURN NULL; END IF;
 
   IF length(coalesce(trim(p_parent_name), '')) < 2 THEN RAISE EXCEPTION 'name required'; END IF;
   IF length(coalesce(p_general_signature, '')) < 100 OR length(p_general_signature) > 400000
@@ -190,7 +193,7 @@ BEGIN
    (p_owner_id, p_family_key, p_token, 'media', 'signed', left(p_family_label, 160), p_child_first_names,
     left(trim(p_parent_name), 120), left(coalesce(p_parent_phone, ''), 40), left(coalesce(p_parent_email, ''), 160),
     det, clean_media, p_media_signature, 'en', left(p_media_version, 20), now(), 'signup');
-  RETURN p_token;
+  RETURN NULL;
 END;
 $$;
 

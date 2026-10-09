@@ -18,7 +18,7 @@ import { jsPDF } from 'jspdf';
 export type Lang = 'en';
 export type ConsentKind = 'general' | 'media';
 
-export const GENERAL_VERSION = '1.0-draft';
+export const GENERAL_VERSION = '1.1-draft';
 export const MEDIA_VERSION = '1.0';
 
 export const MEDIA_KEYS = [
@@ -148,7 +148,7 @@ export const GENERAL_FORM: Record<Lang, {
       {
         heading: 'Who can see it',
         items: [
-          'Only JFlips management.',
+          "JFlips management. Your child's coaches can see your child's name, age, medical information and your contact numbers, so they can keep your child safe and reach you in an emergency. Your signature, email address and billing details stay with management.",
           'We do not sell your information, and we do not share it with anyone else unless the law requires it or a doctor needs it in an emergency.'
         ]
       },
