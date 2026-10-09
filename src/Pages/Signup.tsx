@@ -34,14 +34,12 @@ type YoungAthlete = {
   adultName: string;              // who that adult is, if not the parent
   adultPhone: string;
   collectors: { name: string; phone: string }[];   // who may collect the child (up to 3)
-  toiletTrained: '' | 'yes' | 'no' | 'mostly';
   notes: string;                  // anything coaches should know
-  discretion: boolean;            // coach decides which skills and may stop anything unsafe
 };
 const EMPTY_YOUNG: YoungAthlete = {
   stays: false, adultName: '', adultPhone: '',
   collectors: [{ name: '', phone: '' }, { name: '', phone: '' }, { name: '', phone: '' }],
-  toiletTrained: '', notes: '', discretion: false
+  notes: ''
 };
 
 const EMPTY_FORM: FormData = {
@@ -188,9 +186,7 @@ async function generateIndemnityPDF(form: FormData, signatureDataUrl: string, cl
       ['Adult staying at venue', young.stays ? 'Yes, a parent or responsible adult stays at or near the venue for the whole class' : 'No'],
       ['Adult at the venue', [young.adultName, young.adultPhone].filter(Boolean).join(' · ') || 'The parent'],
       ['May collect the child', young.collectors.filter(c => c.name.trim()).map(c => c.name.trim() + (c.phone.trim() ? ' (' + c.phone.trim() + ')' : '')).join('; ') || '—'],
-      ['Toilet trained', young.toiletTrained === 'yes' ? 'Yes' : young.toiletTrained === 'no' ? 'No' : young.toiletTrained === 'mostly' ? 'Mostly' : '—'],
       ['Coaches should know', young.notes.trim() || '—'],
-      ['Coach discretion', young.discretion ? 'The coach decides which skills the child may attempt and may stop any activity they consider unsafe' : '—'],
     ];
     doc.setFontSize(9); doc.setTextColor(...rgb('#475569'));
     yf.forEach(([label, value]) => {
@@ -327,13 +323,9 @@ export default function Signup() {
         return;
       }
 
-      // get_signup_classes returns only id, name and price. The old direct read of
-      // class_types also returned enrolled_student_ids, which put every enrolled
-      // child's id in public view.
-      const { data, error } = await supabase.rpc('get_signup_classes', { p_owner_id: gymOwnerId });
-      if (!error && Array.isArray(data)) {
-        setClasses(data.map((ct: any) => ({ id: ct.id, name: ct.name, price: Number(ct.price || 0), studentIds: [] })));
-      }
+      // Parents do not choose a class when they register. The owner assigns each
+      // child to classes afterwards, so this page needs no class list at all (the
+      // old direct read of class_types also exposed every enrolled child's id).
 
       // The gym's default rate for a new athlete, so a child who registers here
       // arrives already on the right money instead of falling through to the
@@ -424,9 +416,7 @@ export default function Signup() {
     if (!form.indemnityAgreed) return 'Please confirm that you have read and agree to the indemnity declaration.';
     if (isYoung) {
       if (!young.stays) return 'Please confirm that a parent or responsible adult will stay at or near the venue for the whole class.';
-      if (!young.toiletTrained) return 'Please say whether your child is toilet trained.';
       if (!young.collectors.some(c => c.name.trim())) return 'Please give the name of at least one person who may collect your child.';
-      if (!young.discretion) return 'Please confirm that the coach may decide which skills your child attempts and may stop anything unsafe.';
     }
     if (!signatureDataUrl) { setSignatureError(true); return 'Please sign the form before submitting.'; }
     if (!gAgreed) { setConsentErrs({ agree: true }); return 'Please tick the box to confirm you agree to the privacy notice.'; }
@@ -460,7 +450,7 @@ export default function Signup() {
         }
       }
 
-      const { error: studentError } = await supabase.from('tumbling_students').insert({
+      const studentRow = {
         id: studentId, 
         name: studentName, 
         user_id: ownerUserId, 
@@ -495,27 +485,28 @@ export default function Signup() {
         // Stamped at creation so the gym's current default is what this child
         // pays, and so later changes to that default never move them.
         ...(defaultGroupRate ? { custom_group_rate: defaultGroupRate } : {})
-      });
-      if (studentError) throw new Error(studentError.message);
+      };
 
-      if (selectedClass) {
-        // Done by a function on the server that appends this one child. The page no
-        // longer knows the class's other children, so it must never rewrite the list.
-        const { error: enrolErr } = await supabase.rpc('signup_enrol_student', {
-          p_owner_id: ownerUserId, p_class_id: form.classId, p_student_id: studentId
-        });
-        if (enrolErr) console.error('Could not add the child to the chosen class:', enrolErr.message);
+      const isNetworkFailure = (msg: string) => /failed to fetch|networkerror|load failed|network request failed/i.test(msg || '');
+      let { error: studentError } = await supabase.from('tumbling_students').insert(studentRow);
+      // A request that never left the phone (a dropped signal, a moment offline) is
+      // safe to repeat once: it has the same id, so it can never save two children.
+      if (studentError && isNetworkFailure(studentError.message)) {
+        await new Promise(r => setTimeout(r, 1500));
+        const retry = await supabase.from('tumbling_students').insert(studentRow);
+        // If the first try actually reached the server and only the reply was lost,
+        // the child already exists: that is success, not an error.
+        studentError = retry.error && retry.error.code !== '23505' ? retry.error : null;
+      }
+      if (studentError) {
+        throw new Error(isNetworkFailure(studentError.message)
+          ? 'We could not reach the server. Please check your internet connection and press the button again. Nothing has been saved yet.'
+          : studentError.message);
       }
 
-      await supabase.from('signup_submissions').insert({
-        student_id: studentId, student_name: studentName, dob: dobForDb, age: form.age || null,
-        class_id: form.classId, class_name: selectedClass?.name || '',
-        medical_notes: form.medicalNotes.trim() || null, parent1_name: parentName,
-        parent1_phone: form.parent1Phone.trim(), parent1_email: form.parent1Email.trim(),
-        parent2_name: form.parent2Name.trim() || null, parent2_phone: form.parent2Phone.trim() || null,
-        submitted_at: new Date().toISOString(), user_id: ownerUserId,
-        signature_data: signatureDataUrl
-      });
+      // The child's details are saved once, in their own record above. They are not
+      // copied into a second table (signup_submissions): nothing reads that copy,
+      // and a second copy of medical notes and contact numbers is more to protect.
 
       // POPIA consent records. Saved as their own rows, never inside the
       // indemnity. The child already exists at this point, so a failure here must
@@ -568,7 +559,9 @@ export default function Signup() {
       setSubmittedClassName('General Registration');
       setSubmitted(true);
     } catch (e: any) {
-      setError(e.message || 'Something went wrong. Please try again.');
+      setError(/failed to fetch|networkerror|load failed/i.test(e?.message || '')
+        ? 'We could not reach the server. Please check your internet connection and try again.'
+        : (e.message || 'Something went wrong. Please try again.'));
     } finally { setLoading(false); }
   };
 
@@ -706,19 +699,8 @@ export default function Signup() {
                   <div style={{ flex: 1 }}><Input type="tel" value={c.phone} onChange={e => setYoung(y => ({ ...y, collectors: y.collectors.map((x, j) => j === i ? { ...x, phone: e.target.value } : x) }))} placeholder="Cell number" /></div>
                 </Row>
               ))}
-              <Label>Is your child toilet trained? *</Label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                {([['yes', 'Yes'], ['mostly', 'Mostly'], ['no', 'No']] as const).map(([v, t]) => (
-                  <button key={v} type="button" onClick={() => setYoung(y => ({ ...y, toiletTrained: v }))}
-                    style={{ flex: 1, padding: '10px', borderRadius: '10px', fontWeight: 800, fontSize: '12px', cursor: 'pointer', border: `2px solid ${young.toiletTrained === v ? '#1e4da1' : '#e2e8f0'}`, background: young.toiletTrained === v ? '#eff6ff' : 'white', color: young.toiletTrained === v ? '#1e4da1' : '#64748b' }}>{t}</button>
-                ))}
-              </div>
               <Label>Anything the coaches should know (separation anxiety, fears, sensitivities)</Label>
               <textarea value={young.notes} onChange={e => setYoung(y => ({ ...y, notes: e.target.value }))} style={{ ...inputStyle, minHeight: '60px', resize: 'vertical' as const }} />
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', padding: '12px', background: young.discretion ? '#f0fdf4' : '#fff7ed', borderRadius: '10px', border: `1.5px solid ${young.discretion ? '#bbf7d0' : '#fed7aa'}` }}>
-                <input type="checkbox" checked={young.discretion} onChange={e => setYoung(y => ({ ...y, discretion: e.target.checked }))} style={{ width: '18px', height: '18px', marginTop: '1px', flexShrink: 0, accentColor: '#1e4da1' }} />
-                <span style={{ fontSize: '12px', color: '#475569', lineHeight: '1.5', fontWeight: 600 }}>The coach decides which skills my child may attempt and may stop any activity they consider unsafe. *</span>
-              </label>
             </Section>
           )}
 

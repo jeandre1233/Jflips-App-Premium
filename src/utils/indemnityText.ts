@@ -32,6 +32,10 @@ export const INDEMNITY_CLAUSES: { heading: string; text: string }[] = [
     text: 'JFLIPS will give basic first aid where possible and will call emergency services or a doctor when needed. Classes take place at a school where staff with first aid training may be on site, but JFLIPS cannot promise that they will be available. If I cannot be reached, I authorise JFLIPS or its coaches to arrange emergency medical treatment or an ambulance for my child, and I accept responsibility for the cost of that treatment.'
   },
   {
+    heading: 'Coaches\' decisions',
+    text: 'The coach decides which skills my child may attempt and may stop any activity they consider unsafe.'
+  },
+  {
     heading: 'Belongings',
     text: 'I understand that JFLIPS TUMBLING, its owner and its coaches are not responsible for the loss, theft or damage of any belongings my child brings to classes.'
   },
@@ -62,6 +66,10 @@ export const INDEMNITY_CLAUSES_ADULT: { heading: string; text: string }[] = [
   {
     heading: 'First aid and emergencies',
     text: 'JFLIPS will give basic first aid where possible and will call emergency services or a doctor when needed. Classes take place at a school where staff with first aid training may be on site, but JFLIPS cannot promise that they will be available. If I cannot respond, I authorise JFLIPS or its coaches to arrange emergency medical treatment or an ambulance for me, and I accept responsibility for the cost of that treatment.'
+  },
+  {
+    heading: 'Coaches\' decisions',
+    text: 'The coach decides which skills I may attempt and may stop any activity they consider unsafe.'
   },
   {
     heading: 'Belongings',

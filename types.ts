@@ -36,7 +36,7 @@ export interface Student {
   young_athlete?: {
     stays?: boolean; adultName?: string; adultPhone?: string;
     collectors?: { name: string; phone: string }[];
-    toiletTrained?: '' | 'yes' | 'no' | 'mostly'; notes?: string; discretion?: boolean;
+    notes?: string;
   } | null;
 }
 

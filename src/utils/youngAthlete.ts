@@ -12,9 +12,7 @@ export interface YoungAthleteInfo {
   adultName?: string;
   adultPhone?: string;
   collectors?: { name: string; phone: string }[];
-  toiletTrained?: '' | 'yes' | 'no' | 'mostly';
   notes?: string;
-  discretion?: boolean;
 }
 
 export function parentMustStay(s: {

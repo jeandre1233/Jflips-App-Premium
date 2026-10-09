@@ -19,7 +19,7 @@ import type { Audience } from './indemnityText';
 export type Lang = 'en';
 export type ConsentKind = 'general' | 'media';
 
-export const GENERAL_VERSION = '1.1-draft';
+export const GENERAL_VERSION = '1.2-draft';
 export const MEDIA_VERSION = '1.0';
 
 export const MEDIA_KEYS = [
@@ -127,7 +127,13 @@ export const GENERAL_FORM: Record<Lang, {
         items: [
           "About your child: name, date of birth and age, class or team, attendance, and any medical conditions, injuries or allergies you tell us about.",
           'About you: name, relationship to the child, cell number, email address and your signature.',
-          'Billing: invoices, the amounts owed and whether they have been paid. We do not store card details.'
+          'Billing: invoices, the amounts owed and whether they have been paid.'
+        ]
+      },
+      {
+        heading: 'Payments',
+        items: [
+          'Payments are made by EFT (electronic funds transfer).'
         ]
       },
       {
@@ -209,7 +215,7 @@ export function generalFormFor(a: Audience) {
     'What we collect': [
       'About you: name, date of birth and age, class or team, attendance, and any medical conditions, injuries or allergies you tell us about.',
       'Contact details: your cell number, email address and your signature.',
-      'Billing: invoices, the amounts owed and whether they have been paid. We do not store card details.'
+      'Billing: invoices, the amounts owed and whether they have been paid.'
     ],
     'Who can see it': [
       "JFlips management. Your coaches can see your name, age, medical information and your cell number, so they can keep you safe and reach you in an emergency. Your signature, email address and billing details stay with management.",
