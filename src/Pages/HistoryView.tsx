@@ -46,8 +46,6 @@ interface HistoryViewProps {
   /** Tick invoices paid / unpaid. Backs the month tabs. */
   onSetInvoicePaid?: (paymentIds: string[], paid: boolean) => void;
   onFixInvoiceAmount?: (paymentId: string, amount: number) => void;
-  onShowRecovery?: () => void;
-  onRestoreSnapshot?: (snapshot: any) => void;
   /**
    * Rebuild a month (or every month) from its archived sessions. This is the
    * owner's route to the redundancy: a month archived by an older version of the
@@ -284,8 +282,6 @@ const ArchivedPayslipA4Doc: React.FC<ArchivedPayslipA4DocProps> = ({ payslip, pr
 
 export const HistoryView: React.FC<HistoryViewProps> = ({
   state,
-  onShowRecovery,
-  onRestoreSnapshot,
   onRecalculate,
   isRecalculating,
   onSetInvoicePaid,

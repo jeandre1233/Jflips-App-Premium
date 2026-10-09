@@ -715,7 +715,7 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                   {gym && <span className="text-[9px] font-black text-[#1e4da1] mr-1">{session.hours_coached || gym.default_hours || 1} HRS</span>}
                   <span className="text-[9px] font-black text-[#1e4da1] mr-1">{(session.studentIds?.length || 0)} IN</span>
                   <button onClick={() => onEditSession(session)} aria-label="Edit Session" className="p-2 bg-slate-50 dark:bg-slate-700 text-slate-400 rounded-lg"><Pencil size={12} /></button>
-                  <button onClick={() => { if (window.confirm("Delete?")) onRemoveSession(session.groupIds || session.id); }} aria-label="Delete Session" className="p-2 bg-slate-50 dark:bg-slate-700 text-slate-400 rounded-lg"><Trash2 size={12} /></button>
+                  {isOwner && <button onClick={() => { if (window.confirm("Delete?")) onRemoveSession(session.groupIds || session.id); }} aria-label="Delete Session" className="p-2 bg-slate-50 dark:bg-slate-700 text-slate-400 rounded-lg"><Trash2 size={12} /></button>}
                 </div>
               </motion.div>
             );

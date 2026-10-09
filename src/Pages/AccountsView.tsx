@@ -117,7 +117,6 @@ interface AccountsViewProps {
   monthLabel?: string;
   onUpdatePayment: (p: Partial<Payment>) => void;
   onResetInvoice: (id: string, label: string, mode: 'coaching' | 'merch') => void;
-  onShowRecovery: () => void;
   onSaveAllocations?: (next: { allocations?: InvoiceAllocations; groupDefaults?: GroupDefaults }) => Promise<boolean>;
   onAddMerch?: (fixedBillTo?: { id: string; kind: MerchBillToKind; label: string }) => void;
   onDeleteMerchOrder?: (id: string) => void;
@@ -130,7 +129,6 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
   monthLabel,
   onUpdatePayment,
   onResetInvoice,
-  onShowRecovery,
   onSaveAllocations,
   onAddMerch,
   onDeleteMerchOrder,

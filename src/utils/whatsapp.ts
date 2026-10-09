@@ -40,6 +40,35 @@ Thank you!`;
   window.open(url, '_blank');
 }
 
+/**
+ * Opens WhatsApp to the parent of a trial athlete with the sign-up link. Sent by the
+ * owner once, after the child's free trial class.
+ */
+export function sendWhatsAppTrialSignup(opts: {
+  parentName?: string; phone: string; childName: string; className?: string; classDate?: string; link: string;
+}): void {
+  if (!opts.phone) {
+    alert(`No phone number saved for ${opts.childName}'s parent.`);
+    return;
+  }
+  const when = opts.classDate
+    ? new Date(opts.classDate).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })
+    : '';
+  const lines = [
+    `Hi ${opts.parentName && opts.parentName !== 'Parent' ? opts.parentName : 'there'}! 🤸`,
+    '',
+    `${opts.childName} came to one of our JFlips classes${opts.className ? ` (${opts.className}${when ? `, ${when}` : ''})` : when ? ` on ${when}` : ''}. We loved having them!`,
+    '',
+    "If you're interested in continuing the classes, here is the link to sign up:",
+    opts.link,
+    '',
+    'Please fill in your details and sign the forms, then we will add your child to their class.',
+    '',
+    'Thank you!'
+  ];
+  window.open(`https://wa.me/${cleanPhoneNumber(opts.phone)}?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');
+}
+
 /** The message sent to the parents' WhatsApp group. */
 export const GROUP_PAYMENT_REMINDER = [
   'Hallo almal.',

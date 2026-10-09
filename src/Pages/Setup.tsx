@@ -51,6 +51,7 @@ import {
 import { ConsentManager } from '../components/ConsentManager';
 import { CoachStudentList } from '../components/CoachStudentList';
 import { parentMustStay } from '../utils/youngAthlete';
+import { sendWhatsAppTrialSignup } from '../utils/whatsapp';
 import { getDiscordWebhookUrl, setDiscordWebhookUrl, isDiscordNotificationsEnabled, setDiscordNotificationsEnabled } from '../utils/discordNotifications';
 
 const athleteItemVariants = {
@@ -1596,6 +1597,22 @@ export const RosterView = memo(({
                         </div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        {isTemp && isOwner && (
+                          <button
+                            onClick={() => sendWhatsAppTrialSignup({
+                              parentName: student.parent1_name,
+                              phone: student.parent1_phone || student.phone || '',
+                              childName: student.first_name || student.name,
+                              className: student.class_name,
+                              classDate: student.first_class_date,
+                              link: `${window.location.origin}/#/signup?ownerId=${state.profile.id || ''}`
+                            })}
+                            title="Send the sign-up link to this child's parent on WhatsApp"
+                            className="px-2.5 py-2 rounded-xl bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-900/50 text-[9px] font-black uppercase tracking-wider"
+                          >
+                            Send sign-up link
+                          </button>
+                        )}
                         <button 
                           onClick={() => onEditStudent(student)}
                           className="p-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-xl transition-all text-slate-400"

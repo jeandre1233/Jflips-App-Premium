@@ -777,7 +777,6 @@ const App: React.FC = () => {
   const [showModal, setShowModal] = useState<string | null>(null);
   const [isResetConfirming, setIsResetConfirming] = useState(false);
   const [resetConfirmation, setResetConfirmation] = useState<{ familyId: string, label: string, mode: 'coaching' | 'merch' } | null>(null);
-  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [archiveMonth, setArchiveMonth] = useState<string>(MONTHS[new Date().getMonth()]);
   const [archiveYear, setArchiveYear] = useState<number>(new Date().getFullYear());
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -3853,41 +3852,6 @@ const App: React.FC = () => {
     loadCloudData(true);
   };
 
-  const restoreInvoiceSnapshot = async (snapshot: InvoiceSnapshot) => {
-    if (!user) return;
-    setIsSyncing(true);
-    try {
-      // 1. Clear current active sessions
-      await supabase.from('sessions').delete().eq('user_id', user.id);
-      
-      // 2. Restore sessions
-      if (snapshot.snapshot_data.sessions.length > 0) {
-        const sessionsToInsert = snapshot.snapshot_data.sessions.map(s => {
-          const { id, ...rest } = s as any;
-          return {
-            ...rest,
-            user_id: user.id,
-            class_type_id: s.classTypeId,
-            student_ids: s.studentIds
-          };
-        });
-        await supabase.from('sessions').insert(sessionsToInsert);
-      }
-
-      // 3. Restore payments (optional based on user request "active sessions, payments, and invoice data")
-      // We'll just restore sessions for now as they are the primary "active" data.
-      // If we restore payments, we might conflict with existing IDs.
-      
-      alert("Snapshot restored successfully!");
-      loadCloudData(true);
-      setShowRecoveryModal(false);
-    } catch (err) {
-      console.error("Restore failed", err);
-      alert("Restore failed. Please try again.");
-    } finally {
-      setIsSyncing(false);
-    }
-  };
 
   const resetSingleInvoice = async (familyId: string, label: string, mode: 'coaching' | 'merch' = 'coaching') => {
     setResetConfirmation({ familyId, label, mode });
@@ -4430,12 +4394,11 @@ const App: React.FC = () => {
           onSaveAllocations={isOwner ? saveBankAllocations : undefined}
         />
       )}
-      {activeView === View.INVOICES && <AccountsView state={state} user={user} onUpdatePayment={handleUpdatePayment} onResetInvoice={resetSingleInvoice} onShowRecovery={() => setShowRecoveryModal(true)} onSaveAllocations={saveBankAllocations} onAddMerch={(fixedBillTo) => setMerchOrderModal({ fixedBillTo })} onDeleteMerchOrder={handleDeleteMerchOrder} onSetMerchStatus={handleSetMerchOrderStatus} />}
+      {activeView === View.INVOICES && <AccountsView state={state} user={user} onUpdatePayment={handleUpdatePayment} onResetInvoice={resetSingleInvoice} onSaveAllocations={saveBankAllocations} onAddMerch={(fixedBillTo) => setMerchOrderModal({ fixedBillTo })} onDeleteMerchOrder={handleDeleteMerchOrder} onSetMerchStatus={handleSetMerchOrderStatus} />}
       {activeView === View.HISTORY && (
         <HistoryView 
           state={state} 
-          onShowRecovery={() => setShowRecoveryModal(true)}
-          onRestoreSnapshot={restoreInvoiceSnapshot}
+         
           onRecalculate={recalculateHistory}
           isRecalculating={isSyncing}
           onSetInvoicePaid={handleSetInvoicePaid}
@@ -4581,7 +4544,7 @@ const App: React.FC = () => {
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <button onClick={() => { setShowAllLogs(false); startEditSession(session); }} className="p-2 bg-white dark:bg-slate-700 text-slate-400 rounded-lg shadow-sm border border-slate-100 dark:border-slate-600"><Pencil size={12} /></button>
-                        <button onClick={() => { if (window.confirm("Delete this log?")) removeSession(session.groupIds || session.id); }} className="p-2 bg-white dark:bg-slate-700 text-slate-400 rounded-lg shadow-sm border border-slate-100 dark:border-slate-600"><Trash2 size={12} /></button>
+                        {isOwner && <button onClick={() => { if (window.confirm("Delete this log?")) removeSession(session.groupIds || session.id); }} className="p-2 bg-white dark:bg-slate-700 text-slate-400 rounded-lg shadow-sm border border-slate-100 dark:border-slate-600"><Trash2 size={12} /></button>}
                       </div>
                     </motion.div>
                   );
@@ -4696,7 +4659,7 @@ const App: React.FC = () => {
           onLogout={handleLogout} 
           onLinkGoogle={handleLinkGoogle}
           onClose={() => setShowSettingsModal(false)} 
-          onShowRecovery={() => setShowRecoveryModal(true)} 
+          
         />
       )}
       {isResetConfirming && <ArchiveModal state={state} archiveMonth={archiveMonth} archiveYear={archiveYear} setArchiveMonth={setArchiveMonth} setArchiveYear={setArchiveYear} onConfirm={resetMonth} onCancel={() => setIsResetConfirming(false)} />}
@@ -4723,34 +4686,6 @@ const App: React.FC = () => {
         </Modal>
       )}
 
-      {showRecoveryModal && (
-        <Modal title="Recover Invoice Data" onClose={() => setShowRecoveryModal(false)}>
-          <div className="space-y-4 p-2 max-h-[70vh] overflow-y-auto no-scrollbar">
-            {state.snapshots && state.snapshots.length > 0 ? (
-              <div className="space-y-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4 px-1">Available Backups (Last 5)</p>
-                {state.snapshots.map((snap, idx) => (
-                  <div key={snap.id || `snap-${idx}`} className="p-4 bg-white dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700 hover:border-[#1e4da1] transition-all group">
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <p className="text-sm font-black text-slate-900 dark:text-white mb-1">{snap.label}</p>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{snap.snapshot_data.sessions.length} Sessions · {snap.snapshot_data.payments.length} Payments</p>
-                      </div>
-                      <div className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-xl text-[#1e4da1] dark:text-blue-400"><History size={16} /></div>
-                    </div>
-                    <button onClick={() => restoreInvoiceSnapshot(snap)} className="w-full py-3 bg-slate-900 dark:bg-white dark:text-slate-900 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:opacity-90 transition-all">Restore This Snapshot</button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="py-12 text-center space-y-4">
-                <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800/50 rounded-full flex items-center justify-center mx-auto"><History size={24} className="text-slate-300" /></div>
-                <p className="text-sm text-slate-400 font-bold uppercase tracking-wider">No backups found yet</p>
-              </div>
-            )}
-          </div>
-        </Modal>
-      )}
       {isLoggingSession && (
         <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/30 backdrop-blur-sm" role="status" aria-live="polite">
           <div className="px-6 py-4 rounded-2xl bg-white dark:bg-slate-800 shadow-2xl text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-100 flex items-center gap-3">
@@ -9416,6 +9351,12 @@ const RegisterView = memo(({
       setAddAthleteError("Parent cell phone number is strictly required.");
       return;
     }
+    // The number is how the owner sends the sign-up link, so it must be a real one.
+    const phoneDigits = phone.replace(/\D/g, '');
+    if (phoneDigits.length < 9 || phoneDigits.length > 15) {
+      setAddAthleteError("Please enter a valid parent cell number (for example 082 123 4567). We use it to send the sign-up link.");
+      return;
+    }
 
     if (!onSaveStudent) {
       setAddAthleteError("Unable to save athlete: missing handler.");
@@ -9800,7 +9741,7 @@ const RegisterView = memo(({
   );
 });
 
-const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetInvoice, onShowRecovery, onSaveAllocations, onAddMerch, onDeleteMerchOrder, onSetMerchStatus }: { state: AppState, user: any, monthLabel?: string, onUpdatePayment: (p: Partial<Payment>) => void, onResetInvoice: (id: string, label: string, mode: 'coaching' | 'merch') => void, onShowRecovery: () => void, onSaveAllocations?: (next: { allocations?: InvoiceAllocations; groupDefaults?: GroupDefaults }) => Promise<boolean>, onAddMerch?: (fixedBillTo?: { id: string; kind: MerchBillToKind; label: string }) => void, onDeleteMerchOrder?: (id: string) => void, onSetMerchStatus?: (id: string, status: MerchOrderStatus) => void }) => {
+const InvoicesView = memo(({ state, user, monthLabel, onUpdatePayment, onResetInvoice, onSaveAllocations, onAddMerch, onDeleteMerchOrder, onSetMerchStatus }: { state: AppState, user: any, monthLabel?: string, onUpdatePayment: (p: Partial<Payment>) => void, onResetInvoice: (id: string, label: string, mode: 'coaching' | 'merch') => void, onSaveAllocations?: (next: { allocations?: InvoiceAllocations; groupDefaults?: GroupDefaults }) => Promise<boolean>, onAddMerch?: (fixedBillTo?: { id: string; kind: MerchBillToKind; label: string }) => void, onDeleteMerchOrder?: (id: string) => void, onSetMerchStatus?: (id: string, status: MerchOrderStatus) => void }) => {
   const [sel, setSel] = useState<string | null>(null);
   // The saved choices come from the profile, which is loaded from the database.
   // They used to be read straight out of localStorage here — under a key built
@@ -12455,7 +12396,7 @@ const ClassTypeForm: React.FC<any> = ({ students, gyms, staff, isOwner, initialD
   );
 };
 
-const AppSettingsModal: React.FC<any> = ({ state, toggleTheme, onLogout, onLinkGoogle, onClose, onShowRecovery }) => (
+const AppSettingsModal: React.FC<any> = ({ state, toggleTheme, onLogout, onLinkGoogle, onClose }) => (
   <Modal title="Settings" onClose={onClose}>
     <div className="space-y-4">
       <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
