@@ -4,7 +4,10 @@ import { ClassType } from '../../types';
 import { notifyUser } from '../utils/notifications';
 import jsPDF from 'jspdf';
 import { SignaturePad } from '../components/SignaturePad';
-import { INDEMNITY_INTRO_ADULT, INDEMNITY_VERSION, audienceForAge, indemnityClausesFor } from '../utils/indemnityText';
+import {
+  INDEMNITY_INTRO_ADULT, INDEMNITY_INTRO_MINOR, INDEMNITY_RISKS, INDEMNITY_VERSION, MIN_AGE, UNDER_MIN_AGE_MESSAGE,
+  audienceForAge, healthSectionFor, indemnityClausesFor, indemnityRisksFor
+} from '../utils/indemnityText';
 import type { Audience } from '../utils/indemnityText';
 import { GeneralConsentSection, MediaConsentSection } from '../components/ConsentSections';
 import {
@@ -25,7 +28,15 @@ type FormData = {
   parent2Name: string;
   parent2Phone: string;
   classId: string;
-  indemnityAgreed: boolean;
+  relationship: string;            // Mother / Father / Legal guardian / Other (not asked of adults)
+  relationshipOther: string;
+  authorityConfirmed: boolean;     // "I am this child's parent or legal guardian ..."
+  emergencyName: string;
+  emergencyPhone: string;
+  emergencyRelationship: string;
+  healthAgreed: boolean;           // accurate health information + emergency treatment
+  risksAcknowledged: boolean;      // has read the risks
+  indemnityAgreed: boolean;        // accepts the responsibility terms
 };
 
 /** Extra safety details collected for the youngest children (age 4 and under). */
@@ -46,7 +57,13 @@ const EMPTY_FORM: FormData = {
   studentFirstName: '', studentLastName: '', dob: '', age: '',
   medicalNotes: '', parent1Name: '', parent1Phone: '', parent1Email: '',
   parent2Name: '', parent2Phone: '', classId: '', indemnityAgreed: false,
+  relationship: '', relationshipOther: '', authorityConfirmed: false,
+  emergencyName: '', emergencyPhone: '', emergencyRelationship: '',
+  healthAgreed: false, risksAcknowledged: false,
 };
+
+const relationshipOf = (f: FormData, audience: Audience) =>
+  audience === 'adult' ? 'Self (adult participant)' : ((f.relationship === 'Other' ? f.relationshipOther.trim() : f.relationship) || 'Parent or legal guardian');
 
 // ── PDF Generator ─────────────────────────────────────────────
 async function generateIndemnityPDF(form: FormData, signatureDataUrl: string, className: string, audience: Audience = 'minor', young: YoungAthlete | null = null) {
@@ -78,54 +95,51 @@ async function generateIndemnityPDF(form: FormData, signatureDataUrl: string, cl
   doc.line(margin, y + 3, pageW - margin, y + 3);
   y += 12;
 
-  // Indemnity body text
   const studentName = `${form.studentFirstName} ${form.studentLastName}`.trim();
-  doc.setTextColor(...rgb('#1e293b'));
-  doc.setFontSize(10); doc.setFont('helvetica', 'normal');
-  const bodyText = audience === 'adult'
-    ? INDEMNITY_INTRO_ADULT(form.parent1Name || studentName)
-    : `I, ${form.parent1Name || '___________________'}, Parent/Legal Guardian of the enrolled student ${studentName || '___________________'}, hereby indemnify and confirm that my child is physically, medically and mentally fit to become a member of JFLIPS TUMBLING and to participate in the sport of tumbling. I hereby acknowledge the possibility of injury occurring whilst doing tumbling.`;
-  const bodyLines = doc.splitTextToSize(bodyText, contentW);
-  doc.text(bodyLines, margin, y);
-  y += bodyLines.length * 6 + 6;
 
-  // Page-safe layout: the added clauses make this longer than one page.
+  // Page-safe layout: the wording is longer than one page.
   const ensure = (need: number) => {
     if (y + need > 276) { doc.addPage(); y = 20; }
   };
-
-  // Additional clauses (risk, responsibility, first aid and emergencies, health information)
-  indemnityClausesFor(audience).forEach(c => {
-    const lines = doc.splitTextToSize(c.text, contentW);
-    ensure(lines.length * 5 + 10);
+  const text = (t: string, o: { bold?: boolean; indent?: number; gap?: number } = {}) => {
+    doc.setFont('helvetica', o.bold ? 'bold' : 'normal'); doc.setFontSize(10); doc.setTextColor(...rgb('#1e293b'));
+    const lines = doc.splitTextToSize(t, contentW - (o.indent || 0));
+    ensure(lines.length * 5 + (o.gap ?? 4));
+    doc.text(lines, margin + (o.indent || 0), y);
+    y += lines.length * 5 + (o.gap ?? 4);
+  };
+  const heading = (t: string) => {
+    ensure(14);
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...rgb('#1e4da1'));
-    doc.text(c.heading, margin, y); y += 5.5;
-    doc.setFont('helvetica', 'normal'); doc.setTextColor(...rgb('#1e293b'));
-    doc.text(lines, margin, y);
-    y += lines.length * 5 + 4;
-  });
-  y += 2;
+    doc.text(t, margin, y); y += 5.5;
+  };
 
-  // Medical notes heading
-  ensure(45);
-  doc.setFont('helvetica', 'bold');
-  const medLabel = audience === 'adult'
-    ? 'Please list any physical disabilities, history of illness, or allergies you have which we should be aware of (e.g. previous fractures, muscle tone, asthma, etc.):'
-    : 'Please list any physical disabilities, history of illness, or allergies the enrolled child has which we should be aware of (e.g. previous fractures, muscle tone, asthma, etc.):';
-  const medLabelLines = doc.splitTextToSize(medLabel, contentW);
-  doc.text(medLabelLines, margin, y);
-  y += medLabelLines.length * 6 + 6;
+  // Health and emergencies
+  const hs = healthSectionFor(audience);
+  heading('Health information');
+  text(form.medicalNotes?.trim() || 'None');
+  heading(hs.emergencyHeading);
+  hs.emergency.forEach(t => text(t));
+  text('Confirmed: ' + hs.tick.replace(/ \*$/, ''), { bold: true, gap: 6 });
 
-  // Medical notes box
-  doc.setDrawColor(...rgb('#e2e8f0')); doc.setLineWidth(0.4);
-  doc.rect(margin, y, contentW, 20);
-  doc.setFont('helvetica', 'normal'); doc.setTextColor(...rgb('#1e293b'));
-  const medText = form.medicalNotes?.trim() || 'None';
-  doc.text(doc.splitTextToSize(medText, contentW - 6), margin + 3, y + 7);
-  y += 28;
+  // Risks and indemnity
+  heading('Risks and indemnity');
+  text(audience === 'adult'
+    ? INDEMNITY_INTRO_ADULT(form.parent1Name || studentName)
+    : INDEMNITY_INTRO_MINOR(form.parent1Name, studentName));
+  const risks = indemnityRisksFor(audience);
+  heading(INDEMNITY_RISKS.heading);
+  text(risks.intro, { gap: 2 });
+  risks.items.forEach(i => text('•  ' + i, { indent: 3, gap: 1 }));
+  text(risks.outro, { gap: 5 });
+  indemnityClausesFor(audience).forEach(c => { heading(c.heading); text(c.text); });
+  text('Confirmed: I have read and understood the risks described above.', { bold: true, gap: 2 });
+  text(audience === 'adult'
+    ? 'Confirmed: I agree to the responsibility terms above.'
+    : 'Confirmed: I agree to the responsibility terms above, on my own behalf and on behalf of the enrolled student.', { bold: true, gap: 6 });
 
   // Divider
-  doc.setDrawColor(...rgb('#e2e8f0')); doc.line(margin, y, pageW - margin, y); y += 8;
+  doc.setDrawColor(...rgb('#e2e8f0')); doc.setLineWidth(0.4); doc.line(margin, y, pageW - margin, y); y += 8;
 
   // Student details section
   ensure(50);
@@ -153,23 +167,31 @@ async function generateIndemnityPDF(form: FormData, signatureDataUrl: string, cl
   doc.setTextColor(...rgb('#1e4da1')); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
   doc.text(audience === 'adult' ? 'YOUR DETAILS' : 'PARENT / GUARDIAN DETAILS', margin + 3, y + 4.5); y += 10;
 
+  const emergencyText = [form.emergencyName, form.emergencyPhone].filter(Boolean).join(' · ')
+    + (form.emergencyRelationship.trim() ? ` (${form.emergencyRelationship.trim()})` : '');
   const parentFields: [string, string][] = audience === 'adult'
     ? [
         ['Name', form.parent1Name || studentName || '—'],
         ['Phone', form.parent1Phone || '—'],
         ['Email', form.parent1Email || '—'],
+        ['Emergency contact', emergencyText || '—'],
       ]
     : [
         ['Parent 1 Name', form.parent1Name || '—'],
+        ['Relationship', relationshipOf(form, audience)],
         ['Parent 1 Phone', form.parent1Phone || '—'],
         ['Parent 1 Email', form.parent1Email || '—'],
         ...(form.parent2Name ? [['Parent 2 Name', form.parent2Name] as [string,string], ['Parent 2 Phone', form.parent2Phone || '—'] as [string,string]] : []),
+        ['Emergency contact', emergencyText || '—'],
+        ['Authority', 'Confirmed by tick box: parent or legal guardian, allowed to make decisions about the child\'s activities and medical care'],
       ];
   doc.setFontSize(9); doc.setTextColor(...rgb('#475569'));
   parentFields.forEach(([label, value]) => {
+    const vLines = doc.splitTextToSize(value, contentW - 44);
+    ensure(vLines.length * 5 + 3);
     doc.setFont('helvetica', 'bold'); doc.text(`${label}:`, margin, y);
-    doc.setFont('helvetica', 'normal'); doc.text(value, margin + 42, y);
-    y += 7;
+    doc.setFont('helvetica', 'normal'); doc.text(vLines, margin + 42, y);
+    y += Math.max(7, vLines.length * 5 + 2);
   });
   y += 6;
 
@@ -181,9 +203,9 @@ async function generateIndemnityPDF(form: FormData, signatureDataUrl: string, cl
     ensure(70);
     doc.setFillColor(248, 250, 252); doc.rect(margin, y, contentW, 6, 'F');
     doc.setTextColor(...rgb('#1e4da1')); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
-    doc.text('YOUNG ATHLETE (AGE 4 AND UNDER)', margin + 3, y + 4.5); y += 10;
+    doc.text('YOUNG ATHLETE (AGE 2 TO 4)', margin + 3, y + 4.5); y += 10;
     const yf: [string, string][] = [
-      ['Adult staying at venue', young.stays ? 'Yes, a parent or responsible adult stays at or near the venue for the whole class' : 'No'],
+      ['Adult staying at venue', young.stays ? 'Yes, a parent or responsible adult stays at the venue for the whole class' : 'No'],
       ['Adult at the venue', [young.adultName, young.adultPhone].filter(Boolean).join(' · ') || 'The parent'],
       ['May collect the child', young.collectors.filter(c => c.name.trim()).map(c => c.name.trim() + (c.phone.trim() ? ' (' + c.phone.trim() + ')' : '')).join('; ') || '—'],
       ['Coaches should know', young.notes.trim() || '—'],
@@ -281,7 +303,8 @@ export default function Signup() {
   // Age comes from the date of birth, so this is a rule rather than a choice.
   const audience: Audience = audienceForAge(form.age);
   const ageNum = form.age === '' ? null : parseInt(form.age, 10);
-  const isYoung = ageNum !== null && Number.isFinite(ageNum) && ageNum <= 4;
+  const isYoung = ageNum !== null && Number.isFinite(ageNum) && ageNum >= MIN_AGE && ageNum <= 4;
+  const tooYoung = ageNum !== null && Number.isFinite(ageNum) && ageNum < MIN_AGE;
   const [young, setYoung] = useState<YoungAthlete>(EMPTY_YOUNG);
 
   // The risk box must be read to the end before the tick box unlocks.
@@ -398,6 +421,7 @@ export default function Signup() {
   const handleSign = useCallback((dataUrl: string) => { setSignatureDataUrl(dataUrl); setSignatureError(false); }, []);
 
   const validate = () => {
+    if (tooYoung) return UNDER_MIN_AGE_MESSAGE;
     if (!form.studentFirstName.trim()) return "Please enter the student's first name.";
     if (!form.studentLastName.trim()) return "Please enter the student's last name.";
     if (!form.dob.trim()) return "Please enter the student's date of birth.";
@@ -407,17 +431,25 @@ export default function Signup() {
     if (!isFormatOk) return "Please enter a valid Date of Birth in DD/MM/YYYY format.";
     
     if (audience !== 'adult' && !form.parent1Name.trim()) return 'Please enter the primary parent/guardian name.';
+    if (audience !== 'adult' && !form.relationship) return 'Please choose your relationship to the child.';
+    if (audience !== 'adult' && form.relationship === 'Other' && !form.relationshipOther.trim()) return 'Please say what your relationship to the child is.';
+    if (audience !== 'adult' && !form.authorityConfirmed) return "Please tick the box to confirm you are the child's parent or legal guardian.";
     if (!form.parent1Phone.trim()) return 'Please enter a contact number.';
     if (!/^[\d\s\+\-\(\)]{7,15}$/.test(form.parent1Phone.replace(/\s+/g, ''))) {
       return 'Please enter a valid phone number (digits only, 7–15 characters).';
     }
     if (!form.parent1Email.trim()) return 'Please enter an email address.';
     if (!/\S+@\S+\.\S+/.test(form.parent1Email.trim())) return 'Please enter a valid email address.';
-    if (!form.indemnityAgreed) return 'Please confirm that you have read and agree to the indemnity declaration.';
+    if (!form.emergencyName.trim() || !form.emergencyPhone.trim()) return 'Please give an emergency contact: a name and a phone number.';
+    if (!/^[\d\s\+\-\(\)]{7,15}$/.test(form.emergencyPhone.replace(/\s+/g, ''))) return "Please enter a valid phone number for the emergency contact.";
     if (isYoung) {
-      if (!young.stays) return 'Please confirm that a parent or responsible adult will stay at or near the venue for the whole class.';
+      if (!young.stays) return 'Please confirm that a parent or responsible adult will stay at the venue for the whole class.';
       if (!young.collectors.some(c => c.name.trim())) return 'Please give the name of at least one person who may collect your child.';
     }
+    if (!form.medicalNotes.trim()) return 'Please tell us about any health conditions, allergies or injuries, or write None.';
+    if (!form.healthAgreed) return 'Please tick the box to confirm your health information and the emergency treatment.';
+    if (!form.risksAcknowledged) return 'Please tick the box to confirm you have read the risks.';
+    if (!form.indemnityAgreed) return 'Please tick the box to confirm you agree to the responsibility terms.';
     if (!signatureDataUrl) { setSignatureError(true); return 'Please sign the form before submitting.'; }
     if (!gAgreed) { setConsentErrs({ agree: true }); return 'Please tick the box to confirm you agree to the privacy notice.'; }
     if (!gSig) { setConsentErrs({ gsig: true }); return 'Please sign the privacy notice before submitting.'; }
@@ -450,6 +482,7 @@ export default function Signup() {
         }
       }
 
+      const relationshipText = relationshipOf(form, audience);
       const studentRow = {
         id: studentId, 
         name: studentName, 
@@ -474,11 +507,18 @@ export default function Signup() {
           document: 'indemnity',
           version: INDEMNITY_VERSION,
           signed_by_name: parentName,
-          relationship: audience === 'adult' ? 'Self (adult participant)' : 'Parent or legal guardian',
+          relationship: relationshipText,
           authority: audience === 'adult'
             ? 'Adult participant (18 or over) signing for themselves'
-            : 'Parent or legal guardian signing for a minor',
+            : 'Parent or legal guardian signing for a minor (confirmed by tick box)',
+          authority_confirmed: audience === 'adult' ? true : form.authorityConfirmed,
           audience,
+          emergency_contact: {
+            name: form.emergencyName.trim(),
+            phone: form.emergencyPhone.trim(),
+            relationship: form.emergencyRelationship.trim() || null
+          },
+          acknowledged: { risks: true, responsibility: true, health_and_emergency_treatment: true },
           signed_at: new Date().toISOString()
         },
         ...(isYoung ? { young_athlete: { ...young, collectors: young.collectors.filter(c => c.name.trim()) } } : {}),
@@ -521,7 +561,7 @@ export default function Signup() {
           p_parent_name: parentName,
           p_parent_phone: form.parent1Phone.trim(),
           p_parent_email: form.parent1Email.trim(),
-          p_details: { relationship: audience === 'adult' ? 'Self (adult participant)' : 'Parent or legal guardian', audience },
+          p_details: { relationship: relationshipText, audience },
           p_general_signature: gSig,
           p_media_choices: mChoices,
           p_media_signature: mSig,
@@ -604,9 +644,15 @@ export default function Signup() {
           </div>
           <h2 style={{ fontSize: '22px', fontWeight: 900, color: '#1e4da1', fontStyle: 'italic', marginBottom: '8px' }}>YOU'RE IN!</h2>
           <p style={{ color: '#475569', fontSize: '15px', lineHeight: '1.6', marginBottom: '6px' }}>
-            <strong>{submittedForm.studentFirstName}</strong> has been registered. We will be in touch shortly regarding class assignment.
+            {audience === 'adult'
+              ? 'You are registered. We will be in touch shortly regarding class assignment.'
+              : <><strong>{submittedForm.studentFirstName}</strong> has been registered. We will be in touch shortly regarding class assignment.</>}
           </p>
-          <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '28px' }}>Download your signed indemnity form for your records. 📄</p>
+          {isYoung && (
+            <p style={{ color: '#475569', fontSize: '13px', lineHeight: '1.6', marginBottom: '6px' }}>Remember, an adult needs to stay at the venue for the whole class.</p>
+          )}
+          <p style={{ color: '#475569', fontSize: '13px', lineHeight: '1.6', marginBottom: '6px' }}>You can change your photo and video choices at any time. Just message us on WhatsApp 069 040 3387.</p>
+          <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '28px' }}>Download your signed forms for your records.</p>
           <button onClick={handleDownloadPdf} disabled={generatingPdf} style={{ width: '100%', padding: '16px', background: generatingPdf ? '#f1f5f9' : 'linear-gradient(135deg, #1e4da1, #1e3a6e)', color: generatingPdf ? '#94a3b8' : 'white', border: 'none', borderRadius: '14px', fontSize: '14px', fontWeight: 900, fontStyle: 'italic', letterSpacing: '0.5px', textTransform: 'uppercase', cursor: generatingPdf ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', boxShadow: generatingPdf ? 'none' : '0 8px 24px rgba(30,77,161,0.35)', marginBottom: '12px' }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             {generatingPdf ? 'Generating PDF...' : 'Download Indemnity Form (PDF)'}
@@ -618,7 +664,7 @@ export default function Signup() {
                   kind, lang: 'en',
                   childNames: `${submittedForm.studentFirstName} ${submittedForm.studentLastName}`.trim(),
                   parentName: submittedForm.parent1Name || `${submittedForm.studentFirstName} ${submittedForm.studentLastName}`.trim(), parentPhone: submittedForm.parent1Phone, parentEmail: submittedForm.parent1Email,
-                  relationship: audience === 'adult' ? 'Self (adult participant)' : 'Parent or legal guardian', audience,
+                  relationship: relationshipOf(submittedForm, audience), audience,
                   choices: kind === 'media' ? (mChoices as Record<string, boolean>) : { agreed: true },
                   signature: kind === 'media' ? mSig : gSig, signedAt: new Date().toISOString(),
                   version: kind === 'media' ? MEDIA_VERSION : GENERAL_VERSION, status: 'signed'
@@ -653,7 +699,7 @@ export default function Signup() {
       <div style={{ maxWidth: '480px', margin: '24px auto', padding: '0 16px 40px' }}>
         <div style={{ background: 'white', borderRadius: '24px', overflow: 'hidden', boxShadow: '0 25px 50px rgba(0,0,0,0.35)' }}>
 
-          <Section label="Student Details" icon="🤸" color="#6366f1">
+          <Section label={audience === 'adult' ? 'Your Details' : 'Student Details'} icon="🤸" color="#6366f1">
             <Row>
               <div style={{ flex: 1 }}><Label>First Name *</Label><Input value={form.studentFirstName} onChange={set('studentFirstName')} placeholder="e.g. Leah" /></div>
               <div style={{ flex: 1 }}><Label>Last Name *</Label><Input value={form.studentLastName} onChange={set('studentLastName')} placeholder="e.g. Smith" /></div>
@@ -664,17 +710,45 @@ export default function Signup() {
             </Row>
           </Section>
 
+          {tooYoung && (
+            <div style={{ padding: '20px 24px 28px', borderTop: '1px solid #f1f5f9' }}>
+              <p style={{ margin: 0, padding: '14px 16px', background: '#fff7ed', border: '1.5px solid #fed7aa', borderRadius: '12px', fontSize: '13px', lineHeight: 1.6, color: '#9a3412', fontWeight: 600 }}>{UNDER_MIN_AGE_MESSAGE}</p>
+            </div>
+          )}
+          {!tooYoung && (<>
           <Section label={audience === 'adult' ? 'Your Contact Details' : 'Primary Parent / Guardian'} icon="👤" color="#0891b2">
             <Label>{audience === 'adult' ? 'Your Full Name' : 'Full Name *'}</Label>
             <Input value={form.parent1Name} onChange={set('parent1Name')} placeholder="e.g. Sarah Smith" />
+            {audience !== 'adult' && (
+              <>
+                <Label>Relationship to the child *</Label>
+                <select value={form.relationship} onChange={set('relationship')} style={selectStyle}>
+                  <option value="">Choose one</option>
+                  <option value="Mother">Mother</option>
+                  <option value="Father">Father</option>
+                  <option value="Legal guardian">Legal guardian</option>
+                  <option value="Other">Other, please say</option>
+                </select>
+                {form.relationship === 'Other' && (
+                  <Input value={form.relationshipOther} onChange={set('relationshipOther')} placeholder="Your relationship to the child" />
+                )}
+              </>
+            )}
             <Row>
               <div style={{ flex: 1 }}><Label>Phone Number *</Label><Input type="tel" value={form.parent1Phone} onChange={set('parent1Phone')} placeholder="e.g. 082 123 4567" /></div>
               <div style={{ flex: 1 }}><Label>Email Address *</Label><Input type="email" value={form.parent1Email} onChange={set('parent1Email')} placeholder="e.g. sarah@email.com" /></div>
             </Row>
+            {audience !== 'adult' && (
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', padding: '12px', background: form.authorityConfirmed ? '#f0fdf4' : '#f8fafc', borderRadius: '10px', border: `1.5px solid ${form.authorityConfirmed ? '#bbf7d0' : '#e2e8f0'}` }}>
+                <input type="checkbox" checked={form.authorityConfirmed} onChange={e => { setForm(prev => ({ ...prev, authorityConfirmed: e.target.checked })); if (error) setError(''); }} style={{ width: '18px', height: '18px', marginTop: '1px', flexShrink: 0, accentColor: '#1e4da1' }} />
+                <span style={{ fontSize: '12px', color: '#475569', lineHeight: '1.5', fontWeight: 600 }}>I am this child's parent or legal guardian, and I am allowed to make decisions about their activities and medical care. *</span>
+              </label>
+            )}
           </Section>
 
           {audience !== 'adult' && (
           <Section label="Second Parent / Guardian" icon="👤" color="#7c3aed" subtitle="Optional">
+            <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>Optional. We may phone them if we cannot reach you.</p>
             <Row>
               <div style={{ flex: 1 }}><Label>Full Name</Label><Input value={form.parent2Name} onChange={set('parent2Name')} placeholder="e.g. John Smith" /></div>
               <div style={{ flex: 1 }}><Label>Phone Number</Label><Input type="tel" value={form.parent2Phone} onChange={set('parent2Phone')} placeholder="e.g. 083 987 6543" /></div>
@@ -682,11 +756,22 @@ export default function Signup() {
           </Section>
           )}
 
+          <Section label="Emergency Contact" icon="🚑" color="#dc2626">
+            <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>{audience === 'adult' ? 'Someone we can phone if you are hurt or ill.' : 'Someone we can phone if we cannot reach you.'}</p>
+            <Label>Full Name *</Label>
+            <Input value={form.emergencyName} onChange={set('emergencyName')} placeholder="e.g. Anna Smith" />
+            <Row>
+              <div style={{ flex: 1 }}><Label>Phone Number *</Label><Input type="tel" value={form.emergencyPhone} onChange={set('emergencyPhone')} placeholder="e.g. 082 123 4567" /></div>
+              <div style={{ flex: 1 }}><Label>{audience === 'adult' ? 'Relationship to you' : 'Relationship to the child'}</Label><Input value={form.emergencyRelationship} onChange={set('emergencyRelationship')} placeholder="e.g. grandmother, uncle, neighbour" /></div>
+            </Row>
+          </Section>
+
           {isYoung && (
             <Section label="Young Athlete (ages 2 to 4)" icon="🧸" color="#ea580c">
+              <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>Children this young need an adult close by. This is how we keep your child safe.</p>
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', padding: '12px', background: young.stays ? '#f0fdf4' : '#fff7ed', borderRadius: '10px', border: `1.5px solid ${young.stays ? '#bbf7d0' : '#fed7aa'}` }}>
                 <input type="checkbox" checked={young.stays} onChange={e => setYoung(y => ({ ...y, stays: e.target.checked }))} style={{ width: '18px', height: '18px', marginTop: '1px', flexShrink: 0, accentColor: '#1e4da1' }} />
-                <span style={{ fontSize: '12px', color: '#475569', lineHeight: '1.5', fontWeight: 600 }}>A parent, guardian or other responsible adult will stay at the venue, or be immediately reachable, for the whole class. *</span>
+                <span style={{ fontSize: '12px', color: '#475569', lineHeight: '1.5', fontWeight: 600 }}>A parent, guardian or other responsible adult will stay at the venue for the whole class. *</span>
               </label>
               <Row>
                 <div style={{ flex: 1 }}><Label>Adult at the venue (if not a parent)</Label><Input value={young.adultName} onChange={e => setYoung(y => ({ ...y, adultName: e.target.value }))} placeholder="Name" /></div>
@@ -699,13 +784,32 @@ export default function Signup() {
                   <div style={{ flex: 1 }}><Input type="tel" value={c.phone} onChange={e => setYoung(y => ({ ...y, collectors: y.collectors.map((x, j) => j === i ? { ...x, phone: e.target.value } : x) }))} placeholder="Cell number" /></div>
                 </Row>
               ))}
+              <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>We will only hand your child over to these people. If someone else is collecting, please message us before the class.</p>
               <Label>Anything the coaches should know (separation anxiety, fears, sensitivities)</Label>
               <textarea value={young.notes} onChange={e => setYoung(y => ({ ...y, notes: e.target.value }))} style={{ ...inputStyle, minHeight: '60px', resize: 'vertical' as const }} />
             </Section>
           )}
 
-          {/* Indemnity & Medical Declaration */}
-          <Section label="Indemnity & Medical Declaration" icon="📋" color="#dc2626">
+          {/* Health and emergencies */}
+          <Section label="Health and Emergencies" icon="🩺" color="#dc2626">
+            {(() => { const hs = healthSectionFor(audience); return (<>
+              <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>{hs.why}</p>
+              <Label>{hs.label}</Label>
+              <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8' }}>{hs.hint}</p>
+              <textarea value={form.medicalNotes} onChange={set('medicalNotes')} placeholder="e.g. None / Asthma / Previous knee injury..." style={{ ...inputStyle, minHeight: '72px', resize: 'vertical' as const }} />
+              <div style={{ background: '#fffafa', border: '1.5px solid #fecaca', borderRadius: '12px', padding: '14px 16px', fontSize: '12px', lineHeight: '1.7', color: '#475569' }}>
+                <p style={{ margin: '0 0 6px', fontWeight: 900, color: '#1e4da1' }}>{hs.emergencyHeading}</p>
+                {hs.emergency.map(t => <p key={t} style={{ margin: '0 0 8px', color: '#1e293b' }}>{t}</p>)}
+              </div>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', padding: '12px', background: form.healthAgreed ? '#f0fdf4' : '#fff7f7', borderRadius: '10px', border: `1.5px solid ${form.healthAgreed ? '#bbf7d0' : '#fecaca'}` }}>
+                <input type="checkbox" checked={form.healthAgreed} onChange={e => { setForm(prev => ({ ...prev, healthAgreed: e.target.checked })); if (error) setError(''); }} style={{ width: '18px', height: '18px', marginTop: '1px', flexShrink: 0, accentColor: '#1e4da1' }} />
+                <span style={{ fontSize: '12px', color: '#475569', lineHeight: '1.5', fontWeight: 600 }}>{hs.tick}</span>
+              </label>
+            </>); })()}
+          </Section>
+
+          {/* Risks and indemnity */}
+          <Section label="Risks and Indemnity" icon="📋" color="#dc2626">
             <div style={{ border: '2px solid #dc2626', borderRadius: '14px', overflow: 'hidden' }}>
               <div style={{ background: '#dc2626', color: 'white', padding: '8px 14px', fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px' }}>
                 ⚠ Important: the risks and your responsibility. Please read all of it.
@@ -713,40 +817,37 @@ export default function Signup() {
               <div ref={indemnityBoxRef}
                 onScroll={e => { const el = e.currentTarget; if (el.scrollTop + el.clientHeight >= el.scrollHeight - 8) setIndemnityRead(true); }}
                 style={{ background: '#fffafa', padding: '16px', fontSize: '12px', lineHeight: '1.7', color: '#475569', maxHeight: '320px', overflowY: 'auto' }}>
-              {audience === 'adult' ? (
-                <p style={{ margin: '0 0 10px', color: '#1e293b', fontSize: '12px' }}>
-                  {INDEMNITY_INTRO_ADULT(form.parent1Name.trim() || `${form.studentFirstName} ${form.studentLastName}`.trim())}
-                </p>
-              ) : (
               <p style={{ margin: '0 0 10px', color: '#1e293b', fontSize: '12px' }}>
-                I, <strong style={{ color: '#1e4da1', textDecoration: 'underline', textUnderlineOffset: '2px' }}>{form.parent1Name || '___________________'}</strong>, Parent/Legal Guardian of the enrolled student{' '}
-                <strong style={{ color: '#1e4da1', textDecoration: 'underline', textUnderlineOffset: '2px' }}>{`${form.studentFirstName} ${form.studentLastName}`.trim() || '___________________'}</strong>,
-                hereby indemnify and confirm that my child is physically, medically and mentally fit to become a member of <strong>JFLIPS TUMBLING</strong> and to participate in the sport of tumbling. I hereby acknowledge the possibility of injury occurring whilst doing tumbling.
+                {audience === 'adult'
+                  ? INDEMNITY_INTRO_ADULT(form.parent1Name.trim() || `${form.studentFirstName} ${form.studentLastName}`.trim())
+                  : INDEMNITY_INTRO_MINOR(form.parent1Name.trim(), `${form.studentFirstName} ${form.studentLastName}`.trim())}
               </p>
-              )}
+              {(() => { const r = indemnityRisksFor(audience); return (
+                <div style={{ margin: '0 0 10px', color: '#1e293b', fontSize: '12px' }}>
+                  <p style={{ margin: '0 0 4px' }}><strong style={{ color: '#1e4da1' }}>{INDEMNITY_RISKS.heading}.</strong> {r.intro}</p>
+                  {r.items.map(i => <p key={i} style={{ margin: '0 0 2px', paddingLeft: '6px' }}>• {i}</p>)}
+                  <p style={{ margin: '4px 0 0' }}>{r.outro}</p>
+                </div>
+              ); })()}
               {indemnityClausesFor(audience).map(c => (
                 <p key={c.heading} style={{ margin: '0 0 10px', color: '#1e293b', fontSize: '12px' }}>
                   <strong style={{ color: '#1e4da1' }}>{c.heading}.</strong> {c.text}
                 </p>
               ))}
-              <p style={{ margin: 0, fontWeight: 700, color: '#1e293b', fontSize: '11px' }}>
-                {audience === 'adult'
-                  ? 'Please list any physical disabilities, history of illness, or allergies you have which we should be aware of (e.g. previous fractures, muscle tone, asthma, etc.):'
-                  : 'Please list any physical disabilities, history of illness, or allergies the enrolled child has which we should be aware of (e.g. previous fractures, muscle tone, asthma, etc.):'}
-              </p>
               </div>
             </div>
 
-            <Label>Medical / Allergy Notes</Label>
-            <textarea value={form.medicalNotes} onChange={set('medicalNotes')} placeholder="e.g. None / Asthma / Previous knee injury..." style={{ ...inputStyle, minHeight: '72px', resize: 'vertical' as const }} />
-
             {!indemnityRead && (
-              <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#b91c1c' }}>Scroll to the bottom of the box above to unlock the tick box.</p>
+              <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#b91c1c' }}>Scroll to the bottom of the box above to unlock the tick boxes.</p>
             )}
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: indemnityRead ? 'pointer' : 'not-allowed', opacity: indemnityRead ? 1 : 0.6, padding: '12px', background: form.risksAcknowledged ? '#f0fdf4' : '#fff7f7', borderRadius: '10px', border: `1.5px solid ${form.risksAcknowledged ? '#bbf7d0' : '#fecaca'}`, transition: 'all 0.2s' }}>
+              <input type="checkbox" disabled={!indemnityRead} checked={form.risksAcknowledged} onChange={e => { setForm(prev => ({ ...prev, risksAcknowledged: e.target.checked })); if (error) setError(''); }} style={{ width: '18px', height: '18px', marginTop: '1px', flexShrink: 0, accentColor: '#1e4da1' }} />
+              <span style={{ fontSize: '12px', color: '#475569', lineHeight: '1.5', fontWeight: 600 }}>I have read and understood the risks described above. *</span>
+            </label>
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: indemnityRead ? 'pointer' : 'not-allowed', opacity: indemnityRead ? 1 : 0.6, padding: '12px', background: form.indemnityAgreed ? '#f0fdf4' : '#fff7f7', borderRadius: '10px', border: `1.5px solid ${form.indemnityAgreed ? '#bbf7d0' : '#fecaca'}`, transition: 'all 0.2s' }}>
-              <input type="checkbox" disabled={!indemnityRead} checked={form.indemnityAgreed} onChange={e => setForm(prev => ({ ...prev, indemnityAgreed: e.target.checked }))} style={{ width: '18px', height: '18px', marginTop: '1px', flexShrink: 0, accentColor: '#1e4da1' }} />
+              <input type="checkbox" disabled={!indemnityRead} checked={form.indemnityAgreed} onChange={e => { setForm(prev => ({ ...prev, indemnityAgreed: e.target.checked })); if (error) setError(''); }} style={{ width: '18px', height: '18px', marginTop: '1px', flexShrink: 0, accentColor: '#1e4da1' }} />
               <span style={{ fontSize: '12px', color: '#475569', lineHeight: '1.5', fontWeight: 600 }}>
-                I confirm I have read and understood the indemnity declaration above, and agree to its terms{audience === 'adult' ? '' : ' on behalf of myself and the enrolled student'}. *
+                I agree to the responsibility terms above{audience === 'adult' ? '' : ', on my own behalf and on behalf of the enrolled student'}. *
               </span>
             </label>
 
@@ -758,6 +859,7 @@ export default function Signup() {
               <div style={{ border: signatureError ? '2px solid #ef4444' : '2px solid transparent', borderRadius: '14px', transition: 'border-color 0.2s' }}>
                 <SignaturePad onSign={handleSign} cleared={clearSig} />
               </div>
+              <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#94a3b8' }}>Sign with your finger or your mouse.</p>
               {signatureDataUrl && (
                 <p style={{ fontSize: '11px', color: '#16a34a', fontWeight: 600, marginTop: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
@@ -784,6 +886,8 @@ export default function Signup() {
             />
           </Section>
 
+          </>)}
+
           <div style={{ padding: '24px' }}>
             {error && (
               <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '12px', padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -791,11 +895,11 @@ export default function Signup() {
                 <span style={{ fontSize: '13px', color: '#dc2626', fontWeight: 600 }}>{error}</span>
               </div>
             )}
-            <button onClick={handleSubmit} disabled={loading} style={{ width: '100%', padding: '18px', background: loading ? '#93c5fd' : 'linear-gradient(135deg, #1e4da1, #1e3a6e)', color: 'white', border: 'none', borderRadius: '14px', fontSize: '14px', fontWeight: 900, fontStyle: 'italic', letterSpacing: '1px', textTransform: 'uppercase', cursor: loading ? 'not-allowed' : 'pointer', boxShadow: loading ? 'none' : '0 8px 24px rgba(30,77,161,0.4)', transition: 'all 0.2s' }}>
+            <button onClick={handleSubmit} disabled={loading || tooYoung} style={{ width: '100%', padding: '18px', background: loading ? '#93c5fd' : 'linear-gradient(135deg, #1e4da1, #1e3a6e)', color: 'white', border: 'none', borderRadius: '14px', fontSize: '14px', fontWeight: 900, fontStyle: 'italic', letterSpacing: '1px', textTransform: 'uppercase', cursor: loading ? 'not-allowed' : 'pointer', boxShadow: loading ? 'none' : '0 8px 24px rgba(30,77,161,0.4)', transition: 'all 0.2s' }}>
               {loading ? '⏳ Submitting...' : '✅ Complete Registration'}
             </button>
             <p style={{ textAlign: 'center', fontSize: '11px', color: '#94a3b8', marginTop: '12px' }}>
-              By submitting you agree to the indemnity declaration. A signed PDF will be available to download.
+              By pressing the button you confirm what you have ticked and signed above. A signed PDF of each form will be available to download.
             </p>
           </div>
         </div>

@@ -19,8 +19,8 @@ import type { Audience } from './indemnityText';
 export type Lang = 'en';
 export type ConsentKind = 'general' | 'media';
 
-export const GENERAL_VERSION = '1.2-draft';
-export const MEDIA_VERSION = '1.0';
+export const GENERAL_VERSION = '1.3-draft';
+export const MEDIA_VERSION = '1.1-draft';
 
 export const MEDIA_KEYS = [
   'instagramFacebookPhotos',
@@ -63,6 +63,7 @@ export const MEDIA_FORM: Record<Lang, {
   title: string; subtitle: string; intro: string;
   uses: Record<MediaKey, string>;
   useHeading: string; yes: string; no: string;
+  othersHeading: string; others: string;
   promiseHeading: string; promises: string[];
   rightsHeading: string; rights: string[];
   declarationHeading: string; declaration: string;
@@ -82,6 +83,8 @@ export const MEDIA_FORM: Record<Lang, {
       printedMaterial: 'Photos and videos of my child in printed material and presentations to schools, such as brochures',
       internalRecordings: 'Recordings of my child during classes for coaching and progress, which are not made public'
     },
+    othersHeading: 'Photos taken by other people',
+    others: 'At competitions and showcases, organisers, other clubs and spectators may take photos and videos. We cannot control what they do with them. If you do not want your child photographed at an event, tell the coach before the event.',
     promiseHeading: 'Our promise',
     promises: [
       'We only use photos and videos to promote JFlips and the sport and to show children\'s progress.',
@@ -94,7 +97,7 @@ export const MEDIA_FORM: Record<Lang, {
     rights: [
       "You can change or withdraw your consent at any time by contacting us. We will then remove the photos and videos from JFlips's own pages and website as soon as possible. We cannot control content that others have already saved or shared.",
       'You can ask what information we hold about your child, and ask for it to be corrected or deleted.',
-      'This form and your choices are kept for as long as your child is at JFlips, and after that only for as long as necessary.',
+      'We keep this form and your choices as proof of what you agreed, for as long as your child is at JFlips and afterwards for as long as the law requires or a claim could be made.',
       "If you feel your child's personal information has been mishandled, you can lodge a complaint with the Information Regulator: POPIAComplaints@inforegulator.org.za."
     ],
     declarationHeading: 'Declaration and signature',
@@ -114,32 +117,27 @@ export const GENERAL_FORM: Record<Lang, {
   en: {
     title: 'Privacy notice and consent',
     subtitle: 'In terms of the Protection of Personal Information Act (POPIA)',
-    intro: "JFlips is the responsible party for your family's personal information. This notice explains what we collect, why we collect it, who can see it and what your rights are. Please read it and confirm below.",
+    intro: "JFlips is the responsible party for your family's personal information. This notice tells you what we collect, why we collect it, who can see it, where it is kept and what your rights are. Please read it and confirm below.",
     sections: [
       {
         heading: 'Who is responsible for your information',
         items: [
-          'JFlips (Jeandre Blacquiere). You can contact us on WhatsApp 069 040 3387 or at jflipsinc@gmail.com.'
+          'JFlips (Jeandre Blacquiere). Our Information Officer is Jeandre Blacquiere. You can reach us on WhatsApp 069 040 3387 or at jflipsinc@gmail.com.'
         ]
       },
       {
         heading: 'What we collect',
         items: [
-          "About your child: name, date of birth and age, class or team, attendance, and any medical conditions, injuries or allergies you tell us about.",
-          'About you: name, relationship to the child, cell number, email address and your signature.',
-          'Billing: invoices, the amounts owed and whether they have been paid.'
-        ]
-      },
-      {
-        heading: 'Payments',
-        items: [
-          'Payments are made by EFT (electronic funds transfer).'
+          'About your child: name, date of birth and age, class or team, attendance, and any medical conditions, injuries or allergies you tell us about. For children aged 2 to 4: who will stay at the venue and who may collect them.',
+          'About you: name, relationship to the child, cell number, email address and your signature. Also the name and number of your emergency contact.',
+          'Billing: invoices, the amounts owed and whether they have been paid. Payments are made by EFT, so we do not hold card details.',
+          'A record of what you agreed to: which version of each form you saw, and the date and time you signed.'
         ]
       },
       {
         heading: 'Is giving us your information voluntary?',
         items: [
-          'Yes, but we need your details, an emergency contact and your child\'s health information to enrol your child and keep them safe. Without them we cannot enrol your child. Giving us photo and video consent is a separate choice and is always optional.'
+          "Yes. But we cannot enrol your child without your details, an emergency contact and your child's health information, because we need them to keep your child safe. Photo and video consent is a separate choice and is always optional."
         ]
       },
       {
@@ -148,21 +146,29 @@ export const GENERAL_FORM: Record<Lang, {
           'To register your child and run classes, teams and practices safely.',
           'To contact you about classes, schedules, emergencies and payments.',
           'To invoice you and record payments.',
-          'To keep the records the law requires, such as financial records.',
-          "Your child's medical information is special personal information. We use it only to keep your child safe and to give the right information to a doctor or medical help in an emergency."
+          'To keep the records the law requires, such as financial records, and to protect ourselves if a claim is made.',
+          "Your child's medical information is special personal information. We use it only to keep your child safe and to tell a doctor or medical helper what they need to know in an emergency."
         ]
       },
       {
         heading: 'Who can see it',
         items: [
-          "JFlips management. Your child's coaches can see your child's name, age, medical information and your contact numbers, so they can keep your child safe and reach you in an emergency. Your signature, email address and billing details stay with management.",
-          'We do not sell your information, and we do not share it with anyone else unless the law requires it or a doctor needs it in an emergency.'
+          'JFlips management can see all of it.',
+          "Your child's coaches can see your child's name, age, medical information and your contact numbers, so they can keep your child safe and reach you in an emergency. They cannot see your signature, email address or billing details.",
+          'The companies that run the services we use to store and send information for us (see below). They may only use it for that.',
+          'We do not sell your information. We do not share it with anyone else unless the law requires it or a doctor or medical helper needs it in an emergency.'
+        ]
+      },
+      {
+        heading: 'Where it is kept',
+        items: [
+          "Your information is stored in an online database run by Supabase. Our app and website are hosted by Vercel. We use Google Firebase to send alerts to our coaches' phones and Resend to send emails. Some of these companies are outside South Africa, so your information is sent to other countries. We only use them to run JFlips, and only people with their own login can open the information."
         ]
       },
       {
         heading: 'How long we keep it',
         items: [
-          'We will delete all of your and your child\'s information when your child chooses to leave the club, once you have told us so and all accounts are paid.'
+          'We keep your information while your child is enrolled. After they leave, we delete what we no longer need. We keep some records for longer, because the law requires it or because a claim could still be made: financial records, signed forms like this one, and incident or injury records. You can ask us how long we keep any record.'
         ]
       },
       {
@@ -196,11 +202,14 @@ export function mediaFormFor(a: Audience) {
       printedMaterial: 'Photos and videos of me in printed material and presentations to schools, such as brochures',
       internalRecordings: 'Recordings of me during classes for coaching and progress, which are not made public'
     },
+    others: 'At competitions and showcases, organisers, other clubs and spectators may take photos and videos. We cannot control what they do with them. If you do not want to be photographed at an event, tell the coach before the event.',
     promises: base.promises.map((p, i) => i === 1
       ? 'We do not name your surname or address with photos and videos, and we do not tag you on social media.'
       : p),
     rights: base.rights.map((r, i) => i === 1
       ? 'You can ask what information we hold about you, and ask for it to be corrected or deleted.'
+      : i === 2
+        ? 'We keep this form and your choices as proof of what you agreed, for as long as you are at JFlips and afterwards for as long as the law requires or a claim could be made.'
       : i === 3
         ? 'If you feel your personal information has been mishandled, you can lodge a complaint with the Information Regulator: POPIAComplaints@inforegulator.org.za.'
         : r),
@@ -214,15 +223,18 @@ export function generalFormFor(a: Audience) {
   const swap: Record<string, string[]> = {
     'What we collect': [
       'About you: name, date of birth and age, class or team, attendance, and any medical conditions, injuries or allergies you tell us about.',
-      'Contact details: your cell number, email address and your signature.',
-      'Billing: invoices, the amounts owed and whether they have been paid.'
+      'Contact details: your cell number, email address and signature, and the name and number of your emergency contact.',
+      'Billing: invoices, the amounts owed and whether they have been paid. Payments are made by EFT, so we do not hold card details.',
+      'A record of what you agreed to: which version of each form you saw, and the date and time you signed.'
     ],
     'Who can see it': [
-      "JFlips management. Your coaches can see your name, age, medical information and your cell number, so they can keep you safe and reach you in an emergency. Your signature, email address and billing details stay with management.",
-      'We do not sell your information, and we do not share it with anyone else unless the law requires it or a doctor needs it in an emergency.'
+      'JFlips management can see all of it.',
+      'Your coaches can see your name, age, medical information and cell number, so they can keep you safe and reach you in an emergency. They cannot see your signature, email address or billing details.',
+      'The companies that run the services we use to store and send information for us (see below). They may only use it for that.',
+      'We do not sell your information. We do not share it with anyone else unless the law requires it or a doctor or medical helper needs it in an emergency.'
     ],
     'How long we keep it': [
-      'We will delete all of your information when you choose to leave the club, once you have told us so and all accounts are paid.'
+      'We keep your information while you are enrolled. After you leave, we delete what we no longer need. We keep some records for longer, because the law requires it or because a claim could still be made: financial records, signed forms like this one, and incident or injury records. You can ask us how long we keep any record.'
     ],
     'Your rights': [
       'You can ask what information we hold about you, and ask for it to be corrected or deleted.',
@@ -233,11 +245,11 @@ export function generalFormFor(a: Audience) {
       'To enrol you and run classes, teams and practices safely.',
       'To contact you about classes, schedules, emergencies and payments.',
       'To invoice you and record payments.',
-      'To keep the records the law requires, such as financial records.',
-      'Your medical information is special personal information. We use it only to keep you safe and to give the right information to a doctor or medical help in an emergency.'
+      'To keep the records the law requires, such as financial records, and to protect ourselves if a claim is made.',
+      'Your medical information is special personal information. We use it only to keep you safe and to tell a doctor or medical helper what they need to know in an emergency.'
     ],
     'Is giving us your information voluntary?': [
-      'Yes, but we need your details, an emergency contact and your health information to enrol you and keep you safe. Without them we cannot enrol you. Photo and video consent is a separate choice and is always optional.'
+      'Yes. But we cannot enrol you without your details, an emergency contact and your health information, because we need them to keep you safe. Photo and video consent is a separate choice and is always optional.'
     ]
   };
   return {
@@ -400,6 +412,7 @@ export function generateConsentPdf(input: ConsentPdfInput, opts: { save?: boolea
       y += lines.length * 5 + 3;
     });
     y += 2;
+    heading(media.othersHeading); para(media.others, { gap: 4 }); y += 2;
     heading(media.promiseHeading); media.promises.forEach(bullet); y += 2;
     heading(media.rightsHeading); media.rights.forEach(bullet); y += 2;
   } else {

@@ -101,6 +101,8 @@ export const MediaConsentSection: React.FC<{
       <p style={{ margin: 0, fontSize: '11px', color: '#64748b' }}>{ui.optional}</p>
 
       <div style={card}>
+        <p style={{ ...h, margin: '0 0 4px' }}>{f.othersHeading}</p>
+        <p style={{ margin: 0 }}>{f.others}</p>
         <p style={h}>{f.promiseHeading}</p>
         {f.promises.map(p => <p key={p} style={li}>• {p}</p>)}
         <p style={h}>{f.rightsHeading}</p>
