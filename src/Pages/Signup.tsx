@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from '../../supabase';
 import { ClassType } from '../../types';
 import { notifyUser } from '../utils/notifications';
-import jsPDF from 'jspdf';
+import { buildIndemnityPdf, indemnityPdfFileName } from '../utils/indemnityPdf';
 import { SignaturePad } from '../components/SignaturePad';
 import {
   INDEMNITY_INTRO_ADULT, INDEMNITY_INTRO_MINOR, INDEMNITY_RISKS, INDEMNITY_VERSION, MIN_AGE, UNDER_MIN_AGE_MESSAGE,
@@ -65,193 +65,19 @@ const EMPTY_FORM: FormData = {
 const relationshipOf = (f: FormData, audience: Audience) =>
   audience === 'adult' ? 'Self (adult participant)' : ((f.relationship === 'Other' ? f.relationshipOther.trim() : f.relationship) || 'Parent or legal guardian');
 
-// ── PDF Generator ─────────────────────────────────────────────
+// ── PDF Generator: the shared builder, so this and the owner's re-print match ──
 async function generateIndemnityPDF(form: FormData, signatureDataUrl: string, className: string, audience: Audience = 'minor', young: YoungAthlete | null = null) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const pageW = 210;
-  const margin = 20;
-  const contentW = pageW - margin * 2;
-  let y = 20;
-
-  const rgb = (hex: string): [number, number, number] => [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
-
-  // Header bar
-  doc.setFillColor(30, 77, 161);
-  doc.rect(0, 0, pageW, 28, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(18); doc.setFont('helvetica', 'bolditalic');
-  doc.text('JFLIPS', margin, 17);
-  doc.setFontSize(8); doc.setFont('helvetica', 'normal');
-  doc.text('STUNTING & TUMBLING', margin + 28, 17);
-  doc.setFontSize(9);
-  doc.text('INDEMNITY & MEDICAL DECLARATION', pageW - margin, 17, { align: 'right' });
-  y = 38;
-
-  // Title
-  doc.setTextColor(...rgb('#1e4da1'));
-  doc.setFontSize(13); doc.setFont('helvetica', 'bold');
-  doc.text('INDEMNITY & MEDICAL DECLARATION', margin, y);
-  doc.setDrawColor(30, 77, 161); doc.setLineWidth(0.5);
-  doc.line(margin, y + 3, pageW - margin, y + 3);
-  y += 12;
-
   const studentName = `${form.studentFirstName} ${form.studentLastName}`.trim();
-
-  // Page-safe layout: the wording is longer than one page.
-  const ensure = (need: number) => {
-    if (y + need > 276) { doc.addPage(); y = 20; }
-  };
-  const text = (t: string, o: { bold?: boolean; indent?: number; gap?: number } = {}) => {
-    doc.setFont('helvetica', o.bold ? 'bold' : 'normal'); doc.setFontSize(10); doc.setTextColor(...rgb('#1e293b'));
-    const lines = doc.splitTextToSize(t, contentW - (o.indent || 0));
-    ensure(lines.length * 5 + (o.gap ?? 4));
-    doc.text(lines, margin + (o.indent || 0), y);
-    y += lines.length * 5 + (o.gap ?? 4);
-  };
-  const heading = (t: string) => {
-    ensure(14);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...rgb('#1e4da1'));
-    doc.text(t, margin, y); y += 5.5;
-  };
-
-  // Health and emergencies
-  const hs = healthSectionFor(audience);
-  heading('Health information');
-  text(form.medicalNotes?.trim() || 'None');
-  heading(hs.emergencyHeading);
-  hs.emergency.forEach(t => text(t));
-  text('Confirmed: ' + hs.tick.replace(/ \*$/, ''), { bold: true, gap: 6 });
-
-  // Risks and indemnity
-  heading('Risks and indemnity');
-  text(audience === 'adult'
-    ? INDEMNITY_INTRO_ADULT(form.parent1Name || studentName)
-    : INDEMNITY_INTRO_MINOR(form.parent1Name, studentName));
-  const risks = indemnityRisksFor(audience);
-  heading(INDEMNITY_RISKS.heading);
-  text(risks.intro, { gap: 2 });
-  risks.items.forEach(i => text('•  ' + i, { indent: 3, gap: 1 }));
-  text(risks.outro, { gap: 5 });
-  indemnityClausesFor(audience).forEach(c => { heading(c.heading); text(c.text); });
-  text('Confirmed: I have read and understood the risks described above.', { bold: true, gap: 2 });
-  text(audience === 'adult'
-    ? 'Confirmed: I agree to the responsibility terms above.'
-    : 'Confirmed: I agree to the responsibility terms above, on my own behalf and on behalf of the enrolled student.', { bold: true, gap: 6 });
-
-  // Divider
-  doc.setDrawColor(...rgb('#e2e8f0')); doc.setLineWidth(0.4); doc.line(margin, y, pageW - margin, y); y += 8;
-
-  // Student details section
-  ensure(50);
-  doc.setFillColor(248, 250, 252); doc.rect(margin, y, contentW, 6, 'F');
-  doc.setTextColor(...rgb('#1e4da1')); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
-  doc.text('STUDENT DETAILS', margin + 3, y + 4.5); y += 10;
-
-  const studentFields = [
-    ['Full Name', studentName || '—'],
-    ['Date of Birth', form.dob || '—'],
-    ['Age', form.age ? `${form.age} years` : '—'],
-    ['Class Enrolled', className || '—'],
-  ];
-  doc.setFontSize(9); doc.setTextColor(...rgb('#475569'));
-  studentFields.forEach(([label, value]) => {
-    doc.setFont('helvetica', 'bold'); doc.text(`${label}:`, margin, y);
-    doc.setFont('helvetica', 'normal'); doc.text(value, margin + 42, y);
-    y += 7;
+  const doc = buildIndemnityPdf({
+    studentName, dob: form.dob, age: form.age, className, audience,
+    parentName: form.parent1Name || (audience === 'adult' ? studentName : ''),
+    relationship: relationshipOf(form, audience),
+    phone: form.parent1Phone, email: form.parent1Email,
+    parent2Name: form.parent2Name, parent2Phone: form.parent2Phone,
+    emergency: { name: form.emergencyName, phone: form.emergencyPhone, relationship: form.emergencyRelationship.trim() || null },
+    medicalNotes: form.medicalNotes, young, signature: signatureDataUrl, version: INDEMNITY_VERSION
   });
-  y += 4;
-
-  // Parent details section
-  ensure(50);
-  doc.setFillColor(248, 250, 252); doc.rect(margin, y, contentW, 6, 'F');
-  doc.setTextColor(...rgb('#1e4da1')); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
-  doc.text(audience === 'adult' ? 'YOUR DETAILS' : 'PARENT / GUARDIAN DETAILS', margin + 3, y + 4.5); y += 10;
-
-  const emergencyText = [form.emergencyName, form.emergencyPhone].filter(Boolean).join(' · ')
-    + (form.emergencyRelationship.trim() ? ` (${form.emergencyRelationship.trim()})` : '');
-  const parentFields: [string, string][] = audience === 'adult'
-    ? [
-        ['Name', form.parent1Name || studentName || '—'],
-        ['Phone', form.parent1Phone || '—'],
-        ['Email', form.parent1Email || '—'],
-        ['Emergency contact', emergencyText || '—'],
-      ]
-    : [
-        ['Parent 1 Name', form.parent1Name || '—'],
-        ['Relationship', relationshipOf(form, audience)],
-        ['Parent 1 Phone', form.parent1Phone || '—'],
-        ['Parent 1 Email', form.parent1Email || '—'],
-        ...(form.parent2Name ? [['Parent 2 Name', form.parent2Name] as [string,string], ['Parent 2 Phone', form.parent2Phone || '—'] as [string,string]] : []),
-        ['Emergency contact', emergencyText || '—'],
-        ['Authority', 'Confirmed by tick box: parent or legal guardian, allowed to make decisions about the child\'s activities and medical care'],
-      ];
-  doc.setFontSize(9); doc.setTextColor(...rgb('#475569'));
-  parentFields.forEach(([label, value]) => {
-    const vLines = doc.splitTextToSize(value, contentW - 44);
-    ensure(vLines.length * 5 + 3);
-    doc.setFont('helvetica', 'bold'); doc.text(`${label}:`, margin, y);
-    doc.setFont('helvetica', 'normal'); doc.text(vLines, margin + 42, y);
-    y += Math.max(7, vLines.length * 5 + 2);
-  });
-  y += 6;
-
-  // Divider
-  doc.setDrawColor(...rgb('#e2e8f0')); doc.line(margin, y, pageW - margin, y); y += 8;
-
-  // Young athlete (age 4 and under): the supervision arrangement the parent agreed to
-  if (young) {
-    ensure(70);
-    doc.setFillColor(248, 250, 252); doc.rect(margin, y, contentW, 6, 'F');
-    doc.setTextColor(...rgb('#1e4da1')); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
-    doc.text('YOUNG ATHLETE (AGE 2 TO 4)', margin + 3, y + 4.5); y += 10;
-    const yf: [string, string][] = [
-      ['Adult staying at venue', young.stays ? 'Yes, a parent or responsible adult stays at the venue for the whole class' : 'No'],
-      ['Adult at the venue', [young.adultName, young.adultPhone].filter(Boolean).join(' · ') || 'The parent'],
-      ['May collect the child', young.collectors.filter(c => c.name.trim()).map(c => c.name.trim() + (c.phone.trim() ? ' (' + c.phone.trim() + ')' : '')).join('; ') || '—'],
-      ['Coaches should know', young.notes.trim() || '—'],
-    ];
-    doc.setFontSize(9); doc.setTextColor(...rgb('#475569'));
-    yf.forEach(([label, value]) => {
-      const lines = doc.splitTextToSize(value, contentW - 48);
-      ensure(lines.length * 5 + 4);
-      doc.setFont('helvetica', 'bold'); doc.text(label + ':', margin, y);
-      doc.setFont('helvetica', 'normal'); doc.text(lines, margin + 46, y);
-      y += lines.length * 5 + 2;
-    });
-    y += 4;
-  }
-
-  // Signature section
-  ensure(62);
-  doc.setFillColor(248, 250, 252); doc.rect(margin, y, contentW, 6, 'F');
-  doc.setTextColor(...rgb('#1e4da1')); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
-  doc.text('SIGNATURE', margin + 3, y + 4.5); y += 12;
-
-  if (signatureDataUrl) {
-    doc.addImage(signatureDataUrl, 'PNG', margin, y, 80, 30);
-    y += 34;
-  }
-
-  // Signature line
-  doc.setDrawColor(...rgb('#1e293b')); doc.setLineWidth(0.5);
-  doc.line(margin, y, margin + 80, y);
-  doc.line(margin + 100, y, margin + 160, y);
-  doc.setTextColor(...rgb('#475569')); doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
-  doc.text('Signature', margin, y + 5);
-  doc.setFont('helvetica', 'bold'); doc.text('Date:', margin + 100, y + 5);
-  doc.setFont('helvetica', 'normal'); doc.text(new Date().toLocaleDateString('en-ZA'), margin + 114, y + 5);
-
-  // Footer on every page
-  const pageCount = doc.getNumberOfPages();
-  for (let p = 1; p <= pageCount; p++) {
-    doc.setPage(p);
-    doc.setFillColor(30, 77, 161); doc.rect(0, 287, pageW, 10, 'F');
-    doc.setTextColor(255, 255, 255); doc.setFontSize(7); doc.setFont('helvetica', 'normal');
-    doc.text(`JFLIPS TUMBLING  |  This document serves as an official indemnity declaration.  |  v${INDEMNITY_VERSION}  |  ${p}/${pageCount}`, pageW / 2, 293, { align: 'center' });
-  }
-
-  const filename = `JFLIPS_Indemnity_${studentName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.pdf`;
-  doc.save(filename);
+  doc.save(indemnityPdfFileName(studentName));
 }
 
 // ── Main Component ────────────────────────────────────────────
@@ -318,11 +144,7 @@ export default function Signup() {
   // POPIA: two further forms, each with its own signature. Never pre-answered,
   // and a "No" to any photo/video use never blocks the registration.
   const [gAgreed, setGAgreed] = useState(false);
-  const [gSig, setGSig] = useState('');
-  const [gClear, setGClear] = useState(0);
   const [mChoices, setMChoices] = useState<Partial<Record<MediaKey, boolean>>>({});
-  const [mSig, setMSig] = useState('');
-  const [mClear, setMClear] = useState(0);
   const [consentErrs, setConsentErrs] = useState<Record<string, boolean>>({});
   const [consentSaved, setConsentSaved] = useState(false);
 
@@ -450,11 +272,9 @@ export default function Signup() {
     if (!form.healthAgreed) return 'Please tick the box to confirm your health information and the emergency treatment.';
     if (!form.risksAcknowledged) return 'Please tick the box to confirm you have read the risks.';
     if (!form.indemnityAgreed) return 'Please tick the box to confirm you agree to the responsibility terms.';
-    if (!signatureDataUrl) { setSignatureError(true); return 'Please sign the form before submitting.'; }
     if (!gAgreed) { setConsentErrs({ agree: true }); return 'Please tick the box to confirm you agree to the privacy notice.'; }
-    if (!gSig) { setConsentErrs({ gsig: true }); return 'Please sign the privacy notice before submitting.'; }
     if (!MEDIA_KEYS.every(k => typeof mChoices[k] === 'boolean')) { setConsentErrs({ choices: true }); return 'Please answer Yes or No for every photo and video use.'; }
-    if (!mSig) { setConsentErrs({ msig: true }); return 'Please sign the photo and video consent before submitting.'; }
+    if (!signatureDataUrl) { setSignatureError(true); return 'Please sign at the bottom of the form before submitting.'; }
     setConsentErrs({});
     return '';
   };
@@ -562,9 +382,9 @@ export default function Signup() {
           p_parent_phone: form.parent1Phone.trim(),
           p_parent_email: form.parent1Email.trim(),
           p_details: { relationship: relationshipText, audience },
-          p_general_signature: gSig,
+          p_general_signature: signatureDataUrl,
           p_media_choices: mChoices,
-          p_media_signature: mSig,
+          p_media_signature: signatureDataUrl,
           p_general_version: GENERAL_VERSION,
           p_media_version: MEDIA_VERSION,
           p_token: newConsentToken()
@@ -666,7 +486,7 @@ export default function Signup() {
                   parentName: submittedForm.parent1Name || `${submittedForm.studentFirstName} ${submittedForm.studentLastName}`.trim(), parentPhone: submittedForm.parent1Phone, parentEmail: submittedForm.parent1Email,
                   relationship: relationshipOf(submittedForm, audience), audience,
                   choices: kind === 'media' ? (mChoices as Record<string, boolean>) : { agreed: true },
-                  signature: kind === 'media' ? mSig : gSig, signedAt: new Date().toISOString(),
+                  signature: signatureDataUrl, signedAt: new Date().toISOString(),
                   version: kind === 'media' ? MEDIA_VERSION : GENERAL_VERSION, status: 'signed'
                 })} style={{ width: '100%', padding: '14px', background: 'white', color: '#1e4da1', border: '2px solid #1e4da1', borderRadius: '14px', fontSize: '12px', fontWeight: 900, fontStyle: 'italic', textTransform: 'uppercase', cursor: 'pointer', marginBottom: '10px' }}>
                   {text}
@@ -851,6 +671,27 @@ export default function Signup() {
               </span>
             </label>
 
+          </Section>
+
+          {/* POPIA: privacy notice, then photo and video consent. Separate forms, separate signatures. */}
+          <Section label="Privacy Notice (POPIA)" icon="🔒" color="#7c3aed">
+            <GeneralConsentSection
+              agreed={gAgreed} onAgree={v => { setGAgreed(v); if (error) setError(''); }}
+              hideSignature errorAgree={consentErrs.agree} audience={audience}
+            />
+          </Section>
+
+          <Section label="Photo & Video Consent (POPIA)" icon="📸" color="#0891b2">
+            <MediaConsentSection
+              choices={mChoices} onChoice={(k, v) => { setMChoices(c => ({ ...c, [k]: v })); if (error) setError(''); }}
+              hideSignature errorChoices={consentErrs.choices} audience={audience}
+            />
+          </Section>
+
+          <Section label="Sign" icon="✍️" color="#1e4da1">
+            <p style={{ margin: 0, fontSize: '12px', color: '#475569', lineHeight: 1.6 }}>
+              One signature covers everything above: the health and emergency treatment, the risks and indemnity, the privacy notice and the photo and video choices you made.
+            </p>
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 <Label>Signature *</Label>
@@ -867,23 +708,6 @@ export default function Signup() {
                 </p>
               )}
             </div>
-          </Section>
-
-          {/* POPIA: privacy notice, then photo and video consent. Separate forms, separate signatures. */}
-          <Section label="Privacy Notice (POPIA)" icon="🔒" color="#7c3aed">
-            <GeneralConsentSection
-              agreed={gAgreed} onAgree={v => { setGAgreed(v); if (error) setError(''); }}
-              signed={!!gSig} onSign={d => setGSig(d)} clearKey={gClear} onClear={() => { setGSig(''); setGClear(c => c + 1); }}
-              errorAgree={consentErrs.agree} errorSignature={consentErrs.gsig} audience={audience}
-            />
-          </Section>
-
-          <Section label="Photo & Video Consent (POPIA)" icon="📸" color="#0891b2">
-            <MediaConsentSection
-              choices={mChoices} onChoice={(k, v) => { setMChoices(c => ({ ...c, [k]: v })); if (error) setError(''); }}
-              signed={!!mSig} onSign={d => setMSig(d)} clearKey={mClear} onClear={() => { setMSig(''); setMClear(c => c + 1); }}
-              errorChoices={consentErrs.choices} errorSignature={consentErrs.msig} audience={audience}
-            />
           </Section>
 
           </>)}

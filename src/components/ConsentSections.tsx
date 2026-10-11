@@ -33,9 +33,11 @@ const SignatureBlock: React.FC<{
 
 export const GeneralConsentSection: React.FC<{
   agreed: boolean; onAgree: (v: boolean) => void;
-  signed: boolean; onSign: (d: string) => void; clearKey: number; onClear: () => void;
+  signed?: boolean; onSign?: (d: string) => void; clearKey?: number; onClear?: () => void;
   errorSignature?: boolean; errorAgree?: boolean; audience?: Audience;
-}> = ({ agreed, onAgree, signed, onSign, clearKey, onClear, errorSignature, errorAgree, audience = 'minor' }) => {
+  /** The sign-up page signs once, at the very end, so it hides this form's own signature. */
+  hideSignature?: boolean;
+}> = ({ agreed, onAgree, signed = false, onSign = () => {}, clearKey = 0, onClear = () => {}, errorSignature, errorAgree, audience = 'minor', hideSignature }) => {
   const f = generalFormFor(audience); const ui = uiFor(audience);
   return (
     <>
@@ -57,16 +59,17 @@ export const GeneralConsentSection: React.FC<{
         <input type="checkbox" checked={agreed} onChange={e => onAgree(e.target.checked)} style={{ width: '18px', height: '18px', marginTop: '1px', flexShrink: 0, accentColor: '#1e4da1' }} />
         <span style={{ fontSize: '12px', color: '#475569', lineHeight: 1.5, fontWeight: 600 }}>{f.agreeLabel} *</span>
       </label>
-      <SignatureBlock label={ui.signHere} clearLabel={ui.clear} capturedLabel={ui.signatureCaptured} signed={signed} error={errorSignature} onSign={onSign} clearKey={clearKey} onClear={onClear} />
+      {!hideSignature && <SignatureBlock label={ui.signHere} clearLabel={ui.clear} capturedLabel={ui.signatureCaptured} signed={signed} error={errorSignature} onSign={onSign} clearKey={clearKey} onClear={onClear} />}
     </>
   );
 };
 
 export const MediaConsentSection: React.FC<{
   choices: Partial<Record<MediaKey, boolean>>; onChoice: (k: MediaKey, v: boolean) => void;
-  signed: boolean; onSign: (d: string) => void; clearKey: number; onClear: () => void;
+  signed?: boolean; onSign?: (d: string) => void; clearKey?: number; onClear?: () => void;
   errorChoices?: boolean; errorSignature?: boolean; audience?: Audience;
-}> = ({ choices, onChoice, signed, onSign, clearKey, onClear, errorChoices, errorSignature, audience = 'minor' }) => {
+  hideSignature?: boolean;
+}> = ({ choices, onChoice, signed = false, onSign = () => {}, clearKey = 0, onClear = () => {}, errorChoices, errorSignature, audience = 'minor', hideSignature }) => {
   const f = mediaFormFor(audience); const ui = uiFor(audience);
   return (
     <>
@@ -111,7 +114,7 @@ export const MediaConsentSection: React.FC<{
         <p style={{ margin: 0, color: '#1e293b' }}>{f.declaration}</p>
         <p style={{ margin: '10px 0 0', fontSize: '11px', color: '#64748b' }}>{f.contact}</p>
       </div>
-      <SignatureBlock label={ui.signHere} clearLabel={ui.clear} capturedLabel={ui.signatureCaptured} signed={signed} error={errorSignature} onSign={onSign} clearKey={clearKey} onClear={onClear} />
+      {!hideSignature && <SignatureBlock label={ui.signHere} clearLabel={ui.clear} capturedLabel={ui.signatureCaptured} signed={signed} error={errorSignature} onSign={onSign} clearKey={clearKey} onClear={onClear} />}
     </>
   );
 };

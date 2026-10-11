@@ -136,6 +136,7 @@ import { OfflineBanner } from './src/components/OfflineBanner';
 import { SyncStatusBadge } from './src/components/SyncStatusBadge';
 import { sendWhatsAppAttendanceQuery, sendWhatsAppInvoiceReminder } from './src/utils/whatsapp';
 import { openClassEnquiryReply } from './src/utils/parentMessages';
+import { buildIndemnityPdf, indemnityPdfFileName } from './src/utils/indemnityPdf';
 import { sendCycleMonthReminderNotification, sendTempAthleteFollowupDiscordNotification, getDiscordWebhookUrl, setDiscordWebhookUrl } from './src/utils/discordNotifications';
 import { notifyUser, describeSessionLog, NOTIFICATION_TITLES } from './src/utils/notifications';
 import { 
@@ -165,7 +166,29 @@ export function getSessionBillingMonth(dateStr: string, billingDay: number = 1):
   return { monthName, year };
 }
 
+/**
+ * The owner's re-print of a signed indemnity. A child who signed the current form
+ * (version 3.x) gets the current layout. A child who signed an earlier version keeps
+ * the earlier print, because the current wording is not what they agreed to.
+ */
 async function generateIndemnityPDFFromStudent(student: Student) {
+  const rec: any = (student as any).indemnity_record;
+  if (String(rec?.version || '').startsWith('3.')) {
+    const audience = rec.audience === 'adult' ? 'adult' : 'minor';
+    const doc = buildIndemnityPdf({
+      studentName: student.name, dob: student.dob, age: student.age, className: student.class_name,
+      audience, parentName: student.parent1_name || '', relationship: rec.relationship || '',
+      phone: student.parent1_phone, email: student.parent1_email,
+      parent2Name: student.parent2_name, parent2Phone: student.parent2_phone,
+      emergency: rec.emergency_contact || null, medicalNotes: student.medical_notes,
+      young: student.young_athlete as any, signature: student.signature_data,
+      signedAt: student.indemnity_date, version: rec.version
+    });
+    const fileName = indemnityPdfFileName(student.name, student.indemnity_date);
+    if (Capacitor.isNativePlatform()) await saveAndShareFile(doc.output('datauristring'), fileName);
+    else doc.save(fileName);
+    return;
+  }
   if (!(window as any).jspdf) {
     await new Promise<void>((resolve, reject) => {
       const script = document.createElement('script');

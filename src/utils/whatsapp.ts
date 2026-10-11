@@ -1,5 +1,6 @@
 import { Student } from '../../types';
 import { trialFollowUpMessage } from './parentMessages';
+import { openWhatsApp } from './openWhatsApp';
 
 /**
  * Format a phone number to standard international format without spaces, leading zeros, or symbols
@@ -55,7 +56,7 @@ export function sendWhatsAppTrialSignup(opts: {
   const text = trialFollowUpMessage({
     parentName: opts.parentName, childName: opts.childName, classDate: opts.classDate, link: opts.link
   });
-  window.open(`https://wa.me/${cleanPhoneNumber(opts.phone)}?text=${encodeURIComponent(text)}`, '_blank');
+  void openWhatsApp({ phone: cleanPhoneNumber(opts.phone), text });
 }
 
 /** The message sent to the parents' WhatsApp group. */
@@ -73,7 +74,7 @@ export const GROUP_PAYMENT_REMINDER = [
  * the group, then press send.
  */
 export function sendWhatsAppGroupReminder(): void {
-  window.open(`https://wa.me/?text=${encodeURIComponent(GROUP_PAYMENT_REMINDER)}`, '_blank');
+  void openWhatsApp({ text: GROUP_PAYMENT_REMINDER });
 }
 
 /**

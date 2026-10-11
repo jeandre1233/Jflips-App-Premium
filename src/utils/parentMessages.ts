@@ -3,6 +3,8 @@
  * Class times and fees are fixed text for now (the fee structure may be reworked).
  */
 
+import { openWhatsApp } from './openWhatsApp';
+
 export const LIVE_APP_URL = 'https://jflips.vercel.app';
 
 export const CLASS_TIMES = [
@@ -82,6 +84,5 @@ export function classEnquiryMessage(opts: { link: string }): string {
 
 /** Opens WhatsApp's own contact chooser with the enquiry reply already typed. */
 export function openClassEnquiryReply(ownerId: string | undefined | null): void {
-  const text = classEnquiryMessage({ link: tumblingSignupLink(ownerId) });
-  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  void openWhatsApp({ text: classEnquiryMessage({ link: tumblingSignupLink(ownerId) }) });
 }
