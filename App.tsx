@@ -1633,6 +1633,54 @@ const App: React.FC = () => {
         }
       }
 
+      // 🗄️ Old athletes: ONE nudge a month when the other details of someone who left
+      // more than 12 months ago are due for deletion (the privacy notice promises it).
+      // No names in the alert. Nothing is deleted by itself: the owner does it from
+      // Setup, Clients, Old athletes.
+      if (isOwnerRole) {
+        const dueAlertKey = `old_athletes_due_alert_${now.getFullYear()}_${now.getMonth()}`;
+        if (!localStorage.getItem(dueAlertKey)) {
+          try {
+            const todayIso = now.toISOString().slice(0, 10);
+            const { data: dueRows, error: dueErr } = await supabase.from('old_athletes')
+              .select('id')
+              .is('profile_deleted_at', null)
+              .lte('profile_delete_after', todayIso);
+
+            // If the table is not there yet, stay quiet and try again later.
+            if (!dueErr) {
+              if ((dueRows || []).length > 0) {
+                // Dedupe across devices: phone and laptop both run this check.
+                const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+                const { data: already } = await supabase.from('notifications')
+                  .select('id')
+                  .eq('user_id', ownerId)
+                  .eq('type', 'system')
+                  .gte('created_at', monthStart)
+                  .contains('metadata', { kind: 'old_athletes_due' })
+                  .limit(1);
+
+                if (!already || already.length === 0) {
+                  const n = dueRows!.length;
+                  await notifyUser({
+                    userId: ownerId,
+                    type: 'system',
+                    title: 'Old athletes: details due for deletion',
+                    message: `${n} athlete${n === 1 ? ' left' : 's left'} more than 12 months ago. Their other details are now due for deletion. Open Setup, Clients, Old athletes.`,
+                    url: '/?tab=setup',
+                    metadata: { kind: 'old_athletes_due', due_count: n },
+                    push: true,
+                  });
+                }
+              }
+              localStorage.setItem(dueAlertKey, 'true');
+            }
+          } catch (err) {
+            console.error('Failed to send the old athletes reminder:', err);
+          }
+        }
+      }
+
       // 2️⃣ Cycle Month Invoicing Reminder (on 30th/end of month if active sessions exist)
       const currentDayOfMonth = now.getDate();
       const isFeb = now.getMonth() === 1;

@@ -1,45 +1,42 @@
 # JFLIPS sign-up form: report for legal review
 
-**Date:** 12 October 2026
+**Date:** 12 October 2026 (revision 3)
 
 | Document | Version |
 | --- | --- |
-| Terms and Conditions | 5.0-draft |
-| Privacy notice (POPIA) | 1.4-draft |
-| Photo and video consent (POPIA) | 1.2-draft |
+| Terms and Conditions | 5.0-draft (wording unchanged since the last report) |
+| Privacy notice (POPIA) | 1.5-draft |
+| Photo and video consent (POPIA) | 1.3-draft |
 
 **What this document is.** It is the complete text of the JFLIPS registration form as a parent or adult sees it, written out of the live app so that it cannot differ from what people actually sign. It is followed by facts about how JFLIPS works, the questions we need you to answer, and a list of things we noticed but did not change. All three documents are drafts. JFLIPS is a working name: the registered company name is not confirmed yet.
 
-**How the form works.** A parent fills in the details, reads the Terms and Conditions in a scroll box (the tick boxes stay locked until they have scrolled to the bottom), opens the privacy notice (also locked until it has been opened and read to the bottom), answers Yes or No for each photo and video use, and signs once at the bottom. That one signature covers all three documents. The privacy notice and the photo consent are saved as their own records, so a parent can change photo choices later without touching what they signed. The signed PDF puts all three documents, the choices made and the one signature into a single file, with the version of each document in the footer.
+**How the form works.** A parent fills in the details, reads the Terms and Conditions in a scroll box (the tick boxes stay locked until they have scrolled to the bottom), opens the privacy notice (also locked until it has been opened and read to the bottom), answers Yes or No for each photo and video use, and signs once at the bottom. That one signature covers all three documents. The privacy notice and the photo consent are saved as their own records. Once signed, a form cannot be changed from the family's link: a family that wants to change its photo choices contacts JFLIPS, JFLIPS reopens the photo form, and the family signs again. The earlier answers stay in the record's history. The signed PDF puts all three documents, the choices made and the one signature into a single file, with the version of each document in the footer.
 
 **Two versions of every text.** A parent or guardian signs for a child under 18. An adult (18 or over) signs for themselves. Both are printed below.
 
-**Old records keep their old wording.** Every signed record stores the version it was signed under. The app keeps the exact wording of earlier versions and prints that wording on the PDF of an old record. Kept: Terms 4.0-draft; privacy notice 1.0-draft, 1.1-draft, 1.2-draft and 1.3-draft; photo consent 1.0 and 1.1-draft. See Suggestions for the exceptions.
+**Old records keep their old wording.** Every signed record stores the version it was signed under. The app keeps the exact wording of earlier versions and prints that wording on the PDF of an old record. Kept: Terms 4.0-draft; privacy notice 1.0-draft to 1.4-draft; photo consent 1.0, 1.1-draft and 1.2-draft. See Suggestions for the exceptions.
 
-### Change log since the last version
+### Change log since the last report
 
-The last version sent for review was Terms 4.0-draft, privacy notice 1.3-draft and photo consent 1.1-draft (FORM_FOR_LAWYER.pdf).
+The last report covered Terms 5.0-draft, privacy notice 1.4-draft and photo consent 1.2-draft.
 
-**Terms and Conditions 5.0-draft**
-- New section 7, Enrolment terms: ten rules for a parent or guardian, nine for an adult (an adult has no Late collection rule). It is in the form, the index and the PDF.
-- The company is named "JFLIPS" everywhere. "JFLIPS TUMBLING (JFLIPS)" was replaced.
+**Terms and Conditions 5.0-draft:** no wording change.
 
-**Privacy notice 1.4-draft**
-- "Who is responsible": now "JFLIPS. Our Information Officer is Jeandre Blacquiere. You can reach us on WhatsApp 069 040 3387 or at jflipsinc@gmail.com."
-- Adult opening paragraph: "your family's personal information" became "your personal information".
-- "Where it is kept": rewritten. Resend is removed. It now says Supabase servers are in Ireland (so information goes to another country), Vercel hosts the app in Cape Town, and Google Firebase sends alerts to coaches' phones. It says the alerts can include a child's name (an adult's version says "your name").
-- "How long we keep it": now gives periods: financial records 7 years; signed forms and injury or incident records until a child is at least 19 (an adult: 5 years after leaving); everything else deleted within 12 months of leaving.
-- The tick box is locked until the notice has been opened and read to the bottom (same as the Terms ticks). It works by touch on a phone.
-- "JFlips" became "JFLIPS".
+**Privacy notice 1.5-draft**
+- "Who can see it": coaches can now also see the emergency contact. (Parent: "...your contact numbers and your emergency contact..."; adult: "...cell number and emergency contact...".)
+- "How long we keep it": says that when a child leaves, their record is moved to a separate archive that only JFLIPS management can open, and kept there only as long as needed. The periods are unchanged.
 
-**Photo and video consent 1.2-draft**
-- Adult line under the six questions now says "your place at JFLIPS" (it said "your child's place").
-- Rights, first bullet: photos and videos removed from JFLIPS's own pages and website within 7 days of withdrawal.
-- Rights, record-keeping bullet: now points to the retention periods in the privacy notice.
-- "Photos taken by other people": added that JFLIPS tells the event organiser and does not post that child (or adult) from the event.
-- "JFlips" became "JFLIPS".
+**Photo and video consent 1.3-draft**
+- "Your rights", first bullet: to change choices, JFLIPS sends the form again to sign; if a family withdraws, photos and videos are removed within 7 days.
 
-**Not changed in this round:** the cheer sign-up form (reported on under Suggestions), the form fields, the age rule, and the wording of the Terms apart from the company name and section 7.
+**Other form text:** the thank-you page now says "To change your photo and video choices, message us on WhatsApp 069 040 3387 and we will send you the form again." The personal link page no longer offers a change or withdraw button.
+
+**Changes to the app behind the form**
+- Discord and Google (sign-in, Calendar, Sheets) were removed from the app completely.
+- When the owner removes a child, the record moves to a separate "Old athletes" archive: signed forms and a saved PDF are kept until the child turns 19 (an adult: 5 years after leaving); everything else can be deleted from 12 months after leaving.
+- Coaches now see the emergency contact.
+- The owner gets one reminder a month (in the app and on the phone, with no names) when the other details of someone who left more than 12 months ago are due for deletion.
+- Signed forms cannot be changed through the family's link; the owner reopens the photo form on request.
 
 ## PART 1: THE FORM (information the parent gives)
 
@@ -250,7 +247,7 @@ JFLIPS is the responsible party for your family's personal information. This not
 
 **Who can see it**
 - JFLIPS management can see all of it.
-- Your child's coaches can see your child's name, age, medical information and your contact numbers, so they can keep your child safe and reach you in an emergency. They cannot see your signature, email address or billing details.
+- Your child's coaches can see your child's name, age, medical information, your contact numbers and your emergency contact, so they can keep your child safe and reach you in an emergency. They cannot see your signature, email address or billing details.
 - The companies that run the services we use to store and send information for us (see below). They may only use it for that.
 - We do not sell your information. We do not share it with anyone else unless the law requires it or a doctor or medical helper needs it in an emergency.
 
@@ -258,7 +255,7 @@ JFLIPS is the responsible party for your family's personal information. This not
 - Your information is stored in an online database run by Supabase. Its servers are in Ireland, so your information is sent to another country. Our app and website are hosted by Vercel in Cape Town. We use Google Firebase to send alerts to our coaches' phones. These alerts can include a child's name. We only use these companies to run JFLIPS, and only people with their own login can open your information.
 
 **How long we keep it**
-We keep your information while your child is enrolled. After they leave, we keep it only for as long as we need it:
+We keep your information while your child is enrolled. When they leave, we move their record to a separate archive that only JFLIPS management can open. We keep it there only for as long as we need it:
 - Financial records (invoices and payments): 7 years, because the law requires it.
 - Signed forms (the terms, this notice and the photo consent) and injury or incident records: until your child is at least 19, because a claim could still be made until then.
 - Everything else, such as contact details, health information and attendance: we delete it within 12 months after your child leaves.
@@ -304,7 +301,7 @@ JFLIPS is the responsible party for your personal information. This notice tells
 
 **Who can see it**
 - JFLIPS management can see all of it.
-- Your coaches can see your name, age, medical information and cell number, so they can keep you safe and reach you in an emergency. They cannot see your signature, email address or billing details.
+- Your coaches can see your name, age, medical information, cell number and emergency contact, so they can keep you safe and reach someone in an emergency. They cannot see your signature, email address or billing details.
 - The companies that run the services we use to store and send information for us (see below). They may only use it for that.
 - We do not sell your information. We do not share it with anyone else unless the law requires it or a doctor or medical helper needs it in an emergency.
 
@@ -312,7 +309,7 @@ JFLIPS is the responsible party for your personal information. This notice tells
 - Your information is stored in an online database run by Supabase. Its servers are in Ireland, so your information is sent to another country. Our app and website are hosted by Vercel in Cape Town. We use Google Firebase to send alerts to our coaches' phones. These alerts can include your name. We only use these companies to run JFLIPS, and only people with their own login can open your information.
 
 **How long we keep it**
-We keep your information while you are enrolled. After you leave, we keep it only for as long as we need it:
+We keep your information while you are enrolled. When you leave, we move your record to a separate archive that only JFLIPS management can open. We keep it there only for as long as we need it:
 - Financial records (invoices and payments): 7 years, because the law requires it.
 - Signed forms (the terms, this notice and the photo consent) and injury or incident records: 5 years after you leave, because a claim could still be made during that time.
 - Everything else, such as contact details, health information and attendance: we delete it within 12 months after you leave.
@@ -363,7 +360,7 @@ At competitions and showcases, organisers, other clubs and spectators may take p
 - We store recordings securely and delete them when we no longer need them or when you ask us to.
 
 **Your rights**
-- You can change or withdraw your consent at any time by contacting us. We will then remove the photos and videos from JFLIPS's own pages and website within 7 days. We cannot control content that others have already saved or shared.
+- You can change or withdraw your consent at any time by contacting us. To change your choices, we will send you the form again to sign. If you withdraw, we will remove the photos and videos from JFLIPS's own pages and website within 7 days. We cannot control content that others have already saved or shared.
 - You can ask what information we hold about your child, and ask for it to be corrected or deleted.
 - We keep this form and your choices as proof of what you agreed, for the period set out under 'How long we keep it' in the privacy notice.
 - If you feel your child's personal information has been mishandled, you can lodge a complaint with the Information Regulator: POPIAComplaints@inforegulator.org.za.
@@ -402,7 +399,7 @@ At competitions and showcases, organisers, other clubs and spectators may take p
 - We store recordings securely and delete them when we no longer need them or when you ask us to.
 
 **Your rights**
-- You can change or withdraw your consent at any time by contacting us. We will then remove the photos and videos from JFLIPS's own pages and website within 7 days. We cannot control content that others have already saved or shared.
+- You can change or withdraw your consent at any time by contacting us. To change your choices, we will send you the form again to sign. If you withdraw, we will remove the photos and videos from JFLIPS's own pages and website within 7 days. We cannot control content that others have already saved or shared.
 - You can ask what information we hold about you, and ask for it to be corrected or deleted.
 - We keep this form and your choices as proof of what you agreed, for the period set out under 'How long we keep it' in the privacy notice.
 - If you feel your personal information has been mishandled, you can lodge a complaint with the Information Regulator: POPIAComplaints@inforegulator.org.za.
@@ -418,7 +415,9 @@ Questions, or want to change your choices? Contact Jeandre Blacquiere on WhatsAp
 
 **Button:** Complete Registration. Small print: "By pressing the button you confirm what you have ticked and signed above. A signed PDF of each form will be available to download."
 
-**Thank-you page:** "[child] has been registered. We will be in touch shortly regarding class assignment." *(Adult: "You are registered. ...")* For ages 2 to 4: "Remember, an adult needs to stay at the venue for the whole class." For everyone: "You can change your photo and video choices at any time. Just message us on WhatsApp 069 040 3387." Then one button, "Download Signed Forms (PDF)".
+**Thank-you page:** "[child] has been registered. We will be in touch shortly regarding class assignment." *(Adult: "You are registered. ...")* For ages 2 to 4: "Remember, an adult needs to stay at the venue for the whole class." For everyone: "To change your photo and video choices, message us on WhatsApp 069 040 3387 and we will send you the form again." Then one button, "Download Signed Forms (PDF)".
+
+**The family's personal link (families who sign through a link instead of the sign-up page):** once a form is signed, the link shows it read-only: the date signed, the version and the answers given. It cannot be changed or withdrawn from the link. The text says: "To change your photo and video choices, message JFLIPS on WhatsApp 069 040 3387 and we will send you the form again." The owner presses "Reopen photo form" in Setup, sends the link again, and the family signs again. The earlier answers are kept.
 
 **What the signed PDF contains:** details of the child, parent, emergency contact and health answer; the Terms and Conditions with the two confirmations; the privacy notice with its confirmation; the photo and video consent with every Yes/No answer given (and any earlier answers); the one signature with the date and time; and a table of the version of each document that was signed. The footer of every page shows the three version numbers.
 
@@ -426,7 +425,7 @@ Questions, or want to change your choices? Contact Jeandre Blacquiere on WhatsAp
 
 ## PART 6: HOW JFLIPS WORKS
 
-Sources: the app code, the database scripts in the repository, and a read-only look at the live database policies on 12 October 2026. Where a fact comes from the owner and cannot be seen in the app, it says so.
+Sources: the app code, the database scripts in the repository, and a read-only look at the live Supabase project (database policies and edge functions) on 12 October 2026. Where a fact comes from the owner and cannot be seen in the app, it says so.
 
 ### 6A. Coaches
 
@@ -439,61 +438,62 @@ Sources: the app code, the database scripts in the repository, and a read-only l
 
 ### 6B. What coaches can see, and how the database enforces it
 
-A coach does not read the children's table directly. The app asks the database for a roster through a function that removes the private fields before anything reaches the coach. The database refuses direct reads.
+A coach does not read the children's table directly. The app asks the database for a roster through a function that removes the private fields before anything reaches the coach. The database refuses direct reads. Tested on the live database with a simulated coach on this date (the test was rolled back).
 
 | What | Can a coach see it? | How it is enforced |
 | --- | --- | --- |
 | Child's name, age, class, medical notes, parents' names and phone numbers, young-athlete details (who collects, adult at the venue) | Yes | Function coach_roster() (tighten_access.sql). It only answers for an approved coach of that owner who is allowed to see tumbling clients. |
+| **Emergency contact given at sign-up (new)** | **Yes** | coach_roster() now adds the emergency contact (form_changes_oct2026.sql). It is shown in the coach athlete view under "Emergency contacts", after the parents. The signed record it comes from stays hidden. Children who registered before this form have none. |
 | Signature image | No | coach_roster() removes signature_data. |
 | Parent's email address | No | coach_roster() removes parent1_email. |
 | Date of birth | No | coach_roster() removes dob and gives age and a "parent must stay" flag instead. |
-| The signed record (relationship, authority tick, emergency contact, which ticks were given) | No | coach_roster() removes indemnity_record. |
+| The signed record (relationship, authority tick, which ticks were given) | No | coach_roster() removes indemnity_record. |
 | Custom rates for a child | No | coach_roster() removes custom_group_rate and custom_private_rate. |
-| Direct reads of the children's table | No | Live policies on tumbling_students: tumbling_owner_all (owner only), tumbling_students_coach_insert (a coach can add a child, not read or change one), tumbling_students_public_signup_insert (the public sign-up page can add a child). There is no read or update rule for coaches. The two coach rules that used to exist were dropped (tighten_access_step2.sql and tighten_access_step3.sql) and the live list confirms they are gone. |
+| Direct reads of the children's table | No | Live policies on tumbling_students: tumbling_owner_all (owner only), tumbling_students_coach_insert (a coach can add a child, not read or change one), tumbling_students_public_signup_insert (the public sign-up page can add a child). There is no read or update rule for coaches. |
 | Class list and prices | Names only | Function coach_classes() removes the price. Table class_types is owner only (class_types_owner_all). |
 | Invoices, payments and billing | No | payments (payments_owner_only), history (history_owner_only), archived_sessions (archived_sessions_owner_all): owner only. |
 | Bank details | No | owner_profiles (owner_manages_own_profile): owner only. |
 | Signed privacy and photo records | No | consent_records (consent_owner_all): owner only. |
+| **Old athletes archive (new)** | No | old_athletes (old_athletes_owner_all): owner only. The test showed a coach sees no rows. |
 | A coach's own payslips and invoice snapshots | Own only | invoice_snapshots_self (coach_id = the coach); staff_payslips policies. |
 | Other coaches | Names only | Function coach_directory() returns names and usernames only. |
 | Injury and incident reports | Yes | incident_staff_select lets a coach read them and incident_staff_insert lets a coach add one. |
-| Cheer team athletes | Yes, the whole row | team_athletes_coach_read. This table is separate from tumbling clients and is not covered by coach_roster(). Not reviewed in this task. See Suggestions. |
+| Cheer team athletes | Yes, the whole row | team_athletes_coach_read. This table is separate from tumbling clients and is not covered by coach_roster(). Not reviewed. See Suggestions. |
 
-**Confirmation for the privacy notice sentence** ("They cannot see your signature, email address or billing details"): from the repository scripts and the live policies, a coach cannot see a tumbling client's signature, email address or billing details. The cheer team athletes table in the last row is the exception to check.
+**Confirmation for the privacy notice sentence** ("They cannot see your signature, email address or billing details"): from the repository scripts and the live policies, a coach cannot see a tumbling client's signature, email address or billing details. The cheer team athletes table in the second-last row is the exception to check.
 
 ### 6C. Every outside service the app still talks to
 
+**Removed on this date:** Discord (trial-athlete and billing messages), and Google sign-in, Google Calendar and Google Sheets. The code was deleted, together with the Firebase, Google APIs and Google AI packages that only these used. The browser no longer stores Google tokens. The Netlify build file was deleted (the site is not on Netlify).
+
 | Service | What personal information goes to it | Where it is hosted |
 | --- | --- | --- |
-| Supabase | Everything: children, parents, health answers, emergency contacts, signatures, invoices, consent records, coach accounts and logins. | Ireland, as stated in the notice. The repository does not set a region and the Supabase dashboard page checked did not show one. Unverified. |
-| Vercel | Hosts the app and website. It handles requests from every visitor (including the sign-up page). The database content does not pass through it. | The notice says Cape Town. vercel.json sets no region, so this is unverified. Vercel serves the pages from its own network. |
-| Google Firebase Cloud Messaging | The text of each alert sent to the owner's phone. These can include: a child's name (new sign-up, new cheer registration, trial-athlete follow-up), a coach's name and email (a coach asks to join), a coach's name with a class name and attendance count (session logged), and counts and amounts of unpaid invoices. They do not include phone numbers or a parent's name. | Google. |
-| Google sign-in, Google Calendar and Google Sheets (optional, only if the owner connects Google) | Calendar events list the names of the students in each scheduled class. Sheets receive monthly totals, class names, coach names, enrolled counts and hours. No student names were found in what goes to Sheets. | Google. |
-| Discord (optional, only if the owner turns it on and gives a webhook) | The trial-athlete follow-up message sends the child's name and the parent's phone number, for up to ten trial athletes. The billing reminder carries no personal information. A function that would send a whole registration to Discord (child, date of birth, parent contacts, email, medical notes) exists in the code but nothing calls it. | Discord. The notice does not mention Discord. |
-| Resend (email) | Coach join and approval emails only: the coach's name and email, the owner's email and the business name. No child or parent information. Removed from the notice. The code is still there (see below). | Resend. |
-| Google Fonts | Every page load, including the sign-up page, asks Google for the Inter font, so the visitor's address is sent to Google. | Google. |
-| Cloudflare cdnjs | Only when the owner prints an old-version PDF: the app loads a PDF library from cdnjs at that moment. No personal information is sent. | Cloudflare. |
+| Supabase | Everything: children, parents, health answers, emergency contacts, signatures, invoices, consent records, the old athletes archive, coach accounts and logins. | Ireland (confirmed by the owner). |
+| Vercel | Hosts the app and website. It handles requests from every visitor (including the sign-up page). The database content does not pass through it. | Cape Town (confirmed by the owner). |
+| Google Firebase Cloud Messaging (alerts only) | The text of each alert sent to the owner's phone. These can include: a child's name (new sign-up, new cheer registration, trial-athlete follow-up), a coach's name and email (a coach asks to join), a coach's name with a class name and attendance count (session logged), and counts and amounts of unpaid invoices. They do not include phone numbers or a parent's name. | Google. |
+| Google Fonts | Every page load, including the sign-up page, asks Google for the Inter font, so the visitor's address is sent to Google. This is the one remaining Google service besides alerts. | Google. |
+| Cloudflare cdnjs | Only when the owner prints a registration from before the Terms 4.0 wording: the app loads a PDF library from cdnjs at that moment. No personal information is sent. | Cloudflare. |
 | WhatsApp | When the owner presses a message button, WhatsApp opens with the text typed in (names and phone numbers). The app does not send it. | WhatsApp. |
+| Resend (email) | Nothing. See below. | Not in use. |
 
-**What remains of Resend and email-sending code (nothing was deleted):**
-- supabase/functions/send-staff-email/index.ts: the function itself. It needs a RESEND_API_KEY secret and posts to api.resend.com.
-- App.tsx, in the coach sign-up: calls send-staff-email to tell the owner a coach asked to join.
-- src/Pages/Setup.tsx, when the owner approves or declines a coach: calls send-staff-email to tell the coach.
-- A "Resend link" button label in ConsentManager.tsx. That is the word "resend" for a WhatsApp link, not the Resend service.
-- netlify.toml: a build file for Netlify. It is not known whether the site is also on Netlify.
+**Resend and other email code.** Checked live on this date: the Supabase project has two edge functions, send-push-notification and send-login-notification. The function send-staff-email, which the app's Resend code calls, is not deployed, and there is no RESEND_API_KEY secret. So the Resend code cannot send anything: the two places that call it only log a warning. It is still in the repository: supabase/functions/send-staff-email/index.ts, a call in App.tsx (coach sign-up) and a call in src/Pages/Setup.tsx (coach approval). Nothing was deleted in this round.
+
+**send-login-notification.** This edge function is deployed in Supabase but is not in the repository, and nothing in the app calls it. The owner knows about it and has asked for it to be left in place. Its code was not read.
 
 ### 6D. What the form promises that needs a process
 
 | Promise | What the app does today |
 | --- | --- |
-| Delete everything else within 12 months of leaving | **Nothing automatic.** The app does not record when a child left, so it cannot flag old records. The owner can delete a child's record by hand (owner only). Manual. |
-| Remove photos and videos within 7 days of withdrawal | **Partly.** A parent can withdraw through their personal link. The app then sets all six answers to No, keeps the earlier answers in the record's history, and the owner's consent list shows "Do not post". The owner is **not alerted** when this happens and there is no 7-day timer. Taking the posts down on Instagram, Facebook and the website is done by hand outside the app. Manual. |
-| Keep financial records for 7 years | **Kept by default, not protected.** Invoices and payments stay in the database and nothing deletes them automatically. Nothing stops the owner deleting them either, and nothing tracks the 7 years. Automatic by inaction. |
-| Keep signed forms until a child is at least 19 (an adult: 5 years after leaving) | **Kept by default, but deletion removes them.** The signed Terms and signature live in the child's own record. If the owner deletes the child's record, they go with it. The privacy and photo records are kept separately and stay. The app stores a date of birth, so age 19 could be worked out, but nothing does. Manual and at risk. |
-| Keep injury and incident records for the same period | **Kept by default.** Nothing deletes them automatically and nothing tracks the period. Manual. |
-| "You can ask us how long we keep any record" and requests to see, correct or delete information | No process in the app. The owner handles requests by hand. Manual. |
+| When a child leaves, their record is moved to a separate archive only management can open | **Automatic.** Removing a child copies the record to the Old athletes archive first, and only then deletes the live record. If the copy fails, nothing is removed. A trial athlete (who has signed nothing) is simply deleted. |
+| Delete everything else within 12 months of leaving | **Manual, with a reminder.** Each archived child shows the date from which their other details can be deleted, with a red "Details due" tag once it passes. Once a month the owner also gets a notification (in the app and on the phone, with no names) saying how many are due. The owner presses "Delete other details". Nothing deletes automatically. |
+| Remove photos and videos within 7 days of withdrawal | **Manual.** A family tells JFLIPS (WhatsApp). The owner presses "Reopen photo form" and sends the link; the family signs again with their new answers, and the earlier answers stay in the record's history. The app does not alert the owner when a family asks, and there is no 7-day timer. Taking posts down on Instagram, Facebook and the website is done by hand. |
+| Keep financial records for 7 years | **Kept by default.** Invoices and payments are not touched when a child is removed and nothing deletes them automatically. Nothing tracks the 7 years. |
+| Keep signed forms until a child is at least 19 (an adult: 5 years after leaving) | **Kept, with a date.** The signed Terms, signature, privacy and photo records and a saved PDF of the signed forms move to the archive with the date to keep them until (the 19th birthday, or 5 years after an adult leaves). The owner can still choose "Delete everything" early, but is warned first. |
+| Keep injury and incident records for the same period | **Kept by default.** Incident reports stay in their own table and are not moved with the child. Nothing deletes them or tracks the period. |
+| "You can ask us how long we keep any record" and requests to see, correct or delete information | No process in the app. The owner handles requests by hand. |
+| Attendance and billing history | Past invoices and monthly history can still contain a removed child's name. They are financial records and stay for 7 years. |
 
-Promises in the new enrolment terms, for completeness:
+Promises in the enrolment terms, for completeness:
 
 | Promise | What the app does today |
 | --- | --- |
@@ -502,7 +502,7 @@ Promises in the new enrolment terms, for completeness:
 | One free first class per child | **Automatic for trial athletes** (the first class on the date recorded is free). It does not stop a returning child being added again as a new trial athlete. |
 | 30 days' notice before fees change; notice of changes to times or venues | **Nothing.** The owner tells families by hand. Manual. |
 | An injury or incident is recorded and the parent is told the same day | **Half.** There is an incident log. Telling the parent is manual. |
-| Late collection: a coach stays, phones the parent and emergency contact | **Nothing.** Coaches cannot see the emergency contact (see Suggestions). Manual. |
+| Late collection: a coach stays, phones the parent and emergency contact | **Partly.** Coaches can now see the emergency contact. Everything else is manual. |
 
 ## PART 7: QUESTIONS FOR THE LAWYER
 
@@ -524,33 +524,32 @@ Promises in the new enrolment terms, for completeness:
 16. Coaches: they are contractors with no written agreement, no fixed schedule and per-session pay, and they can decline classes. Please advise on classification, the agreement they need and the POPIA terms for coaches who see children's medical information.
 17. Venue: what should the Muldersdrift Primary agreement say about late collection, first aid and a coach waiting with a child?
 18. Insurance: JFLIPS has no public liability insurance yet. Should the form go live before it does?
+19. Changing or withdrawing photo consent: a signed form cannot be changed from the family's link. The family contacts JFLIPS, JFLIPS reopens the form and sends it again, and photos are removed within 7 days of a withdrawal. Is it acceptable that a withdrawal needs a message to JFLIPS rather than a button, given that withdrawing should be as easy as giving consent?
+20. Emergency contacts: the person named as an emergency contact has not signed anything, and coaches can now see their name and number. Is the line in the privacy notice enough, or must the signer confirm they have that person's permission?
 
 ## PART 8: SUGGESTIONS (noticed, not changed)
 
 Nothing below was changed. Each is for the owner and the lawyer to decide.
 
-**Things the notice says that the app does not match**
-1. **Discord and Google.** The notice says information is not shared with anyone else and lists no Discord or Google Calendar and Sheets. Both are optional owner features, but when on, Discord receives a trial athlete's name and the parent's phone number, and Google Calendar receives student names. Either name them in the notice or remove the features.
-2. **Hosting locations are unverified.** "Vercel in Cape Town": vercel.json sets no region, so the repository cannot confirm it. Please check the Vercel project settings. "Supabase in Ireland": please check the Supabase project settings, which the dashboard page checked did not show.
-3. **Resend is still in the code** (list in Part 6C). The emails are for coaches only, but the function and its two calls can be removed together with the RESEND_API_KEY secret.
-4. **Child names in alerts.** The notice now says alerts can include a child's name. Taking names out of the alert text would let that sentence go.
-5. **Adult wording I adjusted.** The alert sentence reads "These alerts can include your name." for adults, because the instruction said to adjust it to who the alert is about.
+**Services**
+1. **Google Fonts is the last Google service besides alerts.** Every visitor's address goes to Google when a page loads. The font can be stored with the app instead, which would remove it. This needs a decision because it adds a font package.
+2. **Resend code is dead** (list in Part 6C). The function is not deployed and there is no key, so it does nothing. The function file and its two calls can be deleted.
+3. **Child names in alerts.** The notice says alerts can include a child's name. Taking names out of the alert text would let that sentence go.
+4. **Adult wording I adjusted.** The alert sentence reads "These alerts can include your name." for adults, because the instruction said to adjust it to who the alert is about.
 
 **Records and PDFs**
-6. **Version labels were reused.** The privacy notice label "1.0-draft" was used for three different wordings before it was bumped. A record stamped 1.0-draft cannot be tied to one wording. The app keeps the last of the three. A rule that every wording change bumps the version would prevent this.
-7. **Terms 2.0-draft and 3.0-draft records.** The owner's re-print for these shows only the original short declaration, not the clauses the parent saw on screen. It is not a faithful copy. The PDF the parent downloaded at the time is. Freezing those two wordings would fix it.
-8. **Deleting a child deletes the signed Terms and signature**, which conflicts with keeping signed forms until age 19. An archive step or an automatic saved PDF before deletion would close this.
-9. **No leave date.** Without a date left, the 12-month deletion cannot be tracked.
-10. **No alert on photo withdrawal.** The owner is not told when a parent withdraws, so the 7-day promise depends on remembering to look.
+5. **Version labels were reused.** The privacy notice label "1.0-draft" was used for three different wordings before it was bumped. A record stamped 1.0-draft cannot be tied to one wording. The app keeps the last of the three. A rule that every wording change bumps the version would prevent this.
+6. **Terms 2.0-draft and 3.0-draft records.** The owner's re-print for these shows only the original short declaration, not the clauses the parent saw on screen. It is not a faithful copy. The PDF the parent downloaded at the time is.
+7. **Trial athletes are deleted, not archived.** They have signed nothing, so nothing is kept. If a trial athlete's parent gave a phone number, it is gone at once.
+8. **Archive and shared families.** The privacy and photo records move to the archive only when they belong to that child alone (their key is the child's id). A record shared by several children stays where it is.
+9. **Team (cheer) athletes also go to Old athletes** when removed. They have no signed forms, so only the 12-month details date applies.
+10. **No alert when a family asks to change photo choices.** They message the owner on WhatsApp, which the app cannot see, so the 7-day promise depends on the owner acting.
 
-**Safety**
-11. **Coaches cannot see the emergency contact** (it is stored in the signed record, which coaches cannot read). In a late collection or an emergency a coach has only the parents' numbers.
-12. **Cheer team athletes.** Coaches can read this table directly (team_athletes_coach_read), outside the function that hides private fields. The notice sentence about coaches is about tumbling clients.
+**Safety and access**
+11. **Cheer team athletes.** Coaches can read this table directly (team_athletes_coach_read), outside the function that hides private fields. The notice sentence about coaches is about tumbling clients.
+12. **Public sign-up rules.** The sign-up pages work because the database lets anyone with the public key add a row (tumbling_students_public_signup_insert, cheer_registrations_public_insert, notifications_public_signup_insert). No limits on how often were seen. This is by design but worth knowing.
+13. **Privacy tick lock** applies to the sign-up page only. The personal consent link page (for existing families) does not lock the privacy tick.
+14. **Personal consent links** use a long random code. Anyone holding the link can open that family's consent page. This is by design.
 
 **The cheer sign-up form (not changed)**
-13. The cheer form (SignupCheer.tsx) does not use the Terms, privacy notice or photo consent. It has no signature and no indemnity. It asks for the athlete's name, date of birth, medical conditions, emergency contact, and the parents' names, phone numbers and email. It has three tick boxes: "I confirm the information supplied is correct", "I understand that this registration is an expression of interest only and does not guarantee placement on a team", and "I consent to JFLIPS storing my information for athlete management purposes". It saves to the cheer_registrations table, which only the owner can read. Anyone with the public key can add a row. It sends an alert containing the athlete's name.
-
-**Other**
-14. **Public sign-up rules.** The sign-up pages work because the database lets anyone with the public key add a row (tumbling_students_public_signup_insert, cheer_registrations_public_insert, notifications_public_signup_insert). No limits on how often were seen. This is by design but worth knowing.
-15. **Privacy tick lock** applies to the sign-up page only. The personal consent link page (for existing families) does not lock the tick.
-16. **Personal consent links** use a long random code. Anyone holding the link can open that family's consent page. This is by design.
+15. The cheer form (SignupCheer.tsx) does not use the Terms, privacy notice or photo consent. It has no signature and no indemnity. It asks for the athlete's name, date of birth, medical conditions, emergency contact, and the parents' names, phone numbers and email. It has three tick boxes: "I confirm the information supplied is correct", "I understand that this registration is an expression of interest only and does not guarantee placement on a team", and "I consent to JFLIPS storing my information for athlete management purposes". It saves to the cheer_registrations table, which only the owner can read. Anyone with the public key can add a row. It sends an alert containing the athlete's name.
