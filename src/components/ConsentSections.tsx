@@ -41,6 +41,14 @@ export const GeneralConsentSection: React.FC<{
   collapsible?: boolean;
 }> = ({ agreed, onAgree, signed = false, onSign = () => {}, clearKey = 0, onClear = () => {}, errorSignature, errorAgree, audience = 'minor', hideSignature, collapsible }) => {
   const f = generalFormFor(audience); const ui = uiFor(audience);
+  // On the sign-up page (collapsible) the tick stays locked until the notice has been
+  // opened and scrolled to the bottom, like the Terms tick boxes.
+  const [noticeRead, setNoticeRead] = React.useState(!collapsible);
+  const noticeBoxRef = React.useRef<HTMLDivElement>(null);
+  const checkNoticeBottom = () => {
+    const el = noticeBoxRef.current;
+    if (el && el.scrollTop + el.clientHeight >= el.scrollHeight - 12) setNoticeRead(true);
+  };
   const noticeCard = (
       <div style={card}>
         <p style={{ margin: '0 0 6px', fontWeight: 800, color: '#1e293b', fontSize: '13px' }}>{f.title}</p>
@@ -49,7 +57,9 @@ export const GeneralConsentSection: React.FC<{
         {f.sections.map(s => (
           <div key={s.heading}>
             <p style={h}>{s.heading}</p>
+            {s.lead && <p style={{ margin: '0 0 4px' }}>{s.lead}</p>}
             {s.items.map(it => <p key={it} style={li}>• {it}</p>)}
+            {s.tail && <p style={{ margin: '4px 0 0' }}>{s.tail}</p>}
           </div>
         ))}
         <p style={h}>{f.declarationHeading}</p>
@@ -60,13 +70,17 @@ export const GeneralConsentSection: React.FC<{
   return (
     <>
       {collapsible ? (
-        <details style={{ border: '1.5px solid #bfdbfe', borderRadius: '12px', padding: '12px 14px', background: '#eff6ff' }}>
+        <details onToggle={e => { if ((e.currentTarget as HTMLDetailsElement).open) requestAnimationFrame(checkNoticeBottom); }} style={{ border: '1.5px solid #bfdbfe', borderRadius: '12px', padding: '12px 14px', background: '#eff6ff' }}>
           <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 800, color: '#1e4da1', textDecoration: 'underline' }}>Click here to read the privacy notice</summary>
-          <div style={{ marginTop: '10px' }}>{noticeCard}</div>
+          <div ref={noticeBoxRef} onScroll={checkNoticeBottom} onTouchEnd={checkNoticeBottom}
+            style={{ marginTop: '10px', maxHeight: '320px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>{noticeCard}</div>
         </details>
       ) : noticeCard}
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', padding: '12px', background: agreed ? '#f0fdf4' : '#fff7f7', borderRadius: '10px', border: `1.5px solid ${agreed ? '#bbf7d0' : errorAgree ? '#ef4444' : '#fecaca'}` }}>
-        <input type="checkbox" checked={agreed} onChange={e => onAgree(e.target.checked)} style={{ width: '18px', height: '18px', marginTop: '1px', flexShrink: 0, accentColor: '#1e4da1' }} />
+      {collapsible && !noticeRead && (
+        <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#b91c1c' }}>Open the privacy notice and scroll to the bottom to unlock the tick box.</p>
+      )}
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: noticeRead ? 'pointer' : 'not-allowed', opacity: noticeRead ? 1 : 0.6, padding: '12px', background: agreed ? '#f0fdf4' : '#fff7f7', borderRadius: '10px', border: `1.5px solid ${agreed ? '#bbf7d0' : errorAgree ? '#ef4444' : '#fecaca'}` }}>
+        <input type="checkbox" disabled={!noticeRead} checked={agreed} onChange={e => onAgree(e.target.checked)} style={{ width: '18px', height: '18px', marginTop: '1px', flexShrink: 0, accentColor: '#1e4da1' }} />
         <span style={{ fontSize: '12px', color: '#475569', lineHeight: 1.5, fontWeight: 600 }}>{f.agreeLabel} *</span>
       </label>
       {!hideSignature && <SignatureBlock label={ui.signHere} clearLabel={ui.clear} capturedLabel={ui.signatureCaptured} signed={signed} error={errorSignature} onSign={onSign} clearKey={clearKey} onClear={onClear} />}
@@ -111,7 +125,7 @@ export const MediaConsentSection: React.FC<{
           </div>
         ))}
       </div>
-      <p style={{ margin: 0, fontSize: '11px', color: '#64748b' }}>{ui.optional}</p>
+      <p style={{ margin: 0, fontSize: '11px', color: '#64748b' }}>{f.choiceNote}</p>
 
       <div style={card}>
         <p style={{ ...h, margin: '0 0 4px' }}>{f.othersHeading}</p>

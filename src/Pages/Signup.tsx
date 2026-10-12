@@ -5,8 +5,8 @@ import { notifyUser } from '../utils/notifications';
 import { buildIndemnityPdf, indemnityPdfFileName } from '../utils/indemnityPdf';
 import { SignaturePad } from '../components/SignaturePad';
 import {
-  MIN_AGE, TERMS_INTRO_ADULT, TERMS_INTRO_MINOR, TERMS_NOTICE, TERMS_VERSION, UNDER_MIN_AGE_MESSAGE,
-  audienceForAge, healthFieldFor, termsSectionsFor, HEALTH_FIELD
+  MIN_AGE, TERMS_NOTICE, TERMS_VERSION, UNDER_MIN_AGE_MESSAGE,
+  audienceForAge, healthFieldFor, termsFor, HEALTH_FIELD
 } from '../utils/indemnityText';
 import type { Audience } from '../utils/indemnityText';
 import { GeneralConsentSection, MediaConsentSection } from '../components/ConsentSections';
@@ -133,7 +133,12 @@ export default function Signup() {
   const isYoung = ageNum !== null && Number.isFinite(ageNum) && ageNum >= MIN_AGE && ageNum <= 4;
   const tooYoung = ageNum !== null && Number.isFinite(ageNum) && ageNum < MIN_AGE;
   const [young, setYoung] = useState<YoungAthlete>(EMPTY_YOUNG);
-  const termsSections = termsSectionsFor(audience);
+  const termsView = termsFor(audience, TERMS_VERSION, {
+    parent: form.parent1Name.trim(),
+    child: `${form.studentFirstName} ${form.studentLastName}`.trim(),
+    name: form.parent1Name.trim() || `${form.studentFirstName} ${form.studentLastName}`.trim()
+  });
+  const termsSections = termsView.sections;
   const jumpToTerms = (n: number) => {
     const box = indemnityBoxRef.current;
     const el = box?.querySelector(`[data-terms-section="${n}"]`) as HTMLElement | null;
@@ -278,7 +283,7 @@ export default function Signup() {
     if (!form.medicalNotes.trim()) return 'Please tell us about any health conditions, allergies or injuries, or write None.';
     if (!form.risksAcknowledged) return 'Please tick the box to confirm you have read the risks.';
     if (!form.indemnityAgreed) return 'Please tick the box to confirm you agree to the Terms and Conditions.';
-    if (!gAgreed) { setConsentErrs({ agree: true }); return 'Please tick the box to confirm you agree to the privacy notice.'; }
+    if (!gAgreed) { setConsentErrs({ agree: true }); return 'Please open the privacy notice, read it to the bottom and tick the box to confirm you agree.'; }
     if (!MEDIA_KEYS.every(k => typeof mChoices[k] === 'boolean')) { setConsentErrs({ choices: true }); return 'Please answer Yes or No for every photo and video use.'; }
     if (!signatureDataUrl) { setSignatureError(true); return 'Please sign at the bottom of the form before submitting.'; }
     setConsentErrs({});
@@ -625,9 +630,7 @@ export default function Signup() {
               ))}
               <div style={{ height: '1px', background: '#e2e8f0', margin: '12px 0' }} />
               <p style={{ margin: '0 0 12px', color: '#1e293b' }}>
-                {audience === 'adult'
-                  ? TERMS_INTRO_ADULT(form.parent1Name.trim() || `${form.studentFirstName} ${form.studentLastName}`.trim())
-                  : TERMS_INTRO_MINOR(form.parent1Name.trim(), `${form.studentFirstName} ${form.studentLastName}`.trim())}
+                {termsView.intro}
               </p>
               {termsSections.map(sec => (
                 <div key={sec.number} data-terms-section={sec.number} style={{ margin: '0 0 14px' }}>

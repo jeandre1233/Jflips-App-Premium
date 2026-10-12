@@ -137,6 +137,8 @@ import { SyncStatusBadge } from './src/components/SyncStatusBadge';
 import { sendWhatsAppAttendanceQuery, sendWhatsAppInvoiceReminder } from './src/utils/whatsapp';
 import { openClassEnquiryReply } from './src/utils/parentMessages';
 import { buildIndemnityPdf, indemnityPdfFileName } from './src/utils/indemnityPdf';
+import { TERMS_VERSION } from './src/utils/indemnityText';
+import { FROZEN_TEXTS } from './src/utils/frozenTexts';
 import { sendCycleMonthReminderNotification, sendTempAthleteFollowupDiscordNotification, getDiscordWebhookUrl, setDiscordWebhookUrl } from './src/utils/discordNotifications';
 import { notifyUser, describeSessionLog, NOTIFICATION_TITLES } from './src/utils/notifications';
 import { 
@@ -168,13 +170,14 @@ export function getSessionBillingMonth(dateStr: string, billingDay: number = 1):
 
 /**
  * The owner's re-print of a signed registration. A child who signed the current Terms
- * and Conditions (version 4.x) gets the full pack: details, terms, privacy notice and
+ * and Conditions (version 4.0-draft or newer, which the app still holds the wording of) gets the full pack: details, terms, privacy notice and
  * photo and video choices, all with the one signature. A child who signed an earlier
  * version keeps the earlier print, because the current wording is not what they agreed to.
  */
 async function generateIndemnityPDFFromStudent(student: Student) {
   const rec: any = (student as any).indemnity_record;
-  if (String(rec?.version || '').startsWith('4.')) {
+  const recVersion = String(rec?.version || '');
+  if (recVersion === TERMS_VERSION || FROZEN_TEXTS.terms?.[recVersion]) {
     const audience = rec.audience === 'adult' ? 'adult' : 'minor';
     // The photo and privacy records are saved separately (so a parent can change photo
     // choices later without touching what they signed). Pull them in for the proof pack.

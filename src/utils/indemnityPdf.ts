@@ -1,7 +1,5 @@
 import { jsPDF } from 'jspdf';
-import {
-  Audience, TERMS_INTRO_ADULT, TERMS_INTRO_MINOR, TERMS_VERSION, termsSectionsFor
-} from './indemnityText';
+import { Audience, TERMS_VERSION, termsFor } from './indemnityText';
 import { GENERAL_VERSION, MEDIA_KEYS, MEDIA_VERSION, generalFormFor, mediaFormFor } from './consentForms';
 
 /**
@@ -174,10 +172,10 @@ export function buildIndemnityPdf(input: IndemnityPdfInput): jsPDF {
   // ── Part 2: Terms and Conditions ──
   newPage();
   titleBlock('Terms and Conditions');
-  text(audience === 'adult'
-    ? TERMS_INTRO_ADULT(input.parentName || input.studentName)
-    : TERMS_INTRO_MINOR(input.parentName, input.studentName), { gap: 6 });
-  const sections = termsSectionsFor(audience);
+  const terms = termsFor(audience, termsVersion, { parent: input.parentName, child: input.studentName, name: input.parentName || input.studentName });
+  if (terms.notStored) text(terms.notStored, { bold: true, size: 9, color: '#b91c1c', gap: 4 });
+  text(terms.intro, { gap: 6 });
+  const sections = terms.sections;
   heading('Index');
   sections.forEach(s => text(`${s.number}.  ${s.heading}`, { indent: 3, gap: 1 }));
   y += 4;
@@ -196,13 +194,16 @@ export function buildIndemnityPdf(input: IndemnityPdfInput): jsPDF {
   // ── Part 3: Privacy notice ──
   if (input.privacyVersion) {
     newPage();
-    const general = generalFormFor(audience);
+    const general = generalFormFor(audience, input.privacyVersion);
     titleBlock(general.title);
     text(general.subtitle, { size: 9, color: '#64748b', gap: 4 });
+    if (general.notStored) text(general.notStored, { bold: true, size: 9, color: '#b91c1c', gap: 4 });
     text(general.intro, { gap: 6 });
     general.sections.forEach(s => {
       heading(s.heading);
+      if (s.lead) text(s.lead, { gap: 2 });
       s.items.forEach(i => text('•  ' + i, { indent: 3, gap: 2 }));
+      if (s.tail) text(s.tail, { gap: 2 });
       y += 2;
     });
     heading(general.declarationHeading);
@@ -214,9 +215,10 @@ export function buildIndemnityPdf(input: IndemnityPdfInput): jsPDF {
   // ── Part 4: Photo and video consent ──
   if (input.media) {
     newPage();
-    const media = mediaFormFor(audience);
+    const media = mediaFormFor(audience, input.media.version);
     titleBlock(media.title);
     text(media.subtitle, { size: 9, color: '#64748b', gap: 4 });
+    if (media.notStored) text(media.notStored, { bold: true, size: 9, color: '#b91c1c', gap: 4 });
     text(media.intro, { gap: 6 });
     const choices = input.media.choices || {};
     const answerLine = (c: Record<string, boolean>) => {
@@ -248,8 +250,9 @@ export function buildIndemnityPdf(input: IndemnityPdfInput): jsPDF {
         y += 2;
       });
     }
+    if (media.choiceNote) text(media.choiceNote, { size: 9, color: '#64748b', gap: 4 });
     y += 2;
-    heading(media.othersHeading); text(media.others, { gap: 4 });
+    if (media.others) { heading(media.othersHeading); text(media.others, { gap: 4 }); }
     heading(media.promiseHeading); media.promises.forEach(p => text('•  ' + p, { indent: 3, gap: 2 }));
     y += 2;
     heading(media.rightsHeading); media.rights.forEach(r => text('•  ' + r, { indent: 3, gap: 2 }));
