@@ -8326,13 +8326,22 @@ const TeamManagementView = memo(({ state, onRemoveStudent, onUpdateSubTeams, onU
             <h3 className="text-2xl font-black uppercase italic text-[#1a1a1a] dark:text-white">Registration Portal</h3>
             <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-1">Manage public registrations and student signup links</p>
             {state.profile?.role === 'owner' && (
-              <button
-                onClick={() => openClassEnquiryReply(ownerIdForSharing)}
-                title="Opens WhatsApp so you can choose a contact; the class enquiry reply is already typed"
-                className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 text-white text-[10px] font-black uppercase tracking-wider"
-              >
-                <MessageCircle size={14} /> Reply to a class enquiry
-              </button>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  onClick={() => openClassEnquiryReply(ownerIdForSharing, 'en')}
+                  title="Opens WhatsApp so you can choose a contact; the English class enquiry reply is already typed"
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 text-white text-[10px] font-black uppercase tracking-wider"
+                >
+                  <MessageCircle size={14} /> Reply to enquiry (English)
+                </button>
+                <button
+                  onClick={() => openClassEnquiryReply(ownerIdForSharing, 'af')}
+                  title="Opens WhatsApp so you can choose a contact; the Afrikaans class enquiry reply is already typed"
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-900/50 text-green-700 dark:text-green-400 text-[10px] font-black uppercase tracking-wider"
+                >
+                  <MessageCircle size={14} /> Antwoord op navraag (Afrikaans)
+                </button>
+              </div>
             )}
           </div>
 

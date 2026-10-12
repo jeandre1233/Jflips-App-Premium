@@ -82,7 +82,33 @@ export function classEnquiryMessage(opts: { link: string }): string {
   ].join('\n');
 }
 
+/** The same reply in Afrikaans (no group-language note: the group is Afrikaans). */
+export function classEnquiryMessageAfrikaans(opts: { link: string }): string {
+  return [
+    'Hi 👋',
+    '',
+    'Dankie vir jou belangstelling in JFlips! 🤸‍♀️',
+    'Jou kind is welkom om ’n klas te kom probeer. Die eerste klas is gratis!',
+    '',
+    'Ons klasse:',
+    '📅 Woensdag 14:00 – 16:00',
+    '📅 Donderdag 14:00 – 16:00',
+    '📅 Vrydag 16:00 – 17:00',
+    '',
+    `Groepklasse is ${GROUP_FEE} per sessie per persoon.`,
+    `Privaatlesse is ${PRIVATE_FEE} per sessie.`,
+    '',
+    'Jy kan met hierdie link inskryf:',
+    opts.link,
+    '',
+    'Ek sal jou by die groep voeg.',
+    '',
+    'Geniet jou dag!'
+  ].join('\n');
+}
+
 /** Opens WhatsApp's own contact chooser with the enquiry reply already typed. */
-export function openClassEnquiryReply(ownerId: string | undefined | null): void {
-  void openWhatsApp({ text: classEnquiryMessage({ link: tumblingSignupLink(ownerId) }) });
+export function openClassEnquiryReply(ownerId: string | undefined | null, lang: 'en' | 'af' = 'en'): void {
+  const link = tumblingSignupLink(ownerId);
+  void openWhatsApp({ text: lang === 'af' ? classEnquiryMessageAfrikaans({ link }) : classEnquiryMessage({ link }) });
 }
