@@ -136,21 +136,8 @@ import { OfflineBanner } from './src/components/OfflineBanner';
 import { SyncStatusBadge } from './src/components/SyncStatusBadge';
 import { sendWhatsAppAttendanceQuery, sendWhatsAppInvoiceReminder } from './src/utils/whatsapp';
 import { openClassEnquiryReply } from './src/utils/parentMessages';
-import { buildIndemnityPdf, indemnityPdfFileName } from './src/utils/indemnityPdf';
-import { TERMS_VERSION } from './src/utils/indemnityText';
-import { FROZEN_TEXTS } from './src/utils/frozenTexts';
-import { sendCycleMonthReminderNotification, sendTempAthleteFollowupDiscordNotification, getDiscordWebhookUrl, setDiscordWebhookUrl } from './src/utils/discordNotifications';
+import { archiveAthlete, buildPackFor, canBuildPack, removeArchivedConsents, undoArchive } from './src/utils/oldAthletes';
 import { notifyUser, describeSessionLog, NOTIFICATION_TITLES } from './src/utils/notifications';
-import { 
-  initAuth as initGoogleAuth, 
-  googleSignIn, 
-  logoutGoogle, 
-  getAccessToken, 
-  getSavedSpreadsheetId, 
-  getSavedCalendarId, 
-  syncSchedulesToCalendar, 
-  syncFinancesToGoogleSheet 
-} from './src/utils/googleWorkspace';
 
 import { DashboardView } from './src/Pages/Dashboard';
 import { RosterView } from './src/Pages/Setup';
@@ -176,34 +163,20 @@ export function getSessionBillingMonth(dateStr: string, billingDay: number = 1):
  */
 async function generateIndemnityPDFFromStudent(student: Student) {
   const rec: any = (student as any).indemnity_record;
-  const recVersion = String(rec?.version || '');
-  if (recVersion === TERMS_VERSION || FROZEN_TEXTS.terms?.[recVersion]) {
-    const audience = rec.audience === 'adult' ? 'adult' : 'minor';
+  if (canBuildPack(rec)) {
     // The photo and privacy records are saved separately (so a parent can change photo
     // choices later without touching what they signed). Pull them in for the proof pack.
-    let privacyVersion: string | null = null;
-    let media: any = null;
+    let consents: any[] = [];
     try {
-      const { data: consents } = await supabase.from('consent_records').select('*').eq('family_key', student.id);
-      const general = (consents || []).find((c: any) => c.kind === 'general' && c.status !== 'pending');
-      const photo = (consents || []).find((c: any) => c.kind === 'media' && c.status !== 'pending');
-      if (general) privacyVersion = general.form_version || null;
-      if (photo) media = { version: photo.form_version, choices: photo.choices, status: photo.status, signedAt: photo.signed_at, history: photo.history };
+      const { data } = await supabase.from('consent_records').select('*').eq('family_key', student.id);
+      consents = data || [];
     } catch (e) { console.error('Could not load consent records for the PDF', e); }
-    const doc = buildIndemnityPdf({
-      privacyVersion, media,
-      studentName: student.name, dob: student.dob, age: student.age, className: student.class_name,
-      audience, parentName: student.parent1_name || '', relationship: rec.relationship || '',
-      phone: student.parent1_phone, email: student.parent1_email,
-      parent2Name: student.parent2_name, parent2Phone: student.parent2_phone,
-      emergency: rec.emergency_contact || null, medicalNotes: student.medical_notes,
-      young: student.young_athlete as any, signature: student.signature_data,
-      signedAt: student.indemnity_date, version: rec.version
-    });
-    const fileName = indemnityPdfFileName(student.name, student.indemnity_date);
-    if (Capacitor.isNativePlatform()) await saveAndShareFile(doc.output('datauristring'), fileName);
-    else doc.save(fileName);
-    return;
+    const pack = buildPackFor(student, consents);
+    if (pack) {
+      if (Capacitor.isNativePlatform()) await saveAndShareFile(pack.doc.output('datauristring'), pack.fileName);
+      else pack.doc.save(pack.fileName);
+      return;
+    }
   }
   if (!(window as any).jspdf) {
     await new Promise<void>((resolve, reject) => {
@@ -651,28 +624,7 @@ const DesktopSidebar: React.FC<{
   );
 };
 
-const handleLinkGoogle = async () => {
-  try {
-    const { error } = await supabase.auth.linkIdentity({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent'
-        },
-        scopes: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/calendar'
-      }
-    });
-    if (error) {
-      alert('Error linking Google account: ' + error.message);
-    } else {
-      alert('Google Account successfully linked! You can now log in using either method.');
-    }
-  } catch (err: any) {
-    alert('Error linking Google account: ' + err.message);
-  }
-};
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -921,15 +873,6 @@ const App: React.FC = () => {
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session) {
         setUser(session.user);
-        if (session.provider_token) {
-          console.log('Intercepted Supabase Google provider_token:', session.provider_token);
-          sessionStorage.setItem('google_access_token', session.provider_token);
-          const metadata = session.user.user_metadata || {};
-          sessionStorage.setItem('google_user_display_name', metadata.full_name || metadata.name || session.user.email?.split('@')[0] || 'Google Account');
-          sessionStorage.setItem('google_user_email', session.user.email || '');
-          sessionStorage.setItem('google_user_avatar', metadata.avatar_url || metadata.picture || '');
-          window.dispatchEvent(new Event('google-auth-changed'));
-        }
       } else {
         setUser(null);
       }
@@ -939,11 +882,6 @@ const App: React.FC = () => {
       } else if (event === 'TOKEN_REFRESHED') {
         console.log('Token refreshed successfully');
       } else if (event === 'SIGNED_OUT') {
-        sessionStorage.removeItem('google_access_token');
-        sessionStorage.removeItem('google_user_display_name');
-        sessionStorage.removeItem('google_user_email');
-        sessionStorage.removeItem('google_user_avatar');
-        window.dispatchEvent(new Event('google-auth-changed'));
       }
     });
     return () => {
@@ -1710,13 +1648,6 @@ const App: React.FC = () => {
 
         if (hasUnarchivedSessions && !localStorage.getItem(cycleAlertKey)) {
           try {
-            // Discord alert
-            await sendCycleMonthReminderNotification({
-              monthName: monthLabel,
-              year,
-              unarchivedSessionsCount: state.sessions.length
-            });
-
             // Device push + in-app notification to the gym owner
             await notifyUser({
               userId: ownerId,
@@ -1733,7 +1664,7 @@ const App: React.FC = () => {
           }
         }
 
-        // 3️⃣ Temp Athlete Follow-up Reminder (Push + Discord)
+        // 3️⃣ Temp Athlete Follow-up Reminder (Push)
         // Trigger with the end of month cycle revenue notification
         const tempAthletes = (state.students || []).filter(
           s => !s.is_gym_member && (!!s.is_temporary || (s.id && String(s.id).startsWith('stu_temp_')))
@@ -1744,16 +1675,6 @@ const App: React.FC = () => {
           if (!localStorage.getItem(tempFollowupKey)) {
             try {
               const namesList = tempAthletes.map(s => s.name).slice(0, 5).join(', ') + (tempAthletes.length > 5 ? ` +${tempAthletes.length - 5} more` : '');
-
-              // Discord alert
-              await sendTempAthleteFollowupDiscordNotification({
-                monthName: monthLabel,
-                year,
-                tempAthletes: tempAthletes.map(s => ({
-                  name: s.name,
-                  parentPhone: s.parent1_phone || s.phone
-                }))
-              });
 
               // Device push + in-app notification to the gym owner
               await notifyUser({
@@ -2264,15 +2185,41 @@ const App: React.FC = () => {
   };
 
   const removeStudent = async (id: string) => {
-    if (!user) return; if (!window.confirm("Delete athlete? This will remove all their records.")) return;
-    setIsSyncing(true);
+    if (!user) return;
     const student = state.students.find(s => s.id === id);
-    if (!student) { setIsSyncing(false); return; }
+    if (!student) return;
+    // A trial athlete has signed nothing, so there is nothing to keep: delete as before.
+    const isTrial = !!student.is_temporary || String(id).startsWith('stu_temp_');
+    const confirmed = window.confirm(isTrial
+      ? 'Delete this trial athlete? They have not signed any forms, so nothing is kept.'
+      : 'Remove this athlete? Their record moves to Old athletes (Setup, Clients). Their signed forms are kept until the date shown there, and their other details can be deleted 12 months after they leave.');
+    if (!confirmed) return;
+    setIsSyncing(true);
     const table = student.is_gym_member ? 'team_athletes' : 'tumbling_students';
-    
+
+    // Copy the record to Old athletes first. If that fails, nothing is removed.
+    let archivedConsentIds: string[] = [];
+    if (!isTrial) {
+      const archived = await archiveAthlete({
+        ownerId: user.id, student, table,
+        sessionIds: state.sessions.filter(s => s.studentIds?.includes(id)).map(s => s.id),
+        classIds: state.classTypes.filter(c => c.studentIds?.includes(id)).map(c => c.id)
+      });
+      if (archived.error) {
+        alert('Could not move the athlete to Old athletes, so nothing was removed: ' + archived.error);
+        setIsSyncing(false);
+        return;
+      }
+      archivedConsentIds = archived.consentIds;
+    }
+
     // Delete from main table
     const { error } = await supabase.from(table).delete().eq('id', id).eq('user_id', user.id);
-    if (error) { alert("Delete failed: " + error.message); setIsSyncing(false); return; }
+    if (error) {
+      if (!isTrial) await undoArchive(user.id, id);
+      alert("Delete failed: " + error.message); setIsSyncing(false); return;
+    }
+    if (!isTrial) await removeArchivedConsents(user.id, archivedConsentIds);
 
     // Clean up sessions
     const sessionsWithStudent = state.sessions.filter(s => s.studentIds?.includes(id));
@@ -3815,56 +3762,6 @@ const App: React.FC = () => {
       
       if (delErr) { alert("Delete Error: " + delErr.message); return; }
 
-      // Automatically export to Google Sheets if enabled
-      const googleTokenVal = await getAccessToken();
-      const isSheetsSyncEnabled = localStorage.getItem('google_sheets_sync_enabled') === 'true';
-      if (isSheetsSyncEnabled && googleTokenVal) {
-        console.log('Automated Google Sheets finance syncing triggered...');
-        try {
-          // Read history back from the database rather than predicting it here.
-          // This block used to rebuild the list locally with `existing + new`
-          // arithmetic, so the spreadsheet could disagree with the app about the
-          // same month. The archive has already written the derived truth.
-          const { data: freshHist } = await supabase.from('history')
-            .select('*')
-            .eq('user_id', user.id);
-
-          const updatedHistory: HistoryMonth[] = (freshHist || []).map((h: any) => ({
-            id: h.id,
-            monthName: h.month_name,
-            year: h.year,
-            revenue: Number(h.total_gross ?? h.revenue ?? 0),
-            tumblingGross: Number(h.tumbling_gross ?? 0),
-            tumblingCoachPay: Number(h.tumbling_coach_pay ?? 0),
-            tumblingNet: Number(h.tumbling_net ?? 0),
-            schoolsGross: Number(h.schools_gross ?? 0),
-            schoolsCoachPay: Number(h.schools_coach_pay ?? 0),
-            gymsGross: Number(h.gyms_gross ?? 0),
-            gymsNet: Number(h.gyms_net ?? 0),
-            totalGross: Number(h.total_gross ?? h.revenue ?? 0),
-            totalCoachPayout: Number(h.total_coach_payout ?? 0),
-            netProfit: Number(h.net_profit ?? 0),
-            sessionCount: Number(h.session_count ?? 0),
-            invoicesTotal: Number(h.invoices_total ?? h.total_gross ?? h.revenue ?? 0),
-            invoiceCount: Number(h.invoice_count ?? 0),
-            sessions: h.sessions_json || [],
-            snapshot_data: h.snapshot_json,
-            recordedAt: h.recorded_at
-          }));
-
-          await syncFinancesToGoogleSheet(
-            [], // sessions are cleared on reset
-            updatedHistory,
-            state.classTypes || [],
-            state.gyms || [],
-            state.staff || [],
-            googleTokenVal
-          );
-        } catch (sheetErr) {
-          console.error('Automated Google Sheets export failed during archive:', sheetErr);
-        }
-      }
-
       loadCloudData(true);
       setIsResetConfirming(false);
       handleViewChange(View.INVOICES);
@@ -4220,32 +4117,6 @@ const App: React.FC = () => {
     });
     if (error) { alert("Schedule Save Error: " + error.message); return; }
 
-    // Automated Google Calendar sync
-    const token = await getAccessToken();
-    const isCalendarSyncEnabled = localStorage.getItem('google_calendar_sync_enabled') === 'true';
-    if (isCalendarSyncEnabled && token) {
-      try {
-        const updatedSchedules = (state.schedules || []).filter(s => s.id !== scheduleId);
-        updatedSchedules.push({
-          id: scheduleId,
-          class_ids: classIds,
-          day_of_week: dayOfWeek,
-          time,
-          label: label || null,
-          color: color || null,
-          coach_id: assignedCoachId
-        });
-        await syncSchedulesToCalendar(
-          updatedSchedules,
-          state.classTypes || [],
-          state.gyms || [],
-          state.staff || [],
-          token
-        );
-      } catch (calErr) {
-        console.error('Automated Google Calendar background sync failed:', calErr);
-      }
-    }
 
     setShowModal(null); setEditingSchedule(null); loadCloudData(true);
   };
@@ -4255,23 +4126,6 @@ const App: React.FC = () => {
     const { error } = await supabase.from('class_schedules').delete().eq('id', id).eq('user_id', user.id);
     if (error) { alert("Delete failed: " + error.message); return; }
 
-    // Automated Google Calendar sync on remove
-    const token = await getAccessToken();
-    const isCalendarSyncEnabledOnDelete = localStorage.getItem('google_calendar_sync_enabled') === 'true';
-    if (isCalendarSyncEnabledOnDelete && token) {
-      try {
-        const updatedSchedules = (state.schedules || []).filter(s => s.id !== id);
-        await syncSchedulesToCalendar(
-          updatedSchedules,
-          state.classTypes || [],
-          state.gyms || [],
-          state.staff || [],
-          token
-        );
-      } catch (calErr) {
-        console.error('Automated Google Calendar background sync failed during deletion:', calErr);
-      }
-    }
 
     loadCloudData(true);
   };
@@ -4378,7 +4232,7 @@ const App: React.FC = () => {
           <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-800 text-xs text-slate-400 space-y-2 leading-relaxed">
             <p className="font-semibold text-slate-300">How to fix this:</p>
             <ol className="list-decimal pl-4 space-y-1.5">
-              <li>Go to your hosting dashboard (Vercel, Netlify, etc.) or open your local <code className="font-mono bg-slate-950 px-1 py-0.5 rounded text-amber-400">.env</code> file.</li>
+              <li>Go to your hosting dashboard (Vercel) or open your local <code className="font-mono bg-slate-950 px-1 py-0.5 rounded text-amber-400">.env</code> file.</li>
               <li>Add the environment variables listed above.</li>
               <li>Re-deploy or restart your development server to apply the changes.</li>
             </ol>
@@ -4711,7 +4565,6 @@ const App: React.FC = () => {
           state={state} 
           toggleTheme={toggleTheme} 
           onLogout={handleLogout} 
-          onLinkGoogle={handleLinkGoogle}
           onClose={() => setShowSettingsModal(false)} 
           
         />
@@ -12468,7 +12321,7 @@ const ClassTypeForm: React.FC<any> = ({ students, gyms, staff, isOwner, initialD
   );
 };
 
-const AppSettingsModal: React.FC<any> = ({ state, toggleTheme, onLogout, onLinkGoogle, onClose }) => (
+const AppSettingsModal: React.FC<any> = ({ state, toggleTheme, onLogout, onClose }) => (
   <Modal title="Settings" onClose={onClose}>
     <div className="space-y-4">
       <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">

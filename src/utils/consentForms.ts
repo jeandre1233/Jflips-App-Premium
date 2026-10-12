@@ -20,8 +20,8 @@ import { FROZEN_TEXTS } from './frozenTexts';
 export type Lang = 'en';
 export type ConsentKind = 'general' | 'media';
 
-export const GENERAL_VERSION = '1.4-draft';
-export const MEDIA_VERSION = '1.2-draft';
+export const GENERAL_VERSION = '1.5-draft';
+export const MEDIA_VERSION = '1.3-draft';
 
 export const MEDIA_KEYS = [
   'instagramFacebookPhotos',
@@ -109,7 +109,7 @@ export const MEDIA_FORM: Record<Lang, MediaFormText> = {
     ],
     rightsHeading: 'Your rights',
     rights: [
-      "You can change or withdraw your consent at any time by contacting us. We will then remove the photos and videos from JFLIPS's own pages and website within 7 days. We cannot control content that others have already saved or shared.",
+      "You can change or withdraw your consent at any time by contacting us. To change your choices, we will send you the form again to sign. If you withdraw, we will remove the photos and videos from JFLIPS's own pages and website within 7 days. We cannot control content that others have already saved or shared.",
       'You can ask what information we hold about your child, and ask for it to be corrected or deleted.',
       "We keep this form and your choices as proof of what you agreed, for the period set out under 'How long we keep it' in the privacy notice.",
       "If you feel your child's personal information has been mishandled, you can lodge a complaint with the Information Regulator: POPIAComplaints@inforegulator.org.za."
@@ -162,7 +162,7 @@ export const GENERAL_FORM: Record<Lang, GeneralFormText> = {
         heading: 'Who can see it',
         items: [
           'JFLIPS management can see all of it.',
-          "Your child's coaches can see your child's name, age, medical information and your contact numbers, so they can keep your child safe and reach you in an emergency. They cannot see your signature, email address or billing details.",
+          "Your child's coaches can see your child's name, age, medical information, your contact numbers and your emergency contact, so they can keep your child safe and reach you in an emergency. They cannot see your signature, email address or billing details.",
           'The companies that run the services we use to store and send information for us (see below). They may only use it for that.',
           'We do not sell your information. We do not share it with anyone else unless the law requires it or a doctor or medical helper needs it in an emergency.'
         ]
@@ -175,7 +175,7 @@ export const GENERAL_FORM: Record<Lang, GeneralFormText> = {
       },
       {
         heading: 'How long we keep it',
-        lead: 'We keep your information while your child is enrolled. After they leave, we keep it only for as long as we need it:',
+        lead: 'We keep your information while your child is enrolled. When they leave, we move their record to a separate archive that only JFLIPS management can open. We keep it there only for as long as we need it:',
         items: [
           'Financial records (invoices and payments): 7 years, because the law requires it.',
           'Signed forms (the terms, this notice and the photo consent) and injury or incident records: until your child is at least 19, because a claim could still be made until then.',
@@ -260,7 +260,7 @@ function currentGeneralFor(a: Audience): GeneralFormText {
     'Who can see it': {
       items: [
         'JFLIPS management can see all of it.',
-        'Your coaches can see your name, age, medical information and cell number, so they can keep you safe and reach you in an emergency. They cannot see your signature, email address or billing details.',
+        'Your coaches can see your name, age, medical information, cell number and emergency contact, so they can keep you safe and reach someone in an emergency. They cannot see your signature, email address or billing details.',
         'The companies that run the services we use to store and send information for us (see below). They may only use it for that.',
         'We do not sell your information. We do not share it with anyone else unless the law requires it or a doctor or medical helper needs it in an emergency.'
       ]
@@ -271,7 +271,7 @@ function currentGeneralFor(a: Audience): GeneralFormText {
       ]
     },
     'How long we keep it': {
-      lead: 'We keep your information while you are enrolled. After you leave, we keep it only for as long as we need it:',
+      lead: 'We keep your information while you are enrolled. When you leave, we move your record to a separate archive that only JFLIPS management can open. We keep it there only for as long as we need it:',
       items: [
         'Financial records (invoices and payments): 7 years, because the law requires it.',
         'Signed forms (the terms, this notice and the photo consent) and injury or incident records: 5 years after you leave, because a claim could still be made during that time.',
@@ -332,7 +332,7 @@ export const UI: Record<Lang, Record<string, string>> = {
     signatureCaptured: 'Signature captured', submitGeneral: 'Sign privacy notice', submitMedia: 'Sign photo and video consent',
     withdraw: 'Withdraw all photo and video consent', confirmWithdraw: 'Yes, withdraw my consent', cancel: 'Cancel',
     saved: 'Thank you. Your form has been saved.', alreadySigned: 'Signed', pending: 'Not signed yet', withdrawn: 'Consent withdrawn',
-    changeChoices: 'You can change your choices below at any time.', downloadPdf: 'Download signed copy (PDF)',
+    changeChoices: 'To change your photo and video choices, message JFLIPS on WhatsApp 069 040 3387 and we will send you the form again.', downloadPdf: 'Download signed copy (PDF)',
     invalidLink: 'This link is not valid. Please contact JFlips for a new one.', loading: 'Loading...',
     needAll: 'Please answer Yes or No for every use.', needSignature: 'Please sign before submitting.',
     needName: 'Please enter your full name.', needAgree: 'Please tick the box to confirm you agree.',

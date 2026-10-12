@@ -1,5 +1,4 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { google } from 'googleapis';
 
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 

@@ -38,22 +38,12 @@ import {
   MerchItem
 } from '../../types';
 import { supabase } from '../../supabase';
-import { 
-  initAuth as initGoogleAuth, 
-  googleSignIn, 
-  logoutGoogle, 
-  getAccessToken, 
-  getSavedSpreadsheetId, 
-  getSavedCalendarId, 
-  syncSchedulesToCalendar, 
-  syncFinancesToGoogleSheet 
-} from '../utils/googleWorkspace';
 import { ConsentManager } from '../components/ConsentManager';
+import { OldAthletes } from '../components/OldAthletes';
 import { CoachStudentList } from '../components/CoachStudentList';
 import { parentMustStay } from '../utils/youngAthlete';
 import { sendWhatsAppTrialSignup } from '../utils/whatsapp';
 import { tumblingSignupLink } from '../utils/parentMessages';
-import { getDiscordWebhookUrl, setDiscordWebhookUrl, isDiscordNotificationsEnabled, setDiscordNotificationsEnabled } from '../utils/discordNotifications';
 
 const athleteItemVariants = {
   hidden: { y: 15, opacity: 0 },
@@ -594,17 +584,6 @@ export const RosterView = memo(({
     setProfileForm(state.profile);
   }, [state.profile]);
 
-  const [googleUser, setGoogleUser] = useState<any>(null);
-  const [googleToken, setGoogleToken] = useState<string | null>(null);
-  const [spreadsheetId, setSpreadsheetId] = useState<string | null>(getSavedSpreadsheetId());
-  const [calendarId, setCalendarId] = useState<string | null>(getSavedCalendarId());
-  const [googleSheetsSyncEnabled, setGoogleSheetsSyncEnabled] = useState<boolean>(() => {
-    return localStorage.getItem('google_sheets_sync_enabled') === 'true';
-  });
-  const [googleCalendarSyncEnabled, setGoogleCalendarSyncEnabled] = useState<boolean>(() => {
-    return localStorage.getItem('google_calendar_sync_enabled') === 'true';
-  });
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [showSimulator, setShowSimulator] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -628,140 +607,6 @@ export const RosterView = memo(({
     } catch (err) {
       console.error('Failed to copy onboarding link', err);
     }
-  };
-
-  useEffect(() => {
-    const unsubscribe = initGoogleAuth(
-      (u, token) => {
-        setGoogleUser(u);
-        setGoogleToken(token);
-        setSpreadsheetId(getSavedSpreadsheetId());
-        setCalendarId(getSavedCalendarId());
-      },
-      () => {
-        setGoogleUser(null);
-        setGoogleToken(null);
-      }
-    );
-    return () => unsubscribe();
-  }, []);
-
-  const handleGoogleSignIn = async () => {
-    try {
-      const result = await googleSignIn();
-      if (result) {
-        setGoogleUser(result.user);
-        setGoogleToken(result.accessToken);
-        setSpreadsheetId(getSavedSpreadsheetId());
-        setCalendarId(getSavedCalendarId());
-        showToast('Successfully connected your Google account!', 'success');
-      }
-    } catch (err: any) {
-      showToast('Google Sign-In failed: ' + err.message, 'error');
-    }
-  };
-
-  const handleGoogleSignOut = async () => {
-    if (window.confirm('Sign out of your connected Google account?')) {
-      await logoutGoogle();
-      setGoogleUser(null);
-      setGoogleToken(null);
-      showToast('Google account disconnected successfully.', 'success');
-    }
-  };
-
-  const syncSchedules = async () => {
-    const token = await getAccessToken();
-    if (!token) {
-      showToast('Please connect your Google account first!', 'info');
-      return;
-    }
-    setIsSyncing(true);
-    try {
-      await syncSchedulesToCalendar(
-        state.schedules || [],
-        state.classTypes || [],
-        state.gyms || [],
-        state.staff || [],
-        token
-      );
-      setCalendarId(getSavedCalendarId());
-      showToast('Timetable successfully synchronized to Google Calendar!', 'success');
-    } catch (err: any) {
-      showToast('Calendar Sync failed: ' + err.message, 'error');
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const syncSheetsFinances = async () => {
-    const token = await getAccessToken();
-    if (!token) {
-      showToast('Please connect your Google account first!', 'info');
-      return;
-    }
-    const confirmed = window.confirm(
-      'Refresh spreadsheet? This will export active sessions & archived records to make Sheets the single source of truth.'
-    );
-    if (!confirmed) return;
-
-    setIsSyncing(true);
-    try {
-      const sheetId = await syncFinancesToGoogleSheet(
-        state.sessions || [],
-        state.history || [],
-        state.classTypes || [],
-        state.gyms || [],
-        state.staff || [],
-        token
-      );
-      setSpreadsheetId(sheetId);
-      showToast('Finances successfully synchronized to Google Sheets!', 'success');
-    } catch (err: any) {
-      showToast('Sheets Sync failed: ' + err.message, 'error');
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const [discordEnabled, setDiscordEnabled] = useState(isDiscordNotificationsEnabled());
-  const [discordWebhookInput, setDiscordWebhookInput] = useState(getDiscordWebhookUrl() || '');
-  const [testStatus, setTestStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
-
-  const handleToggleDiscord = (enabled: boolean) => {
-    setDiscordEnabled(enabled);
-    setDiscordNotificationsEnabled(enabled);
-    showToast(enabled ? 'Discord notifications enabled' : 'Discord notifications disabled', enabled ? 'success' : 'info');
-  };
-
-  const handleTestDiscordWebhook = async () => {
-    setTestStatus('sending');
-    try {
-      const response = await fetch(discordWebhookInput, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: '🔔 **JFLIPS Notification Engine Connected!**\nYour Discord notification system is connected and working perfectly. 🤸'
-        })
-      });
-      if (response.ok) {
-        setTestStatus('success');
-      } else {
-        setTestStatus('error');
-      }
-    } catch (err) {
-      console.error(err);
-      setTestStatus('error');
-    }
-  };
-
-  const handleSaveDiscordWebhook = (e: React.FormEvent) => {
-    e.preventDefault();
-    setDiscordWebhookUrl(discordWebhookInput);
-    setDiscordNotificationsEnabled(discordEnabled);
-    showToast('Discord settings saved successfully!', 'success');
   };
 
   const tabs = isOwner 
@@ -1494,6 +1339,7 @@ export const RosterView = memo(({
                 </div>
 
                 {entityType === 'athletes' && isOwner && <ConsentManager state={state} />}
+                {entityType === 'athletes' && isOwner && <OldAthletes onChanged={onRefreshStaff} />}
               </div>
             )}
 

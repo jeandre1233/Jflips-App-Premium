@@ -32,6 +32,8 @@ export interface Student {
   first_class_date?: string;
   /** Worked out by the database for coach accounts, which do not receive the dob. */
   parent_must_stay?: boolean;
+  /** The emergency contact given at sign-up. Coaches receive it through coach_roster(). */
+  emergency_contact?: { name?: string; phone?: string; relationship?: string | null } | null;
   /** Safety details collected for children aged 4 and under. */
   young_athlete?: {
     stays?: boolean; adultName?: string; adultPhone?: string;

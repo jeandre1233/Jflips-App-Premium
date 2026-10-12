@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from '../../supabase';
 import { GeneralConsentSection, MediaConsentSection } from '../components/ConsentSections';
 import {
-  ConsentKind, GENERAL_VERSION, MEDIA_KEYS, MEDIA_VERSION, MediaKey, generateConsentPdf, uiFor
+  ConsentKind, GENERAL_VERSION, MEDIA_KEYS, MEDIA_VERSION, MediaKey, generateConsentPdf, mediaFormFor, uiFor
 } from '../utils/consentForms';
 import type { Audience } from '../utils/indemnityText';
 
@@ -45,11 +45,10 @@ export default function Consent() {
   const [mSig, setMSig] = useState('');
   const [mClear, setMClear] = useState(0);
 
-  const [busy, setBusy] = useState<ConsentKind | 'withdraw' | null>(null);
+  const [busy, setBusy] = useState<ConsentKind | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [errs, setErrs] = useState<Record<string, boolean>>({});
-  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
   const [justSigned, setJustSigned] = useState<Record<string, { sig: string; at: string }>>({});
 
   const load = useCallback(async () => {
@@ -112,20 +111,6 @@ export default function Consent() {
     await load();
   };
 
-  const withdraw = async () => {
-    setError(''); setMessage('');
-    setBusy('withdraw');
-    const { error: e } = await supabase.rpc('submit_consent', {
-      p_token: token, p_kind: 'media', p_parent_name: parent.name, p_parent_phone: parent.phone, p_parent_email: parent.email,
-      p_details: {}, p_choices: {}, p_signature: null, p_language: 'en', p_form_version: MEDIA_VERSION, p_withdraw: true
-    });
-    setBusy(null); setConfirmWithdraw(false);
-    if (e) { setError(e.message); return; }
-    setMChoices(MEDIA_KEYS.reduce((a, k) => ({ ...a, [k]: false }), {}));
-    setMessage(ui.saved);
-    await load();
-  };
-
   const download = (kind: ConsentKind) => {
     const js = justSigned[kind];
     const row = rows[kind];
@@ -166,6 +151,13 @@ export default function Consent() {
     return <span style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color, background: color + '18', padding: '3px 10px', borderRadius: '999px' }}>{text}</span>;
   };
 
+  const anyPending = Object.values(rows).some(r => r.status === 'pending');
+  const signedOn = (r: Row) => {
+    const when = r.signed_at ? new Date(r.signed_at).toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+    return `${r.status === 'withdrawn' ? 'Consent withdrawn' : 'Signed'}${when ? ` on ${when}` : ''}${r.form_version ? ` (version ${r.form_version})` : ''}.`;
+  };
+  const lockedText: React.CSSProperties = { margin: 0, fontSize: '13px', color: '#475569', lineHeight: 1.6 };
+
   const section = (title: string, tag: React.ReactNode, body: React.ReactNode) => (
     <div style={{ background: 'white', borderRadius: '20px', padding: '22px 20px', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
@@ -183,7 +175,7 @@ export default function Consent() {
         {childNames && <p style={{ fontSize: '13px', color: '#93c5fd', margin: 0 }}>{ui.familyOf} {childNames}</p>}
       </div>
 
-      {section(ui.parentHeading, null, (
+      {anyPending && section(ui.parentHeading, null, (
         <>
           <div><label style={label}>{ui.fullName} *</label><input style={input} value={parent.name} onChange={e => setParent({ ...parent, name: e.target.value })} /></div>
           <div><label style={label}>{ui.relationship}</label><input style={input} value={parent.relationship} onChange={e => setParent({ ...parent, relationship: e.target.value })} /></div>
@@ -192,7 +184,15 @@ export default function Consent() {
         </>
       ))}
 
-      {rows.general && section(ui.step1, stateTag(rows.general), (
+      {rows.general && section(ui.step1, stateTag(rows.general), rows.general.status !== 'pending' ? (
+        <>
+          <p style={lockedText}>{signedOn(rows.general)}</p>
+          <p style={{ ...lockedText, fontSize: '12px', color: '#64748b' }}>To change anything on this form, message JFLIPS on WhatsApp 069 040 3387.</p>
+          {justSigned.general && (
+            <button onClick={() => download('general')} style={{ ...primary(false), background: 'white', color: '#1e4da1', border: '2px solid #1e4da1' }}>{ui.downloadPdf}</button>
+          )}
+        </>
+      ) : (
         <>
           <GeneralConsentSection
             agreed={gAgreed} onAgree={setGAgreed}
@@ -202,15 +202,32 @@ export default function Consent() {
           <button style={primary(busy === 'general')} disabled={busy === 'general'} onClick={() => submit('general')}>
             {busy === 'general' ? '...' : ui.submitGeneral}
           </button>
-          {(justSigned.general) && (
-            <button onClick={() => download('general')} style={{ ...primary(false), background: 'white', color: '#1e4da1', border: '2px solid #1e4da1' }}>{ui.downloadPdf}</button>
-          )}
         </>
       ))}
 
-      {rows.media && section(ui.step2, stateTag(rows.media), (
+      {rows.media && section(ui.step2, stateTag(rows.media), rows.media.status !== 'pending' ? (
         <>
-          {rows.media.status !== 'pending' && <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>{ui.changeChoices}</p>}
+          <p style={lockedText}>{signedOn(rows.media)}</p>
+          {(() => {
+            const f = mediaFormFor(audience, rows.media.form_version);
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {MEDIA_KEYS.map(k => (
+                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', fontSize: '12px', color: '#1e293b', padding: '8px 10px', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+                    <span>{f.uses[k]}</span>
+                    <strong style={{ color: rows.media!.choices?.[k] ? '#166534' : '#991b1b', flexShrink: 0 }}>{rows.media!.choices?.[k] ? f.yes : f.no}</strong>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+          <p style={{ ...lockedText, fontSize: '12px', color: '#64748b' }}>{ui.changeChoices}</p>
+          {justSigned.media && (
+            <button onClick={() => download('media')} style={{ ...primary(false), background: 'white', color: '#1e4da1', border: '2px solid #1e4da1' }}>{ui.downloadPdf}</button>
+          )}
+        </>
+      ) : (
+        <>
           <MediaConsentSection
             choices={mChoices} onChoice={(k, v) => setMChoices(c => ({ ...c, [k]: v }))}
             signed={!!mSig} onSign={d => setMSig(d)} clearKey={mClear} onClear={() => { setMSig(''); setMClear(c => c + 1); }}
@@ -219,19 +236,6 @@ export default function Consent() {
           <button style={primary(busy === 'media')} disabled={busy === 'media'} onClick={() => submit('media')}>
             {busy === 'media' ? '...' : ui.submitMedia}
           </button>
-          {justSigned.media && (
-            <button onClick={() => download('media')} style={{ ...primary(false), background: 'white', color: '#1e4da1', border: '2px solid #1e4da1' }}>{ui.downloadPdf}</button>
-          )}
-          {rows.media.status === 'signed' && (
-            confirmWithdraw ? (
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={withdraw} disabled={busy === 'withdraw'} style={{ flex: 1, padding: '12px', background: '#b91c1c', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 800, cursor: 'pointer' }}>{ui.confirmWithdraw}</button>
-                <button onClick={() => setConfirmWithdraw(false)} style={{ flex: 1, padding: '12px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '12px', fontWeight: 800, cursor: 'pointer' }}>{ui.cancel}</button>
-              </div>
-            ) : (
-              <button onClick={() => setConfirmWithdraw(true)} style={{ background: 'none', border: 'none', color: '#b91c1c', fontWeight: 700, fontSize: '12px', cursor: 'pointer', textDecoration: 'underline' }}>{ui.withdraw}</button>
-            )
-          )}
         </>
       ))}
 

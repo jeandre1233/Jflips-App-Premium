@@ -161,6 +161,21 @@ export const ConsentManager: React.FC<{ state: AppState }> = ({ state }) => {
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
   };
 
+  /**
+   * A parent asked to change their photo and video choices. Reopening keeps what they
+   * signed in the record's history and makes the form fillable again through the same
+   * link. Then you send the link again.
+   */
+  const reopenPhotos = async (f: Family, m: ConsentRecord) => {
+    if (!window.confirm(`Let ${f.parent} change their photo and video choices? What they signed is kept in the record. You then send them the link again.`)) return;
+    setBusyKey(f.key);
+    const { error } = await supabase.rpc('reopen_consent', { p_id: m.id });
+    setBusyKey(null);
+    if (error) { alert('Could not reopen the form: ' + error.message); return; }
+    await load();
+    if (window.confirm('The photo and video form is open again. Send the link to the parent on WhatsApp now?')) await send(f);
+  };
+
   const copy = async (f: Family) => {
     setBusyKey(f.key);
     const token = await ensureLink(f);
@@ -266,6 +281,12 @@ export const ConsentManager: React.FC<{ state: AppState }> = ({ state }) => {
                         className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[9px] font-black uppercase tracking-wider disabled:opacity-50">
                         <Copy size={11} /> {copiedKey === f.key ? 'Copied' : 'Copy link'}
                       </button>
+                      {m && m.status !== 'pending' && (
+                        <button onClick={() => reopenPhotos(f, m)} disabled={busyKey === f.key}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/40 text-[9px] font-black uppercase tracking-wider disabled:opacity-50">
+                          Reopen photo form
+                        </button>
+                      )}
                       {[g, m].map(r => r && r.status !== 'pending' && r.signature_data && (
                         <button key={r.kind} onClick={() => pdf(f, r)}
                           className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-[#1e4da1] dark:text-blue-400 border border-blue-200 dark:border-blue-900/50 text-[9px] font-black uppercase tracking-wider">

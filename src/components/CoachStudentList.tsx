@@ -26,11 +26,13 @@ const ageOf = (s: Student): number | null => {
   return typeof n === 'number' && Number.isFinite(n) ? n : null;
 };
 
-/** Emergency contacts in the order a coach should try them. */
+/** Who a coach should try, in order: the parents, then the emergency contact given at sign-up. */
 const contactsOf = (s: Student): { name: string; phone: string; label: string }[] => {
+  const ec = s.emergency_contact;
   const list = [
-    { name: s.parent1_name || '', phone: s.parent1_phone || s.phone || '', label: 'Emergency contact 1' },
-    { name: s.parent2_name || '', phone: s.parent2_phone || '', label: 'Emergency contact 2' }
+    { name: s.parent1_name || '', phone: s.parent1_phone || s.phone || '', label: 'Parent / guardian' },
+    { name: s.parent2_name || '', phone: s.parent2_phone || '', label: 'Second parent / guardian' },
+    { name: ec?.name || '', phone: ec?.phone || '', label: ec?.relationship ? `Emergency contact (${ec.relationship})` : 'Emergency contact' }
   ];
   return list.filter(c => c.name || c.phone);
 };
