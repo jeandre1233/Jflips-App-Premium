@@ -60,8 +60,8 @@ export const GeneralConsentSection: React.FC<{
   return (
     <>
       {collapsible ? (
-        <details style={{ border: '1.5px solid #e2e8f0', borderRadius: '12px', padding: '10px 14px', background: 'white' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '12px', fontWeight: 700, color: '#1e4da1' }}>Read the privacy notice</summary>
+        <details style={{ border: '1.5px solid #bfdbfe', borderRadius: '12px', padding: '12px 14px', background: '#eff6ff' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 800, color: '#1e4da1', textDecoration: 'underline' }}>Click here to read the privacy notice</summary>
           <div style={{ marginTop: '10px' }}>{noticeCard}</div>
         </details>
       ) : noticeCard}

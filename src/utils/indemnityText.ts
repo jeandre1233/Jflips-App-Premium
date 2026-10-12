@@ -158,7 +158,7 @@ export const HEALTH_FIELD = {
 export const healthFieldFor = (a: Audience) => (a === 'adult' ? HEALTH_FIELD.adult : HEALTH_FIELD.minor);
 
 /** The short line above the Terms and Conditions. */
-export const TERMS_NOTICE = 'Injuries can be serious (section 2), and section 1 lets us arrange emergency medical help if we cannot reach you. Please read the whole of the Terms and Conditions.';
+export const TERMS_NOTICE = 'Please read the Terms and Conditions.';
 
 /** Minimum age. Younger children are asked to message us instead of registering. */
 export const MIN_AGE = 2;

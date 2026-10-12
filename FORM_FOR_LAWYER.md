@@ -4,7 +4,7 @@ This is every piece of text a parent sees when they register, taken straight fro
 
 Document versions: Terms and Conditions 4.0-draft, Privacy notice 1.3-draft, Photo and video consent 1.1-draft. All are drafts.
 
-**How the form works.** A parent fills in the details, reads the Terms and Conditions in a scroll box (the tick boxes stay locked until they have scrolled to the bottom), reads the privacy notice (folded away, with its own tick), answers Yes or No for each photo and video use, and signs once at the bottom. That one signature covers all three documents. The privacy notice and the photo consent are saved as their own records, so a parent can change photo choices later without touching what they signed. The signed PDF puts all three documents, the choices made and the one signature into a single file, with the version of each document in the footer.
+**How the form works.** A parent fills in the details, reads the Terms and Conditions in a scroll box (the tick boxes stay locked until they have scrolled to the bottom), opens the privacy notice ("Click here to read the privacy notice", with its own tick), answers Yes or No for each photo and video use, and signs once at the bottom. That one signature covers all three documents. The privacy notice and the photo consent are saved as their own records, so a parent can change photo choices later without touching what they signed. The signed PDF puts all three documents, the choices made and the one signature into a single file, with the version of each document in the footer.
 
 **Two versions of every text.** A parent or guardian signs for a child under 18. An adult (18 or over) signs for themselves. Both are printed below.
 
@@ -39,7 +39,7 @@ Document versions: Terms and Conditions 4.0-draft, Privacy notice 1.3-draft, Pho
 
 ### 2A. Parent or guardian signing for a child under 18
 
-Short line above the box: "Injuries can be serious (section 2), and section 1 lets us arrange emergency medical help if we cannot reach you. Please read the whole of the Terms and Conditions."
+Short line above the box: "Please read the Terms and Conditions."
 
 **Index (each line jumps to that section)**
 1. Health and emergency treatment
@@ -94,7 +94,7 @@ I have given accurate health information on this form. I will tell JFLIPS as soo
 
 ### 2B. Adult signing for themselves (18 or over)
 
-Short line above the box: "Injuries can be serious (section 2), and section 1 lets us arrange emergency medical help if we cannot reach you. Please read the whole of the Terms and Conditions."
+Short line above the box: "Please read the Terms and Conditions."
 
 **Index (each line jumps to that section)**
 1. Health and emergency treatment
@@ -151,7 +151,7 @@ I have given accurate health information on this form. I will tell JFLIPS as soo
 
 ## PART 3: PRIVACY NOTICE (POPIA)
 
-Shown folded away behind "Read the privacy notice", with its own tick box.
+Shown folded away behind the line "Click here to read the privacy notice", with its own tick box.
 
 ### 3A. Parent or guardian
 
