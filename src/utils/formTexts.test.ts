@@ -31,8 +31,8 @@ const pack = (extra: any) => pdfText(buildIndemnityPdf({
 }));
 
 test('current versions are the bumped ones', () => {
-  assert.equal(TERMS_VERSION, '5.0-draft');
-  assert.equal(GENERAL_VERSION, '1.5-draft');
+  assert.equal(TERMS_VERSION, '6.0-draft');
+  assert.equal(GENERAL_VERSION, '1.6-draft');
   assert.equal(MEDIA_VERSION, '1.3-draft');
 });
 
@@ -52,12 +52,16 @@ test('parent registration PDF carries the new wording and versions', () => {
     'Unpaid accounts. If an invoice is still unpaid one month after we sent it',
     'Late collection. If your child has not been collected',
     '7. Enrolment terms',
-    'Terms v5.0-draft', 'Privacy v1.5-draft', 'Photo v1.3-draft',
+    'Terms v6.0-draft', 'Privacy v1.6-draft', 'Photo v1.3-draft',
+    'because some classes may be outdoors',
+    'Weather. Some classes may be outdoors.',
+    'only the owner of JFLIPS can open your information there',
     'your contact numbers and your emergency contact',
     'we move their record to a separate archive that only JFLIPS management can open',
     'To change your choices, we will send you the form again to sign.'
   ]) assert.ok(t.includes(phrase), 'missing: ' + phrase);
-  for (const gone of ['JFLIPS TUMBLING (JFLIPS)', 'JFlips', 'Resend', 'ubscription', 'as soon as possible', 'Discord', 'Google Calendar']) {
+  for (const gone of ['JFLIPS TUMBLING (JFLIPS)', 'JFlips', 'Resend', 'ubscription', 'as soon as possible', 'Discord', 'Google Calendar',
+    'ree first class', 'are outdoors', 'own login', 'working name']) {
     assert.ok(!t.includes(gone), 'should not contain: ' + gone);
   }
 });
@@ -73,10 +77,10 @@ test('adult registration PDF carries the adult wording', () => {
     'cell number and emergency contact',
     'we move your record to a separate archive',
     'Your choice here never affects your place at JFLIPS.',
-    'You get one free first class. If you stop and later come back, you do not get another one.',
     'we tell you on the day',
-    'Terms v5.0-draft'
+    'Terms v6.0-draft'
   ]) assert.ok(t.includes(phrase), 'missing: ' + phrase);
+  assert.ok(!t.includes('ree first class'), 'no free class rule');
   assert.ok(!t.includes('Late collection'), 'adults have no late collection rule');
   assert.ok(!t.includes('your child\'s place'), 'adult photo line must not say child');
   assert.ok(!t.includes('family\'s personal information'));
@@ -90,7 +94,7 @@ test('3-year-old registration PDF has the young athlete section and the late col
   assert.ok(t.includes('YOUNG ATHLETE (AGE 2 TO 4)'));
   assert.ok(t.includes('stays at the venue for the whole class'));
   assert.ok(t.includes('Late collection.'));
-  assert.ok(t.includes('Terms v5.0-draft'));
+  assert.ok(t.includes('Terms v6.0-draft'));
 });
 
 test('old versions still print their own wording', () => {
@@ -105,7 +109,7 @@ test('old versions still print their own wording', () => {
 });
 
 test('older privacy and photo versions are kept', () => {
-  for (const v of ['1.0-draft', '1.1-draft', '1.2-draft', '1.3-draft', '1.4-draft']) {
+  for (const v of ['1.0-draft', '1.1-draft', '1.2-draft', '1.3-draft', '1.4-draft', '1.5-draft']) {
     const f = generalFormFor('minor', v);
     assert.ok(!f.notStored, v + ' should be stored');
     assert.ok(f.sections.length >= 7);
@@ -135,6 +139,19 @@ test('a consent PDF for an old record prints that record\'s version, and an unkn
     choices, version: '0.9', status: 'signed'
   }, { save: false }));
   assert.ok(unknown.includes('not stored in the app'));
+});
+
+test('a PDF for a record signed under Terms 5.0 and privacy 1.5 still prints that wording', () => {
+  const t = pack({ version: '5.0-draft', privacyVersion: '1.5-draft' });
+  assert.ok(t.includes('Terms v5.0-draft') && t.includes('Privacy v1.5-draft'));
+  assert.ok(t.includes('Free first class. Each child gets one free first class.'));
+  assert.ok(t.includes('Some classes are outdoors.'));
+  assert.ok(t.includes('because some classes are outdoors'));
+  assert.ok(t.includes('only people with their own login can open your information'));
+  assert.ok(!t.includes('may be outdoors'));
+  assert.ok(!t.includes('only the owner of JFLIPS can open'));
+  assert.ok(termsFor('minor', '5.0-draft').sections.length === 7);
+  assert.ok(!termsFor('adult', '5.0-draft', { name: 'N' }).intro.includes('{'));
 });
 
 test('a PDF for a record signed under the previous release still prints that release', () => {

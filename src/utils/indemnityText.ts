@@ -7,7 +7,7 @@
  * from the lawyer's opinion.
  *
  * DRAFT: the lawyer must read the final wording, especially section 2 (risks) and
- * section 3 (responsibility). Then change TERMS_VERSION to '5.0'.
+ * section 3 (responsibility). Then change TERMS_VERSION to '6.0'.
  *
  * Honesty rule for first aid: it promises only what JFlips can do at every class
  * (basic first aid where possible, and calling for help). The school's
@@ -15,7 +15,7 @@
  * promised. Do not add "a qualified first aider is at every class" until true.
  */
 
-export const TERMS_VERSION = '5.0-draft';
+export const TERMS_VERSION = '6.0-draft';
 
 import { FROZEN_TEXTS } from './frozenTexts';
 
@@ -47,9 +47,8 @@ export const ENROLMENT_TERMS_MINOR: string[] = [
   'Classes and fees. You pay for the classes your child attends. We send an invoice every month, and you pay by EFT.',
   'Unpaid accounts. If an invoice is still unpaid one month after we sent it, your child may not train until the account is paid or you have spoken to us and agreed what happens next.',
   'Absences. You are only charged for classes your child attends.',
-  'Weather. Some classes are outdoors. JFLIPS decides when the weather makes a class unsafe, and we will message parents on WhatsApp before the class. A class that JFLIPS cancels is not charged. We will offer a replacement class where we can.',
+  'Weather. Some classes may be outdoors. JFLIPS decides when the weather makes a class unsafe, and we will message parents on WhatsApp before the class. A class that JFLIPS cancels is not charged. We will offer a replacement class where we can.',
   'Late collection. If your child has not been collected when the class ends, a coach will stay with your child, phone you and your emergency contact, and tell you where your child is. We will never leave a child alone.',
-  'Free first class. Each child gets one free first class. A child who stops and later comes back does not get another one.',
   'Leaving. You can stop coming at any time. Please settle your account first.',
   'Changes. We will give you 30 days\' notice before fees change. We will tell you about changes to class times or venues as early as we can.',
   'Removal. A coach can stop your child from taking part in a class at any time if it is not safe. JFLIPS can suspend your child from classes after a warning.',
@@ -59,8 +58,7 @@ export const ENROLMENT_TERMS_ADULT: string[] = [
   'Classes and fees. You pay for the classes you attend. We send an invoice every month, and you pay by EFT.',
   'Unpaid accounts. If an invoice is still unpaid one month after we sent it, you may not train until the account is paid or you have spoken to us and agreed what happens next.',
   'Absences. You are only charged for classes you attend.',
-  'Weather. Some classes are outdoors. JFLIPS decides when the weather makes a class unsafe, and we will message you on WhatsApp before the class. A class that JFLIPS cancels is not charged. We will offer a replacement class where we can.',
-  'Free first class. You get one free first class. If you stop and later come back, you do not get another one.',
+  'Weather. Some classes may be outdoors. JFLIPS decides when the weather makes a class unsafe, and we will message you on WhatsApp before the class. A class that JFLIPS cancels is not charged. We will offer a replacement class where we can.',
   'Leaving. You can stop coming at any time. Please settle your account first.',
   'Changes. We will give you 30 days\' notice before fees change. We will tell you about changes to class times or venues as early as we can.',
   'Removal. A coach can stop you from taking part in a class at any time if it is not safe. JFLIPS can suspend you from classes after a warning.',
@@ -74,7 +72,7 @@ const RISK_ITEMS_MINOR = [
   'strains, sprains, broken bones and dislocated joints',
   'head, neck and back injuries, which can be serious and, in rare cases, permanent',
   'injuries while a coach is helping or spotting a skill',
-  'uneven ground, heat, cold or wet surfaces, because some classes are outdoors'
+  'uneven ground, heat, cold or wet surfaces, because some classes may be outdoors'
 ];
 const RISK_ITEMS_ADULT = [
   'falls and awkward or uncontrolled landings',
@@ -83,7 +81,7 @@ const RISK_ITEMS_ADULT = [
   'strains, sprains, broken bones and dislocated joints',
   'head, neck and back injuries, which can be serious and, in rare cases, permanent',
   'injuries while a coach is helping or spotting you',
-  'uneven ground, heat, cold or wet surfaces, because some classes are outdoors'
+  'uneven ground, heat, cold or wet surfaces, because some classes may be outdoors'
 ];
 
 const FIRST_AID_PARAGRAPH =

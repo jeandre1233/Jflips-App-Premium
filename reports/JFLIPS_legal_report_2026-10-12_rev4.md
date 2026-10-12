@@ -1,42 +1,37 @@
 # JFLIPS sign-up form: report for legal review
 
-**Date:** 12 October 2026 (revision 3)
+**Date:** 12 October 2026 (revision 4)
 
 | Document | Version |
 | --- | --- |
-| Terms and Conditions | 5.0-draft (wording unchanged since the last report) |
-| Privacy notice (POPIA) | 1.5-draft |
+| Terms and Conditions | 6.0-draft |
+| Privacy notice (POPIA) | 1.6-draft |
 | Photo and video consent (POPIA) | 1.3-draft |
 
-**What this document is.** It is the complete text of the JFLIPS registration form as a parent or adult sees it, written out of the live app so that it cannot differ from what people actually sign. It is followed by facts about how JFLIPS works, the questions we need you to answer, and a list of things we noticed but did not change. All three documents are drafts. JFLIPS is a working name: the registered company name is not confirmed yet.
+**What this document is.** It is the complete text of the JFLIPS registration form as a parent or adult sees it, written out of the live app so that it cannot differ from what people actually sign. It is followed by facts about how JFLIPS works, the questions we need you to answer, and a list of things we noticed but did not change. All three documents are drafts. JFLIPS is the registered company name.
 
 **How the form works.** A parent fills in the details, reads the Terms and Conditions in a scroll box (the tick boxes stay locked until they have scrolled to the bottom), opens the privacy notice (also locked until it has been opened and read to the bottom), answers Yes or No for each photo and video use, and signs once at the bottom. That one signature covers all three documents. The privacy notice and the photo consent are saved as their own records. Once signed, a form cannot be changed from the family's link: a family that wants to change its photo choices contacts JFLIPS, JFLIPS reopens the photo form, and the family signs again. The earlier answers stay in the record's history. The signed PDF puts all three documents, the choices made and the one signature into a single file, with the version of each document in the footer.
 
 **Two versions of every text.** A parent or guardian signs for a child under 18. An adult (18 or over) signs for themselves. Both are printed below.
 
-**Old records keep their old wording.** Every signed record stores the version it was signed under. The app keeps the exact wording of earlier versions and prints that wording on the PDF of an old record. Kept: Terms 4.0-draft; privacy notice 1.0-draft to 1.4-draft; photo consent 1.0, 1.1-draft and 1.2-draft. See Suggestions for the exceptions.
+**Old records keep their old wording.** Every signed record stores the version it was signed under. The app keeps the exact wording of earlier versions and prints that wording on the PDF of an old record. Kept: Terms 4.0-draft and 5.0-draft; privacy notice 1.0-draft to 1.5-draft; photo consent 1.0, 1.1-draft and 1.2-draft. See Suggestions for the exceptions.
 
 ### Change log since the last report
 
-The last report covered Terms 5.0-draft, privacy notice 1.4-draft and photo consent 1.2-draft.
+The last report covered Terms 5.0-draft, privacy notice 1.5-draft and photo consent 1.3-draft.
 
-**Terms and Conditions 5.0-draft:** no wording change.
+**Terms and Conditions 6.0-draft**
+- Section 2 (Risks) and section 7 (Weather): "some classes are outdoors" now reads "some classes may be outdoors".
+- Section 7 (Enrolment terms): the "Free first class" rule was removed. The section now has nine rules for a parent or guardian and eight for an adult.
 
-**Privacy notice 1.5-draft**
-- "Who can see it": coaches can now also see the emergency contact. (Parent: "...your contact numbers and your emergency contact..."; adult: "...cell number and emergency contact...".)
-- "How long we keep it": says that when a child leaves, their record is moved to a separate archive that only JFLIPS management can open, and kept there only as long as needed. The periods are unchanged.
+**Privacy notice 1.6-draft**
+- "Where it is kept": "only people with their own login can open your information" now reads "only the owner of JFLIPS can open your information there".
 
-**Photo and video consent 1.3-draft**
-- "Your rights", first bullet: to change choices, JFLIPS sends the form again to sign; if a family withdraws, photos and videos are removed within 7 days.
+**Photo and video consent 1.3-draft:** no change.
 
-**Other form text:** the thank-you page now says "To change your photo and video choices, message us on WhatsApp 069 040 3387 and we will send you the form again." The personal link page no longer offers a change or withdraw button.
-
-**Changes to the app behind the form**
-- Discord and Google (sign-in, Calendar, Sheets) were removed from the app completely.
-- When the owner removes a child, the record moves to a separate "Old athletes" archive: signed forms and a saved PDF are kept until the child turns 19 (an adult: 5 years after leaving); everything else can be deleted from 12 months after leaving.
-- Coaches now see the emergency contact.
-- The owner gets one reminder a month (in the app and on the phone, with no names) when the other details of someone who left more than 12 months ago are due for deletion.
-- Signed forms cannot be changed through the family's link; the owner reopens the photo form on request.
+**This report**
+- JFLIPS is stated as the registered company name. The question about the company name was removed.
+- A note was added under section 7 asking the lawyer to help with its wording, and a matching question was added at the end of Part 7.
 
 ## PART 1: THE FORM (information the parent gives)
 
@@ -93,7 +88,7 @@ Tumbling and stunting are physical sports. Even with good coaching and safe equi
 - strains, sprains, broken bones and dislocated joints
 - head, neck and back injuries, which can be serious and, in rare cases, permanent
 - injuries while a coach is helping or spotting a skill
-- uneven ground, heat, cold or wet surfaces, because some classes are outdoors
+- uneven ground, heat, cold or wet surfaces, because some classes may be outdoors
 
 Most injuries are minor, like bruises and scrapes. Serious injuries can still happen when the coaches and the children do everything right.
 
@@ -121,11 +116,9 @@ Unpaid accounts. If an invoice is still unpaid one month after we sent it, your 
 
 Absences. You are only charged for classes your child attends.
 
-Weather. Some classes are outdoors. JFLIPS decides when the weather makes a class unsafe, and we will message parents on WhatsApp before the class. A class that JFLIPS cancels is not charged. We will offer a replacement class where we can.
+Weather. Some classes may be outdoors. JFLIPS decides when the weather makes a class unsafe, and we will message parents on WhatsApp before the class. A class that JFLIPS cancels is not charged. We will offer a replacement class where we can.
 
 Late collection. If your child has not been collected when the class ends, a coach will stay with your child, phone you and your emergency contact, and tell you where your child is. We will never leave a child alone.
-
-Free first class. Each child gets one free first class. A child who stops and later comes back does not get another one.
 
 Leaving. You can stop coming at any time. Please settle your account first.
 
@@ -134,6 +127,8 @@ Changes. We will give you 30 days' notice before fees change. We will tell you a
 Removal. A coach can stop your child from taking part in a class at any time if it is not safe. JFLIPS can suspend your child from classes after a warning.
 
 Injuries and incidents. We record every injury or incident, and we tell you on the same day.
+
+**Note for the lawyer on section 7:** the owner wrote a first draft of the Enrolment terms and would like your help with the wording of the whole section.
 
 **Tick boxes (locked until the parent has scrolled to the bottom)**
 - I have read and understood the risks in section 2. *
@@ -171,7 +166,7 @@ Tumbling and stunting are physical sports. Even with good coaching and safe equi
 - strains, sprains, broken bones and dislocated joints
 - head, neck and back injuries, which can be serious and, in rare cases, permanent
 - injuries while a coach is helping or spotting you
-- uneven ground, heat, cold or wet surfaces, because some classes are outdoors
+- uneven ground, heat, cold or wet surfaces, because some classes may be outdoors
 
 Most injuries are minor, like bruises and scrapes. Serious injuries can still happen when the coaches and I do everything right.
 
@@ -199,9 +194,7 @@ Unpaid accounts. If an invoice is still unpaid one month after we sent it, you m
 
 Absences. You are only charged for classes you attend.
 
-Weather. Some classes are outdoors. JFLIPS decides when the weather makes a class unsafe, and we will message you on WhatsApp before the class. A class that JFLIPS cancels is not charged. We will offer a replacement class where we can.
-
-Free first class. You get one free first class. If you stop and later come back, you do not get another one.
+Weather. Some classes may be outdoors. JFLIPS decides when the weather makes a class unsafe, and we will message you on WhatsApp before the class. A class that JFLIPS cancels is not charged. We will offer a replacement class where we can.
 
 Leaving. You can stop coming at any time. Please settle your account first.
 
@@ -210,6 +203,8 @@ Changes. We will give you 30 days' notice before fees change. We will tell you a
 Removal. A coach can stop you from taking part in a class at any time if it is not safe. JFLIPS can suspend you from classes after a warning.
 
 Injuries and incidents. We record every injury or incident, and we tell you on the day.
+
+**Note for the lawyer on section 7:** the owner wrote a first draft of the Enrolment terms and would like your help with the wording of the whole section.
 
 **Tick boxes (locked until the parent has scrolled to the bottom)**
 - I have read and understood the risks in section 2. *
@@ -252,7 +247,7 @@ JFLIPS is the responsible party for your family's personal information. This not
 - We do not sell your information. We do not share it with anyone else unless the law requires it or a doctor or medical helper needs it in an emergency.
 
 **Where it is kept**
-- Your information is stored in an online database run by Supabase. Its servers are in Ireland, so your information is sent to another country. Our app and website are hosted by Vercel in Cape Town. We use Google Firebase to send alerts to our coaches' phones. These alerts can include a child's name. We only use these companies to run JFLIPS, and only people with their own login can open your information.
+- Your information is stored in an online database run by Supabase. Its servers are in Ireland, so your information is sent to another country. Our app and website are hosted by Vercel in Cape Town. We use Google Firebase to send alerts to our coaches' phones. These alerts can include a child's name. We only use these companies to run JFLIPS, and only the owner of JFLIPS can open your information there.
 
 **How long we keep it**
 We keep your information while your child is enrolled. When they leave, we move their record to a separate archive that only JFLIPS management can open. We keep it there only for as long as we need it:
@@ -306,7 +301,7 @@ JFLIPS is the responsible party for your personal information. This notice tells
 - We do not sell your information. We do not share it with anyone else unless the law requires it or a doctor or medical helper needs it in an emergency.
 
 **Where it is kept**
-- Your information is stored in an online database run by Supabase. Its servers are in Ireland, so your information is sent to another country. Our app and website are hosted by Vercel in Cape Town. We use Google Firebase to send alerts to our coaches' phones. These alerts can include your name. We only use these companies to run JFLIPS, and only people with their own login can open your information.
+- Your information is stored in an online database run by Supabase. Its servers are in Ireland, so your information is sent to another country. Our app and website are hosted by Vercel in Cape Town. We use Google Firebase to send alerts to our coaches' phones. These alerts can include your name. We only use these companies to run JFLIPS, and only the owner of JFLIPS can open your information there.
 
 **How long we keep it**
 We keep your information while you are enrolled. When you leave, we move your record to a separate archive that only JFLIPS management can open. We keep it there only for as long as we need it:
@@ -499,7 +494,6 @@ Promises in the enrolment terms, for completeness:
 | --- | --- |
 | You are only charged for classes attended; a cancelled class is not charged | **Automatic.** Invoices are built from the attendance register, so a class that did not happen or a child who did not attend is not billed. |
 | A child may not train if an invoice is unpaid one month after it was sent | **Nothing.** The app tracks whether invoices are paid but does not stop a child attending, and no message goes to the owner when an invoice reaches one month. Manual. |
-| One free first class per child | **Automatic for trial athletes** (the first class on the date recorded is free). It does not stop a returning child being added again as a new trial athlete. |
 | 30 days' notice before fees change; notice of changes to times or venues | **Nothing.** The owner tells families by hand. Manual. |
 | An injury or incident is recorded and the parent is told the same day | **Half.** There is an incident log. Telling the parent is manual. |
 | Late collection: a coach stays, phones the parent and emergency contact | **Partly.** Coaches can now see the emergency contact. Everything else is manual. |
@@ -520,12 +514,12 @@ Promises in the enrolment terms, for completeness:
 12. Retention periods in the privacy notice: financial records 7 years; signed forms and injury or incident records until a child is at least 19, or 5 years after an adult leaves; everything else deleted within 12 months. Are these right?
 13. Photos taken by others at competitions: we tell the organiser and do not post that child ourselves. Is that wording enough?
 14. Overseas processing: Supabase servers are in Ireland, Vercel is in Cape Town and Firebase sends alerts. Is the wording enough? Do we need operator agreements with these providers?
-15. Company name: JFLIPS is used as a working name until the registered name is confirmed. Does that create any problem for the indemnity?
-16. Coaches: they are contractors with no written agreement, no fixed schedule and per-session pay, and they can decline classes. Please advise on classification, the agreement they need and the POPIA terms for coaches who see children's medical information.
-17. Venue: what should the Muldersdrift Primary agreement say about late collection, first aid and a coach waiting with a child?
-18. Insurance: JFLIPS has no public liability insurance yet. Should the form go live before it does?
-19. Changing or withdrawing photo consent: a signed form cannot be changed from the family's link. The family contacts JFLIPS, JFLIPS reopens the form and sends it again, and photos are removed within 7 days of a withdrawal. Is it acceptable that a withdrawal needs a message to JFLIPS rather than a button, given that withdrawing should be as easy as giving consent?
-20. Emergency contacts: the person named as an emergency contact has not signed anything, and coaches can now see their name and number. Is the line in the privacy notice enough, or must the signer confirm they have that person's permission?
+15. Coaches: they are contractors with no written agreement, no fixed schedule and per-session pay, and they can decline classes. Please advise on classification, the agreement they need and the POPIA terms for coaches who see children's medical information.
+16. Venue: what should the Muldersdrift Primary agreement say about late collection, first aid and a coach waiting with a child?
+17. Insurance: JFLIPS has no public liability insurance yet. Should the form go live before it does?
+18. Changing or withdrawing photo consent: a signed form cannot be changed from the family's link. The family contacts JFLIPS, JFLIPS reopens the form and sends it again, and photos are removed within 7 days of a withdrawal. Is it acceptable that a withdrawal needs a message to JFLIPS rather than a button, given that withdrawing should be as easy as giving consent?
+19. Emergency contacts: the person named as an emergency contact has not signed anything, and coaches can now see their name and number. Is the line in the privacy notice enough, or must the signer confirm they have that person's permission?
+20. Enrolment terms (Terms section 7): the owner wrote a first draft and would like your help with the wording of the whole section, including how unpaid accounts, weather cancellations, absences and removal from classes are put.
 
 ## PART 8: SUGGESTIONS (noticed, not changed)
 

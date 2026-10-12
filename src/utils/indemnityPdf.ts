@@ -299,7 +299,7 @@ export function buildIndemnityPdf(input: IndemnityPdfInput): jsPDF {
     doc.setPage(p);
     doc.setFillColor(30, 77, 161); doc.rect(0, 287, pageW, 10, 'F');
     doc.setTextColor(255, 255, 255); doc.setFontSize(7); doc.setFont('helvetica', 'normal');
-    doc.text(`JFLIPS TUMBLING  |  ${versionText}  |  ${p}/${pageCount}`, pageW / 2, 293, { align: 'center' });
+    doc.text(`JFLIPS  |  ${versionText}  |  ${p}/${pageCount}`, pageW / 2, 293, { align: 'center' });
   }
   return doc;
 }

@@ -20,7 +20,7 @@ import { FROZEN_TEXTS } from './frozenTexts';
 export type Lang = 'en';
 export type ConsentKind = 'general' | 'media';
 
-export const GENERAL_VERSION = '1.5-draft';
+export const GENERAL_VERSION = '1.6-draft';
 export const MEDIA_VERSION = '1.3-draft';
 
 export const MEDIA_KEYS = [
@@ -170,7 +170,7 @@ export const GENERAL_FORM: Record<Lang, GeneralFormText> = {
       {
         heading: 'Where it is kept',
         items: [
-          "Your information is stored in an online database run by Supabase. Its servers are in Ireland, so your information is sent to another country. Our app and website are hosted by Vercel in Cape Town. We use Google Firebase to send alerts to our coaches' phones. These alerts can include a child's name. We only use these companies to run JFLIPS, and only people with their own login can open your information."
+          "Your information is stored in an online database run by Supabase. Its servers are in Ireland, so your information is sent to another country. Our app and website are hosted by Vercel in Cape Town. We use Google Firebase to send alerts to our coaches' phones. These alerts can include a child's name. We only use these companies to run JFLIPS, and only the owner of JFLIPS can open your information there."
         ]
       },
       {
@@ -267,7 +267,7 @@ function currentGeneralFor(a: Audience): GeneralFormText {
     },
     'Where it is kept': {
       items: [
-        "Your information is stored in an online database run by Supabase. Its servers are in Ireland, so your information is sent to another country. Our app and website are hosted by Vercel in Cape Town. We use Google Firebase to send alerts to our coaches' phones. These alerts can include your name. We only use these companies to run JFLIPS, and only people with their own login can open your information."
+        "Your information is stored in an online database run by Supabase. Its servers are in Ireland, so your information is sent to another country. Our app and website are hosted by Vercel in Cape Town. We use Google Firebase to send alerts to our coaches' phones. These alerts can include your name. We only use these companies to run JFLIPS, and only the owner of JFLIPS can open your information there."
       ]
     },
     'How long we keep it': {
