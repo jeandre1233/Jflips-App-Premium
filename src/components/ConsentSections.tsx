@@ -37,10 +37,11 @@ export const GeneralConsentSection: React.FC<{
   errorSignature?: boolean; errorAgree?: boolean; audience?: Audience;
   /** The sign-up page signs once, at the very end, so it hides this form's own signature. */
   hideSignature?: boolean;
-}> = ({ agreed, onAgree, signed = false, onSign = () => {}, clearKey = 0, onClear = () => {}, errorSignature, errorAgree, audience = 'minor', hideSignature }) => {
+  /** Show the notice folded away behind a "Read the privacy notice" line, with the tick still visible. */
+  collapsible?: boolean;
+}> = ({ agreed, onAgree, signed = false, onSign = () => {}, clearKey = 0, onClear = () => {}, errorSignature, errorAgree, audience = 'minor', hideSignature, collapsible }) => {
   const f = generalFormFor(audience); const ui = uiFor(audience);
-  return (
-    <>
+  const noticeCard = (
       <div style={card}>
         <p style={{ margin: '0 0 6px', fontWeight: 800, color: '#1e293b', fontSize: '13px' }}>{f.title}</p>
         <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#94a3b8' }}>{f.subtitle}</p>
@@ -55,6 +56,15 @@ export const GeneralConsentSection: React.FC<{
         <p style={{ margin: 0, color: '#1e293b' }}>{f.declaration}</p>
         <p style={{ margin: '10px 0 0', fontSize: '11px', color: '#64748b' }}>{f.contact}</p>
       </div>
+  );
+  return (
+    <>
+      {collapsible ? (
+        <details style={{ border: '1.5px solid #e2e8f0', borderRadius: '12px', padding: '10px 14px', background: 'white' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '12px', fontWeight: 700, color: '#1e4da1' }}>Read the privacy notice</summary>
+          <div style={{ marginTop: '10px' }}>{noticeCard}</div>
+        </details>
+      ) : noticeCard}
       <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', padding: '12px', background: agreed ? '#f0fdf4' : '#fff7f7', borderRadius: '10px', border: `1.5px solid ${agreed ? '#bbf7d0' : errorAgree ? '#ef4444' : '#fecaca'}` }}>
         <input type="checkbox" checked={agreed} onChange={e => onAgree(e.target.checked)} style={{ width: '18px', height: '18px', marginTop: '1px', flexShrink: 0, accentColor: '#1e4da1' }} />
         <span style={{ fontSize: '12px', color: '#475569', lineHeight: 1.5, fontWeight: 600 }}>{f.agreeLabel} *</span>

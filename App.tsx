@@ -167,15 +167,28 @@ export function getSessionBillingMonth(dateStr: string, billingDay: number = 1):
 }
 
 /**
- * The owner's re-print of a signed indemnity. A child who signed the current form
- * (version 3.x) gets the current layout. A child who signed an earlier version keeps
- * the earlier print, because the current wording is not what they agreed to.
+ * The owner's re-print of a signed registration. A child who signed the current Terms
+ * and Conditions (version 4.x) gets the full pack: details, terms, privacy notice and
+ * photo and video choices, all with the one signature. A child who signed an earlier
+ * version keeps the earlier print, because the current wording is not what they agreed to.
  */
 async function generateIndemnityPDFFromStudent(student: Student) {
   const rec: any = (student as any).indemnity_record;
-  if (String(rec?.version || '').startsWith('3.')) {
+  if (String(rec?.version || '').startsWith('4.')) {
     const audience = rec.audience === 'adult' ? 'adult' : 'minor';
+    // The photo and privacy records are saved separately (so a parent can change photo
+    // choices later without touching what they signed). Pull them in for the proof pack.
+    let privacyVersion: string | null = null;
+    let media: any = null;
+    try {
+      const { data: consents } = await supabase.from('consent_records').select('*').eq('family_key', student.id);
+      const general = (consents || []).find((c: any) => c.kind === 'general' && c.status !== 'pending');
+      const photo = (consents || []).find((c: any) => c.kind === 'media' && c.status !== 'pending');
+      if (general) privacyVersion = general.form_version || null;
+      if (photo) media = { version: photo.form_version, choices: photo.choices, status: photo.status, signedAt: photo.signed_at, history: photo.history };
+    } catch (e) { console.error('Could not load consent records for the PDF', e); }
     const doc = buildIndemnityPdf({
+      privacyVersion, media,
       studentName: student.name, dob: student.dob, age: student.age, className: student.class_name,
       audience, parentName: student.parent1_name || '', relationship: rec.relationship || '',
       phone: student.parent1_phone, email: student.parent1_email,
