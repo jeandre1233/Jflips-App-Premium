@@ -556,9 +556,9 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
         >
           <div className="z-10">
             <p className="text-white/60 text-[9px] font-black uppercase tracking-[0.15em] mb-1">
-              {isOwner ? 'Cycle Revenue' : 'Mat Time'}
+              {isOwner ? 'Cycle Revenue' : 'Hours Coached'}
             </p>
-            <h3 className="text-3xl font-black italic">
+            <h3 className={isOwner ? 'text-3xl font-black italic' : 'text-5xl font-black italic'}>
               {isOwner ? `R${activeCycleFinancials.totals.netCycleRevenue}` : `${matTime} HRS`}
             </h3>
             {isOwner && (
@@ -568,12 +568,12 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
             )}
           </div>
           
-          <div className="z-10 border-t border-white/10 pt-2.5 w-full">
+          {isOwner && <div className="z-10 border-t border-white/10 pt-2.5 w-full">
             <div className="flex flex-col">
               <p className="text-white/60 text-[8px] font-black uppercase tracking-widest">{isOwner ? 'Staff Payout' : 'My Earnings'}</p>
               <p className={`text-sm font-black italic ${isOwner ? 'text-emerald-400' : 'text-blue-200'}`}>R{coachEarnings}</p>
             </div>
-          </div>
+          </div>}
           {isOwner ? (
             <CreditCard className="absolute -bottom-3 -right-3 text-white/10 w-20 h-20 rotate-12" />
           ) : (
