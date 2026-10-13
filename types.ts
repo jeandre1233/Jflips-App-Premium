@@ -66,6 +66,8 @@ export interface Gym {
   name: string;
   session_types: string;
   pay_amount: number;
+  /** External gym classes: what the coach earns per hour; the rest of pay_amount is the business's. */
+  coach_pay?: number;
   competition_rate?: number;
   user_id: string;
   gym_type?: 'tumbling' | 'cheer';

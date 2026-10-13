@@ -403,13 +403,13 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
 
   // Live cycle financials across all active invoice data (no date restriction)
   const activeCycleFinancials = useMemo(
-    () => calculateCycleFinancials(priced, state.sessions || []),
+    () => calculateCycleFinancials(priced, state.sessions || [], undefined, state.profile?.id),
     [priced, state.sessions]
   );
 
   // Month-filtered financials for the breakdown modal
   const monthlyFinancials = useMemo(
-    () => calculateCycleFinancials(priced, state.sessions || [], { month: breakdownMonth, year: breakdownYear }),
+    () => calculateCycleFinancials(priced, state.sessions || [], { month: breakdownMonth, year: breakdownYear }, state.profile?.id),
     [priced, state.sessions, breakdownMonth, breakdownYear]
   );
 
@@ -938,7 +938,7 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                           Other Gym Coaching
                         </h5>
                         <p className="text-[8px] font-bold text-slate-400 uppercase">
-                          External Gym Invoices (100% Direct Business Revenue)
+                          External Gym Invoices (coach share paid out, rest is business)
                         </p>
                       </div>
                     </div>
@@ -947,7 +947,7 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
                         Net: R{displayFinancials.gyms.netProfit}
                       </span>
                       <p className="text-[8px] font-bold text-slate-400">
-                        100% Business Revenue
+                        {displayFinancials.gyms.coachPay > 0 ? `Coaches R${displayFinancials.gyms.coachPay} • Business keeps R${displayFinancials.gyms.netProfit}` : 'Direct Business Revenue'}
                       </p>
                     </div>
                   </div>

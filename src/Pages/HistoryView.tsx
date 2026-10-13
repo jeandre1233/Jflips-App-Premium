@@ -1430,12 +1430,12 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             </div>
             <div className="flex items-baseline justify-between text-xs">
               <span className="text-slate-400 font-medium">Coach Expense:</span>
-              <span className="font-bold text-slate-400">R 0.00 (Direct)</span>
+              <span className="font-bold text-slate-400">R {(overallTotals.gymsGross - overallTotals.gymsNet).toFixed(2)}</span>
             </div>
             <div className="flex items-baseline justify-between text-xs pt-1 border-t border-slate-200/60 dark:border-slate-700">
               <span className="font-black text-emerald-600 dark:text-emerald-400">Net Profit:</span>
               <span className="font-black text-emerald-600 dark:text-emerald-400">
-                R {overallTotals.gymsNet.toFixed(2)} (100%)
+                R {overallTotals.gymsNet.toFixed(2)}
               </span>
             </div>
           </div>
@@ -1634,11 +1634,15 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                           <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 space-y-1.5">
                             <div className="flex items-center justify-between text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
                               <span>🏋️ External Gyms</span>
-                              <span>100% Net</span>
+                              <span>Business share</span>
                             </div>
                             <div className="text-[11px] text-slate-500 dark:text-slate-400 flex justify-between">
                               <span>Coaching Fee Invoiced:</span>
                               <span className="font-bold text-slate-800 dark:text-slate-200">R {gGross.toFixed(2)}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 flex justify-between">
+                              <span>Coach Share Paid:</span>
+                              <span className="font-bold text-slate-800 dark:text-slate-200">R {(gGross - gNet).toFixed(2)}</span>
                             </div>
                             <div className="text-[11px] text-slate-500 dark:text-slate-400 flex justify-between">
                               <span>Retained Profit:</span>

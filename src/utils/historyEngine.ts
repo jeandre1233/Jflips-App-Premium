@@ -188,8 +188,9 @@ export function groupSessionsByMonth(
  *   schools  — client lines of kind 'cheer'; coach cost is every line tagged
  *              with an org, since those are a breakdown of the school's own
  *              master invoice.
- *   gyms     — client lines of kind 'gym'; the full amount is business revenue,
- *              there is no coach cost against it.
+ *   gyms     — client lines of kind 'gym'; the coach's share of each class
+ *              (its "Coach gets" amount) is paid out and the rest is business
+ *              revenue. gymsCoachPay is gymsGross − gymsNet.
  */
 export function computeMonthTotals(
   sessions: AttendanceSession[],
@@ -207,15 +208,20 @@ export function computeMonthTotals(
   const byKind = (k: PricedClientLine['kind']) => clientLines.filter(l => l.kind === k);
   const isStaffTurnIn = (l: PricedCoachLine) => l.orgId === null && l.coachId !== ownerId;
 
+  // Coach lines on an external-gym session belong to the gym stream, not tumbling.
+  const gymGroupIds      = new Set(byKind('gym').map(l => l.groupId));
+  const isGymCoach       = (l: PricedCoachLine) => gymGroupIds.has(l.groupId);
+
   const tumblingGross    = sumLines(byKind('class'));
-  const tumblingCoachPay = sumLines(coachLines.filter(isStaffTurnIn));
+  const tumblingCoachPay = sumLines(coachLines.filter(l => isStaffTurnIn(l) && !isGymCoach(l)));
   const tumblingNet      = money(tumblingGross - tumblingCoachPay);
 
   const schoolsGross     = sumLines(byKind('cheer'));
   const schoolsCoachPay  = sumLines(coachLines.filter(l => l.orgId !== null));
 
   const gymsGross        = sumLines(byKind('gym'));
-  const gymsNet          = gymsGross;
+  const gymsCoachPay     = sumLines(coachLines.filter(l => isStaffTurnIn(l) && isGymCoach(l)));
+  const gymsNet          = money(gymsGross - gymsCoachPay);
 
   const merchLines       = byKind('merch');
   const merchGross       = sumLines(merchLines);
@@ -223,7 +229,7 @@ export function computeMonthTotals(
   const merchNet         = money(merchGross - merchCost);
 
   const totalGross       = money(tumblingGross + schoolsGross + gymsGross + merchGross);
-  const totalCoachPayout = money(tumblingCoachPay + schoolsCoachPay);
+  const totalCoachPayout = money(tumblingCoachPay + gymsCoachPay + schoolsCoachPay);
   const netProfit        = money(tumblingNet + gymsNet + merchNet);
 
   // One invoice per client, exactly as the client received it. Zero and negative

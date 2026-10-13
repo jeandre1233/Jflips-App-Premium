@@ -311,6 +311,27 @@ function presetRate(gym: Gym | undefined, parent: Gym | undefined, eventName?: s
   return null;
 }
 
+/**
+ * What the COACH earns per hour on an external-gym session. A "Clinic:240:200"
+ * preset's third part wins, then the class's own "Coach gets" amount, then the
+ * parent gym's. Null means nothing is set, so the coach's profile rate applies
+ * exactly as it did before this split existed.
+ */
+function resolveGymCoachRate(gym: Gym, parent: Gym | undefined, s: SessionRow): number | null {
+  const wanted = (s.custom_event_name || '').toLowerCase();
+  if (wanted) {
+    for (const source of [gym, parent]) {
+      const hit = source?.custom_event_presets?.find(p => p.split(':')[0].trim().toLowerCase() === wanted);
+      if (hit) {
+        const parsed = parseFloat(hit.split(':')[2]);
+        if (Number.isFinite(parsed) && parsed > 0) return parsed;
+      }
+    }
+  }
+  const own = num(gym.coach_pay, 0) || num(parent?.coach_pay, 0);
+  return own > 0 ? own : null;
+}
+
 /** The hourly rate a gym/team session is worth, before any coach split. */
 function resolveEntityRate(gym: Gym, parent: Gym | undefined, s: SessionRow): number {
   const preset = presetRate(gym, parent, s.custom_event_name);
@@ -494,10 +515,12 @@ export function priceSessions(sessions: SessionRow[], ctx: PricingContext): Pric
         ...monthStamp
       });
 
-      // Every coach earns their own full profile rate — no splitting.
+      // Every coach earns the class's "Coach gets" amount (or their own profile
+      // rate when none is set) — never split between coaches.
+      const gymCoachRate = resolveGymCoachRate(gym, parent, head);
       for (const coachId of coachIds) {
         const row = rows.find(r => r.coach_id === coachId) || head;
-        const coachRate = resolveCoachProfileRate(coachId, ctx);
+        const coachRate = gymCoachRate ?? resolveCoachProfileRate(coachId, ctx);
         const coachHours = resolveHours(row, gym);
         coachLines.push({
           sessionId: row.id,
@@ -740,6 +763,7 @@ export interface CycleFinancials {
   };
   gyms: {
     grossRevenue: number;
+    coachPay: number;
     netProfit: number;
     sessionCount: number;
     hoursCoached: number;
@@ -778,7 +802,8 @@ export interface CycleFinancials {
 export function calculateCycleFinancials(
   priced: PricedResult,
   sessions: SessionRow[] = [],
-  monthFilter?: { month: number; year: number }
+  monthFilter?: { month: number; year: number },
+  ownerId?: string
 ): CycleFinancials {
   const filterFn = (dateStr: string) => {
     if (!monthFilter) return true;
@@ -832,8 +857,11 @@ export function calculateCycleFinancials(
   // 3. Gyms (External partner gym coaching)
   const gymClientLines = clientLines.filter(l => l.kind === 'gym');
   const gymsGross = sumLines(gymClientLines);
-  const gymsNet = gymsGross; // 100% straight to business
   const gymsGroupIds = new Set(gymClientLines.map(l => l.groupId));
+  // Coach share of external-gym sessions; the owner is never paid by their own business.
+  const gymsCoachLines = coachLines.filter(l => gymsGroupIds.has(l.groupId) && l.coachId !== ownerId);
+  const gymsCoachPay = sumLines(gymsCoachLines);
+  const gymsNet = money(gymsGross - gymsCoachPay);
   
   const gymSessionsFiltered = (sessions || []).filter(s => {
     if (!filterFn(s.date)) return false;
@@ -880,9 +908,11 @@ export function calculateCycleFinancials(
       const coachNames = firstClient?.coachNames?.join(', ') || (kLines.length > 0 ? `${kLines.length} coaches` : 'Coaches');
       subtext = `School Pass-Through • ${coachNames} (R${coachCost} paid)`;
     } else { // gyms
-      coachCost = 0;
-      netAmount = grossAmount;
-      subtext = `Gym Org • Direct Business Revenue`;
+      coachCost = sumLines(kLines.filter(l => l.coachId !== ownerId));
+      netAmount = money(grossAmount - coachCost);
+      subtext = coachCost > 0
+        ? `Gym Org • Coach R${coachCost} • Business R${netAmount}`
+        : `Gym Org • Direct Business Revenue`;
     }
 
     itemized.push({
@@ -916,7 +946,7 @@ export function calculateCycleFinancials(
 
   // Totals
   const totalGrossInvoiced = money(tumblingGross + schoolsGross + gymsGross + merchGross);
-  const totalCoachPayout = money(tumblingCoachCost + schoolsCoachPay);
+  const totalCoachPayout = money(tumblingCoachCost + gymsCoachPay + schoolsCoachPay);
   const netCycleRevenue = money(tumblingNet + gymsNet + merchNet);
   const totalSessions = tumblingGroupIds.size + schoolsGroupIds.size + gymsGroupIds.size;
 
@@ -937,6 +967,7 @@ export function calculateCycleFinancials(
     },
     gyms: {
       grossRevenue: gymsGross,
+      coachPay: gymsCoachPay,
       netProfit: gymsNet,
       sessionCount: gymsGroupIds.size,
       hoursCoached: gymsHours

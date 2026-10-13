@@ -2141,7 +2141,7 @@ const App: React.FC = () => {
     setIsSyncing(false);
   };
 
-  const handleSaveGym = async (name: string, sessionTypes: string, payAmount: number, gymType: 'tumbling' | 'cheer', defaultHours: number, teamAthleteNames: string[], billToName?: string, billToAddress?: string, billToPhone?: string, parentGymId?: string, competitionRate?: number, coachIds?: string[], defaultCoachId?: string, secondaryCoachId?: string, autoResetInvoice: boolean = true, billingDay: number = 1, customEventPresets?: string[], coachNames?: string[]) => {
+  const handleSaveGym = async (name: string, sessionTypes: string, payAmount: number, gymType: 'tumbling' | 'cheer', defaultHours: number, teamAthleteNames: string[], billToName?: string, billToAddress?: string, billToPhone?: string, parentGymId?: string, competitionRate?: number, coachIds?: string[], defaultCoachId?: string, secondaryCoachId?: string, autoResetInvoice: boolean = true, billingDay: number = 1, customEventPresets?: string[], coachNames?: string[], coachPay?: number) => {
     if (!user) return;
     setIsSyncing(true);
     const gymId = (editingGym && editingGym.id) ? editingGym.id : `gym_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
@@ -2170,14 +2170,16 @@ const App: React.FC = () => {
       auto_reset_invoice: autoResetInvoice,
       billing_day: billingDay,
       custom_event_presets: customEventPresets || [],
-      coach_names: coachNames || []
+      coach_names: coachNames || [],
+      coach_pay: coachPay && coachPay > 0 ? coachPay : null
     };
 
     let { error: gymError } = await supabase.from('gyms').upsert(payload);
 
     if (gymError) {
-      if (gymError.message.includes('coach_names') || gymError.message.includes('custom_event_presets') || gymError.message.includes('auto_reset_invoice') || gymError.message.includes('billing_day')) {
+      if (gymError.message.includes('coach_names') || gymError.message.includes('custom_event_presets') || gymError.message.includes('auto_reset_invoice') || gymError.message.includes('billing_day') || gymError.message.includes('coach_pay')) {
         const fallbackPayload = { ...payload };
+        delete (fallbackPayload as any).coach_pay;
         delete (fallbackPayload as any).coach_names;
         delete (fallbackPayload as any).custom_event_presets;
         delete (fallbackPayload as any).auto_reset_invoice;
@@ -11607,6 +11609,7 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
   const [name, setName] = useState(initialData?.name || '');
   const [sessionTypes, setSessionTypes] = useState(initialData?.session_types || '');
   const [payAmount, setPayAmount] = useState(initialData?.pay_amount?.toString() || '');
+  const [coachPay, setCoachPay] = useState(initialData?.coach_pay?.toString() || '');
   const [gymType, setGymType] = useState<'tumbling' | 'cheer'>(initialData?.gym_type || 'tumbling');
   const [defaultHours, setDefaultHours] = useState(initialData?.default_hours?.toString() || '1');
   const [billToName, setBillToName] = useState(initialData?.bill_to_name || '');
@@ -11650,6 +11653,7 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
   });
   const [newPresetInput, setNewPresetInput] = useState('');
   const [newPresetRate, setNewPresetRate] = useState('');
+  const [newPresetCoachPay, setNewPresetCoachPay] = useState('');
 
   const handleAddPreset = () => {
     const trimmedName = newPresetInput.trim();
@@ -11663,11 +11667,24 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
     }
 
     const trimmedRate = newPresetRate.trim();
-    const finalPreset = trimmedRate ? `${trimmedName}:${trimmedRate}` : trimmedName;
+    const trimmedCoach = newPresetCoachPay.trim();
+    if (trimmedCoach && !trimmedRate) {
+      alert("Enter the fee for this class before the coach amount.");
+      return;
+    }
+    if (trimmedCoach && parseFloat(trimmedCoach) > parseFloat(trimmedRate)) {
+      alert("The coach cannot get more than the fee charged.");
+      return;
+    }
+    // Name:fee or Name:fee:coachGets — older two-part presets keep working.
+    const finalPreset = trimmedRate
+      ? (trimmedCoach ? `${trimmedName}:${trimmedRate}:${trimmedCoach}` : `${trimmedName}:${trimmedRate}`)
+      : trimmedName;
 
     setCustomEventPresets([...customEventPresets, finalPreset]);
     setNewPresetInput('');
     setNewPresetRate('');
+    setNewPresetCoachPay('');
   };
 
   const handleRemovePreset = (presetToRemove: string) => {
@@ -11728,6 +11745,10 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
     const parsedPay = parseFloat(payAmount);
     const parsedHours = parseFloat(defaultHours);
     const parsedComp = parseFloat(competitionRate);
+    const parsedCoachPay = parseFloat(coachPay);
+    if (gymType === 'tumbling' && parsedCoachPay > 0 && parsedCoachPay > parsedPay) {
+      return alert("The coach cannot get more than the rate charged to the gym.");
+    }
 
     onSubmit(
       name,
@@ -11752,7 +11773,8 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
       true, // Auto-reset invoice always defaults to true
       !isSubTeam ? (Number(billingDay) || 1) : 1, // Billing cycle is only in main gym profile
       customEventPresets,
-      coachNames
+      coachNames,
+      gymType === 'tumbling' && parsedCoachPay > 0 ? parsedCoachPay : 0
     );
   };
 
@@ -11814,6 +11836,26 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
           </div>
         </div>
       </div>
+
+      {gymType === 'tumbling' && (
+        <div className="space-y-1">
+          <label className="text-[8px] font-black text-[#94a3b8] uppercase ml-1">Coach Gets (R per Hour)</label>
+          <input
+            type="number"
+            placeholder="E.G. 200 (LEAVE BLANK TO PAY THE COACH THEIR PROFILE RATE)"
+            value={coachPay}
+            onChange={e => setCoachPay(e.target.value)}
+            className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl font-black uppercase text-[10px] outline-none dark:text-slate-200"
+          />
+          {parseFloat(coachPay) > 0 && parseFloat(payAmount) > 0 && (
+            <p className={`text-[9px] font-black uppercase ml-1 ${parseFloat(coachPay) > parseFloat(payAmount) ? 'text-red-500' : 'text-emerald-600'}`}>
+              {parseFloat(coachPay) > parseFloat(payAmount)
+                ? 'Coach amount is higher than the rate charged'
+                : `Business keeps R${(parseFloat(payAmount) - parseFloat(coachPay)).toFixed(2)} per hour`}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <div className={`space-y-1 ${!(isSubTeam && gymType === 'cheer') ? 'col-span-2' : ''}`}>
@@ -11984,14 +12026,14 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
 
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {customEventPresets.map((preset, idx) => {
-                  const [pName, pRate] = preset.includes(':') ? preset.split(':') : [preset, ''];
+                  const [pName, pRate, pCoach] = preset.includes(':') ? preset.split(':') : [preset, '', ''];
                   return (
                     <div 
                       key={`${preset}-${idx}`}
                       className="flex items-center gap-1.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 px-2.5 py-1.5 rounded-lg border border-slate-100 dark:border-slate-600 shadow-sm"
                     >
                       <span className="text-[9px] font-black uppercase tracking-wider">
-                        {pName} {pRate ? `(R${pRate}/hr)` : ''}
+                        {pName} {pRate ? `(R${pRate}/hr${pCoach ? `, coach R${pCoach}` : ''})` : ''}
                       </span>
                       <button 
                         type="button"
@@ -12036,6 +12078,15 @@ const GymProfileModal: React.FC<any> = ({ state, initialData, onSubmit, onDelete
                       }
                     }}
                   />
+                  {gymType === 'tumbling' && (
+                    <input
+                      type="number"
+                      placeholder="COACH GETS (R/HR)"
+                      value={newPresetCoachPay}
+                      onChange={e => setNewPresetCoachPay(e.target.value)}
+                      className="flex-1 min-w-0 w-full px-3 py-2 bg-white dark:bg-slate-700 rounded-lg text-[9px] font-black uppercase outline-none border border-slate-100 dark:border-slate-600 dark:text-white"
+                    />
+                  )}
                 </div>
                 <button
                   type="button"
