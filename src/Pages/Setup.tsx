@@ -132,26 +132,6 @@ const CoachApprovalCard: React.FC<{
         return;
       }
 
-      // Trigger email notification to coach
-      if (coach.email) {
-        try {
-          const emailRes = await supabase.functions.invoke('send-staff-email', {
-            body: {
-              type: 'coach_approval',
-              coachEmail: coach.email,
-              coachName: coach.name || 'Coach',
-              businessName: ownerBusinessName || 'JFLIPS Gym',
-              outcome: status
-            }
-          });
-          if (emailRes.error || (emailRes.data && emailRes.data.error)) {
-            console.warn('Staff notification email warning:', emailRes.error || emailRes.data.error);
-          }
-        } catch (emailErr: any) {
-          console.warn('Staff notification exception:', emailErr);
-        }
-      }
-
       showToast(
         status === 'approved' 
           ? `Coach ${coach.name || coach.email} approved and updated!` 

@@ -5612,23 +5612,6 @@ const AuthView: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
         }
       });
 
-      try {
-        const funcRes = await supabase.functions.invoke('send-staff-email', {
-          body: {
-            type: 'coach_registered',
-            ownerEmail: owner.email,
-            coachName: name.trim(),
-            coachEmail: email.trim().toLowerCase(),
-            businessName: owner.business_name
-          }
-        });
-        if (funcRes.error || funcRes.data?.error) {
-          console.warn('Owner email notification notice:', funcRes.error || funcRes.data?.error);
-        }
-      } catch (emailEx: any) {
-        console.warn('Email trigger warning:', emailEx);
-      }
-
       // Automatically sign in
       await supabase.auth.signInWithPassword({ email: email.trim(), password });
     } catch (err: any) {
