@@ -1,6 +1,6 @@
 # JFLIPS sign-up form: report for legal review
 
-**Date:** 12 October 2026 (revision 4)
+**Date:** 13 October 2026 (revision 5)
 
 | Document | Version |
 | --- | --- |
@@ -8,30 +8,14 @@
 | Privacy notice (POPIA) | 1.6-draft |
 | Photo and video consent (POPIA) | 1.3-draft |
 
-**What this document is.** It is the complete text of the JFLIPS registration form as a parent or adult sees it, written out of the live app so that it cannot differ from what people actually sign. It is followed by facts about how JFLIPS works, the questions we need you to answer, and a list of things we noticed but did not change. All three documents are drafts. JFLIPS is the registered company name.
+**What this document is.** It is the complete text of the JFLIPS registration form as a parent or adult sees it, written out of the live app so that it cannot differ from what people actually sign. It is followed by facts about how JFLIPS works and the questions we need you to answer. A separate file has some extra notes. All three documents are drafts. JFLIPS is the registered company name.
 
 **How the form works.** A parent fills in the details, reads the Terms and Conditions in a scroll box (the tick boxes stay locked until they have scrolled to the bottom), opens the privacy notice (also locked until it has been opened and read to the bottom), answers Yes or No for each photo and video use, and signs once at the bottom. That one signature covers all three documents. The privacy notice and the photo consent are saved as their own records. Once signed, a form cannot be changed from the family's link: a family that wants to change its photo choices contacts JFLIPS, JFLIPS reopens the photo form, and the family signs again. The earlier answers stay in the record's history. The signed PDF puts all three documents, the choices made and the one signature into a single file, with the version of each document in the footer.
 
 **Two versions of every text.** A parent or guardian signs for a child under 18. An adult (18 or over) signs for themselves. Both are printed below.
 
-**Old records keep their old wording.** Every signed record stores the version it was signed under. The app keeps the exact wording of earlier versions and prints that wording on the PDF of an old record. Kept: Terms 4.0-draft and 5.0-draft; privacy notice 1.0-draft to 1.5-draft; photo consent 1.0, 1.1-draft and 1.2-draft. See Suggestions for the exceptions.
+**Old records keep their old wording.** Every signed record stores the version it was signed under. The app keeps the exact wording of earlier versions and prints that wording on the PDF of an old record. Kept: Terms 4.0-draft and 5.0-draft; privacy notice 1.0-draft to 1.5-draft; photo consent 1.0, 1.1-draft and 1.2-draft. The separate notes file lists the exceptions.
 
-### Change log since the last report
-
-The last report covered Terms 5.0-draft, privacy notice 1.5-draft and photo consent 1.3-draft.
-
-**Terms and Conditions 6.0-draft**
-- Section 2 (Risks) and section 7 (Weather): "some classes are outdoors" now reads "some classes may be outdoors".
-- Section 7 (Enrolment terms): the "Free first class" rule was removed. The section now has nine rules for a parent or guardian and eight for an adult.
-
-**Privacy notice 1.6-draft**
-- "Where it is kept": "only people with their own login can open your information" now reads "only the owner of JFLIPS can open your information there".
-
-**Photo and video consent 1.3-draft:** no change.
-
-**This report**
-- JFLIPS is stated as the registered company name. The question about the company name was removed.
-- A note was added under section 7 asking the lawyer to help with its wording, and a matching question was added at the end of Part 7.
 
 ## PART 1: THE FORM (information the parent gives)
 
@@ -420,7 +404,7 @@ Questions, or want to change your choices? Contact Jeandre Blacquiere on WhatsAp
 
 ## PART 6: HOW JFLIPS WORKS
 
-Sources: the app code, the database scripts in the repository, and a read-only look at the live Supabase project (database policies and edge functions) on 12 October 2026. Where a fact comes from the owner and cannot be seen in the app, it says so.
+Sources: the app code, the database scripts in the repository, and a read-only look at the live Supabase project (database policies and edge functions) on 13 October 2026. Where a fact comes from the owner and cannot be seen in the app, it says so.
 
 ### 6A. Coaches
 
@@ -453,7 +437,7 @@ A coach does not read the children's table directly. The app asks the database f
 | A coach's own payslips and invoice snapshots | Own only | invoice_snapshots_self (coach_id = the coach); staff_payslips policies. |
 | Other coaches | Names only | Function coach_directory() returns names and usernames only. |
 | Injury and incident reports | Yes | incident_staff_select lets a coach read them and incident_staff_insert lets a coach add one. |
-| Cheer team athletes | Yes, the whole row | team_athletes_coach_read. This table is separate from tumbling clients and is not covered by coach_roster(). Not reviewed. See Suggestions. |
+| Cheer team athletes | Yes, the whole row | team_athletes_coach_read. This table is separate from tumbling clients and is not covered by coach_roster(). Not reviewed. See the separate notes. |
 
 **Confirmation for the privacy notice sentence** ("They cannot see your signature, email address or billing details"): from the repository scripts and the live policies, a coach cannot see a tumbling client's signature, email address or billing details. The cheer team athletes table in the second-last row is the exception to check.
 
@@ -520,30 +504,3 @@ Promises in the enrolment terms, for completeness:
 18. Changing or withdrawing photo consent: a signed form cannot be changed from the family's link. The family contacts JFLIPS, JFLIPS reopens the form and sends it again, and photos are removed within 7 days of a withdrawal. Is it acceptable that a withdrawal needs a message to JFLIPS rather than a button, given that withdrawing should be as easy as giving consent?
 19. Emergency contacts: the person named as an emergency contact has not signed anything, and coaches can now see their name and number. Is the line in the privacy notice enough, or must the signer confirm they have that person's permission?
 20. Enrolment terms (Terms section 7): the owner wrote a first draft and would like your help with the wording of the whole section, including how unpaid accounts, weather cancellations, absences and removal from classes are put.
-
-## PART 8: SUGGESTIONS (noticed, not changed)
-
-Nothing below was changed. Each is for the owner and the lawyer to decide.
-
-**Services**
-1. **Google Fonts is the last Google service besides alerts.** Every visitor's address goes to Google when a page loads. The font can be stored with the app instead, which would remove it. This needs a decision because it adds a font package.
-2. **Resend code is dead** (list in Part 6C). The function is not deployed and there is no key, so it does nothing. The function file and its two calls can be deleted.
-3. **Child names in alerts.** The notice says alerts can include a child's name. Taking names out of the alert text would let that sentence go.
-4. **Adult wording I adjusted.** The alert sentence reads "These alerts can include your name." for adults, because the instruction said to adjust it to who the alert is about.
-
-**Records and PDFs**
-5. **Version labels were reused.** The privacy notice label "1.0-draft" was used for three different wordings before it was bumped. A record stamped 1.0-draft cannot be tied to one wording. The app keeps the last of the three. A rule that every wording change bumps the version would prevent this.
-6. **Terms 2.0-draft and 3.0-draft records.** The owner's re-print for these shows only the original short declaration, not the clauses the parent saw on screen. It is not a faithful copy. The PDF the parent downloaded at the time is.
-7. **Trial athletes are deleted, not archived.** They have signed nothing, so nothing is kept. If a trial athlete's parent gave a phone number, it is gone at once.
-8. **Archive and shared families.** The privacy and photo records move to the archive only when they belong to that child alone (their key is the child's id). A record shared by several children stays where it is.
-9. **Team (cheer) athletes also go to Old athletes** when removed. They have no signed forms, so only the 12-month details date applies.
-10. **No alert when a family asks to change photo choices.** They message the owner on WhatsApp, which the app cannot see, so the 7-day promise depends on the owner acting.
-
-**Safety and access**
-11. **Cheer team athletes.** Coaches can read this table directly (team_athletes_coach_read), outside the function that hides private fields. The notice sentence about coaches is about tumbling clients.
-12. **Public sign-up rules.** The sign-up pages work because the database lets anyone with the public key add a row (tumbling_students_public_signup_insert, cheer_registrations_public_insert, notifications_public_signup_insert). No limits on how often were seen. This is by design but worth knowing.
-13. **Privacy tick lock** applies to the sign-up page only. The personal consent link page (for existing families) does not lock the privacy tick.
-14. **Personal consent links** use a long random code. Anyone holding the link can open that family's consent page. This is by design.
-
-**The cheer sign-up form (not changed)**
-15. The cheer form (SignupCheer.tsx) does not use the Terms, privacy notice or photo consent. It has no signature and no indemnity. It asks for the athlete's name, date of birth, medical conditions, emergency contact, and the parents' names, phone numbers and email. It has three tick boxes: "I confirm the information supplied is correct", "I understand that this registration is an expression of interest only and does not guarantee placement on a team", and "I consent to JFLIPS storing my information for athlete management purposes". It saves to the cheer_registrations table, which only the owner can read. Anyone with the public key can add a row. It sends an alert containing the athlete's name.
