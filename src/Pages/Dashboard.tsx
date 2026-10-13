@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, memo } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ChevronRight, 
@@ -728,20 +729,21 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
         </motion.div>
       </div>
 
-      {/* Revenue Breakdown Modal (Owner Only) */}
-      <AnimatePresence>
+      {/* Revenue Breakdown Modal (Owner Only). Rendered on <body> so the page header and
+          the content's own stacking layer can never sit on top of it. */}
+      {createPortal(<AnimatePresence>
         {showRevenueBreakdown && isOwner && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-start justify-center p-3 sm:p-6 overflow-y-auto py-8"
+            className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-[200] flex items-start justify-center p-3 sm:p-6 overflow-y-auto pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
           >
             <motion.div
               initial={{ scale: 0.95, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 20 }}
-              className="relative my-auto bg-white dark:bg-slate-900 rounded-[2rem] sm:rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-2xl max-w-xl w-full p-5 sm:p-6 space-y-5 max-h-[85vh] overflow-y-auto"
+              className="relative my-auto bg-white dark:bg-slate-900 rounded-[2rem] sm:rounded-[2.5rem] border border-slate-100 dark:border-slate-800 shadow-2xl max-w-xl w-full p-5 sm:p-6 space-y-5 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain"
             >
               {/* Modal Header */}
               <div className="sticky top-0 bg-white dark:bg-slate-900 z-20 flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4 pt-1">
@@ -1029,7 +1031,7 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>, document.body)}
     </div>
   );
 });
