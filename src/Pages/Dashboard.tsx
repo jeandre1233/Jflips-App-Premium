@@ -552,14 +552,14 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
           animate={{ y: 0, opacity: 1 }} 
           whileTap={{ scale: 0.95 }}
           onClick={isOwner ? () => setShowRevenueBreakdown(true) : () => onShowAllLogs(true)}
-          className={`${isOwner ? 'bg-[#1e4da1] dark:bg-blue-900/40 cursor-pointer' : 'bg-emerald-600 dark:bg-emerald-900/40'} rounded-3xl p-5 text-white shadow-lg flex flex-col justify-between relative overflow-hidden text-left aspect-square lg:aspect-auto lg:h-44`}
+          className={`${isOwner ? 'bg-[#1e4da1] dark:bg-blue-900/40 cursor-pointer' : 'bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-800 dark:from-emerald-800/70 dark:via-emerald-900/60 dark:to-teal-950 ring-1 ring-white/10'} rounded-3xl p-5 text-white shadow-lg flex flex-col justify-between relative overflow-hidden text-left aspect-square lg:aspect-auto lg:h-44`}
         >
           <div className="z-10">
             <p className="text-white/60 text-[9px] font-black uppercase tracking-[0.15em] mb-1">
               {isOwner ? 'Cycle Revenue' : 'Hours Coached'}
             </p>
             <h3 className={isOwner ? 'text-3xl font-black italic' : 'text-5xl font-black italic'}>
-              {isOwner ? `R${activeCycleFinancials.totals.netCycleRevenue}` : `${matTime} HRS`}
+              {isOwner ? `R${activeCycleFinancials.totals.netCycleRevenue}` : <>{matTime}<span className="ml-1.5 text-base not-italic font-black tracking-widest text-white/70">HRS</span></>}
             </h3>
             {isOwner && (
               <p className="text-[9px] font-bold text-white/70 mt-0.5">
@@ -568,6 +568,11 @@ export const DashboardView = memo(({ state, onEditSession, onRemoveSession, onQu
             )}
           </div>
           
+          {!isOwner && (
+            <div className="z-10 flex items-center gap-1 text-white/70 text-[9px] font-black uppercase tracking-widest">
+              This cycle <ChevronRight size={11} /> View logs
+            </div>
+          )}
           {isOwner && <div className="z-10 border-t border-white/10 pt-2.5 w-full">
             <div className="flex flex-col">
               <p className="text-white/60 text-[8px] font-black uppercase tracking-widest">{isOwner ? 'Staff Payout' : 'My Earnings'}</p>
