@@ -91,7 +91,8 @@ test('3-year-old registration PDF has the young athlete section and the late col
     age: 3, dob: '01/01/2023', studentName: 'Tiny Test',
     young: { stays: true, adultName: '', adultPhone: '', collectors: [{ name: 'Test Parent', phone: '0821234567' }], notes: '' }
   });
-  assert.ok(t.includes('YOUNG ATHLETE (AGE 2 TO 4)'));
+  assert.ok(t.includes('Young athlete (age 2 to 4)'));
+  assert.ok(!t.includes('Class Enrolled'), 'the PDF does not show a class');
   assert.ok(t.includes('stays at the venue for the whole class'));
   assert.ok(t.includes('Late collection.'));
   assert.ok(t.includes('Terms v6.0-draft'));

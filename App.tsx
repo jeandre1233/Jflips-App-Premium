@@ -11593,7 +11593,7 @@ const AthleteProfileModal: React.FC<any> = ({ otherStudents, initialData, onSubm
                   className="w-full py-4 bg-slate-900 dark:bg-white dark:text-slate-900 text-white rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg"
                 >
                   {isDownloading ? <Loader2 className="animate-spin" size={14} /> : <Download size={14} />}
-                  Download Indemnity Form (PDF)
+                  Download documents (PDF)
                 </button>
                 <p className="text-center text-[8px] font-bold text-slate-400 uppercase mt-2 italic">Digitally signed on {initialData.indemnity_date ? new Date(initialData.indemnity_date).toLocaleDateString() : 'N/A'}</p>
               </div>

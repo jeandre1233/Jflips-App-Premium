@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import { Audience, TERMS_VERSION, termsFor } from './indemnityText';
 import { GENERAL_VERSION, MEDIA_KEYS, MEDIA_VERSION, generalFormFor, mediaFormFor } from './consentForms';
+import { COLORS, PdfDoc } from './pdfDesign';
 
 /**
  * THE SIGNED REGISTRATION PACK (one PDF).
@@ -12,6 +13,8 @@ import { GENERAL_VERSION, MEDIA_KEYS, MEDIA_VERSION, generalFormFor, mediaFormFo
  * One builder serves the PDF a parent downloads after signing up and the owner's
  * re-print from a child's profile, so they can never differ. All wording comes from
  * indemnityText.ts and consentForms.ts, the same files the sign-up page reads.
+ * The look (letterhead, footer, tables) comes from pdfDesign.ts. This file decides
+ * what goes in; it does not change any wording.
  */
 
 export interface MediaRecord {
@@ -51,86 +54,24 @@ export interface IndemnityPdfInput {
   media?: MediaRecord | null;
 }
 
-const rgb = (hex: string): [number, number, number] =>
-  [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
-
 export function buildIndemnityPdf(input: IndemnityPdfInput): jsPDF {
   const { audience } = input;
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const pageW = 210;
-  const margin = 20;
-  const contentW = pageW - margin * 2;
-  let y = 20;
-
-  const header = () => {
-    doc.setFillColor(30, 77, 161);
-    doc.rect(0, 0, pageW, 28, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(18); doc.setFont('helvetica', 'bolditalic');
-    doc.text('JFLIPS', margin, 17);
-    doc.setFontSize(8); doc.setFont('helvetica', 'normal');
-    doc.text('STUNTING & TUMBLING', margin + 28, 17);
-    doc.setFontSize(9);
-    doc.text('SIGNED REGISTRATION FORMS', pageW - margin, 17, { align: 'right' });
-  };
-  header();
-  y = 38;
-
-  const ensure = (need: number) => {
-    if (y + need > 276) { doc.addPage(); y = 20; }
-  };
-  const text = (t: string, o: { bold?: boolean; indent?: number; gap?: number; size?: number; color?: string } = {}) => {
-    doc.setFont('helvetica', o.bold ? 'bold' : 'normal'); doc.setFontSize(o.size || 10); doc.setTextColor(...rgb(o.color || '#1e293b'));
-    const lines = doc.splitTextToSize(t, contentW - (o.indent || 0));
-    ensure(lines.length * 5 + (o.gap ?? 4));
-    doc.text(lines, margin + (o.indent || 0), y);
-    y += lines.length * 5 + (o.gap ?? 4);
-  };
-  const heading = (t: string) => {
-    ensure(14);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...rgb('#1e4da1'));
-    doc.text(t, margin, y); y += 5.5;
-  };
-  const band = (t: string) => {
-    ensure(24);
-    doc.setFillColor(248, 250, 252); doc.rect(margin, y, contentW, 6, 'F');
-    doc.setTextColor(...rgb('#1e4da1')); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
-    doc.text(t.toUpperCase(), margin + 3, y + 4.5); y += 10;
-  };
-  const titleBlock = (t: string) => {
-    ensure(26);
-    doc.setTextColor(...rgb('#1e4da1')); doc.setFontSize(13); doc.setFont('helvetica', 'bold');
-    const lines = doc.splitTextToSize(t, contentW);
-    doc.text(lines, margin, y);
-    y += lines.length * 6;
-    doc.setDrawColor(30, 77, 161); doc.setLineWidth(0.5); doc.line(margin, y, pageW - margin, y); y += 6;
-  };
-  const fields = (rows: [string, string][]) => {
-    doc.setFontSize(9); doc.setTextColor(...rgb('#475569'));
-    rows.forEach(([label, value]) => {
-      const vLines = doc.splitTextToSize(value, contentW - 48);
-      ensure(vLines.length * 5 + 3);
-      doc.setFont('helvetica', 'bold'); doc.text(`${label}:`, margin, y);
-      doc.setFont('helvetica', 'normal'); doc.text(vLines, margin + 46, y);
-      y += Math.max(7, vLines.length * 5 + 2);
-    });
-  };
-  const newPage = () => { doc.addPage(); header(); y = 38; };
-
+  const d = new PdfDoc();
   const termsVersion = input.version || TERMS_VERSION;
+  const when = input.signedAt ? new Date(input.signedAt) : new Date();
+  const whenText = when.toLocaleString('en-ZA');
 
   // ── Part 1: who signed ──
-  titleBlock(audience === 'adult' ? 'Your details' : 'Details of the child and parent');
-  band(audience === 'adult' ? 'Your details' : 'Student details');
-  fields([
+  d.title(audience === 'adult' ? 'Your details' : 'Details of the child and parent');
+
+  d.section(audience === 'adult' ? 'Your details' : 'Student details');
+  d.details([
     ['Full Name', input.studentName || '—'],
     ['Date of Birth', input.dob || '—'],
-    ['Age', input.age !== undefined && input.age !== null && input.age !== '' ? `${input.age} years` : '—'],
-    ['Class Enrolled', input.className || '—']
+    ['Age', input.age !== undefined && input.age !== null && input.age !== '' ? `${input.age} years` : '—']
   ]);
-  y += 4;
 
-  band(audience === 'adult' ? 'Contact details' : 'Parent / guardian details');
+  d.section(audience === 'adult' ? 'Contact details' : 'Parent / guardian details');
   const emergencyText = input.emergency
     ? [input.emergency.name, input.emergency.phone].filter(Boolean).join(' · ')
       + (input.emergency.relationship ? ` (${input.emergency.relationship})` : '')
@@ -151,157 +92,114 @@ export function buildIndemnityPdf(input: IndemnityPdfInput): jsPDF {
         ['Emergency contact', emergencyText || '—'],
         ['Authority', 'Confirmed by tick box: parent or legal guardian, allowed to make decisions about the child\'s activities and medical care']
       ];
-  fields(rows);
-  y += 4;
+  d.details(rows);
 
   if (input.young) {
     const young = input.young;
-    band('Young athlete (age 2 to 4)');
-    fields([
+    d.section('Young athlete (age 2 to 4)');
+    d.details([
       ['Adult staying at venue', young.stays ? 'Yes, a parent or responsible adult stays at the venue for the whole class' : 'No'],
       ['Adult at the venue', [young.adultName, young.adultPhone].filter(Boolean).join(' · ') || 'The parent'],
       ['May collect the child', (young.collectors || []).filter(c => c.name.trim()).map(c => c.name.trim() + (c.phone.trim() ? ' (' + c.phone.trim() + ')' : '')).join('; ') || '—'],
       ['Coaches should know', young.notes?.trim() || '—']
     ]);
-    y += 4;
   }
 
-  band(audience === 'adult' ? 'Your health' : 'The child\'s health');
-  text(input.medicalNotes?.trim() || 'None');
+  d.section(audience === 'adult' ? 'Your health' : 'The child\'s health');
+  d.paragraph(input.medicalNotes?.trim() || 'None');
 
   // ── Part 2: Terms and Conditions ──
-  newPage();
-  titleBlock('Terms and Conditions');
+  d.startPage();
+  d.title('Terms and Conditions');
   const terms = termsFor(audience, termsVersion, { parent: input.parentName, child: input.studentName, name: input.parentName || input.studentName });
-  if (terms.notStored) text(terms.notStored, { bold: true, size: 9, color: '#b91c1c', gap: 4 });
-  text(terms.intro, { gap: 6 });
+  if (terms.notStored) d.paragraph(terms.notStored, { bold: true, size: 9, color: COLORS.warn });
+  d.paragraph(terms.intro);
   const sections = terms.sections;
-  heading('Index');
-  sections.forEach(s => text(`${s.number}.  ${s.heading}`, { indent: 3, gap: 1 }));
-  y += 4;
+  d.subheading('Index');
+  sections.forEach(s => d.paragraph(`${s.number}.  ${s.heading}`, { indent: 3, gap: 0.6 }));
+  d.gap(2);
   sections.forEach(s => {
-    heading(`${s.number}. ${s.heading}`);
-    s.paragraphs.forEach(p => text(p, { gap: 3 }));
-    (s.items || []).forEach(i => text('•  ' + i, { indent: 3, gap: 1 }));
-    if (s.outro) text(s.outro, { gap: 4 });
-    y += 2;
+    d.section(`${s.number}. ${s.heading}`);
+    s.paragraphs.forEach(p => d.paragraph(p));
+    (s.items || []).forEach(i => d.bullet(i));
+    if (s.items) d.gap(2);
+    if (s.outro) d.paragraph(s.outro);
   });
-  text('Confirmed: I have read and understood the risks in section 2.', { bold: true, gap: 2 });
-  text(audience === 'adult'
+  d.paragraph('Confirmed: I have read and understood the risks in section 2.', { bold: true, gap: 1.5 });
+  d.paragraph(audience === 'adult'
     ? 'Confirmed: I have read and I agree to the Terms and Conditions.'
-    : 'Confirmed: I have read and I agree to the Terms and Conditions, on my own behalf and on behalf of the enrolled student.', { bold: true, gap: 6 });
+    : 'Confirmed: I have read and I agree to the Terms and Conditions, on my own behalf and on behalf of the enrolled student.', { bold: true });
 
   // ── Part 3: Privacy notice ──
   if (input.privacyVersion) {
-    newPage();
+    d.startPage();
     const general = generalFormFor(audience, input.privacyVersion);
-    titleBlock(general.title);
-    text(general.subtitle, { size: 9, color: '#64748b', gap: 4 });
-    if (general.notStored) text(general.notStored, { bold: true, size: 9, color: '#b91c1c', gap: 4 });
-    text(general.intro, { gap: 6 });
+    d.title(general.title);
+    d.paragraph(general.subtitle, { italic: true, size: 9, color: COLORS.grey, gap: 3 });
+    if (general.notStored) d.paragraph(general.notStored, { bold: true, size: 9, color: COLORS.warn });
+    d.paragraph(general.intro);
     general.sections.forEach(s => {
-      heading(s.heading);
-      if (s.lead) text(s.lead, { gap: 2 });
-      s.items.forEach(i => text('•  ' + i, { indent: 3, gap: 2 }));
-      if (s.tail) text(s.tail, { gap: 2 });
-      y += 2;
+      d.section(s.heading);
+      if (s.lead) d.paragraph(s.lead, { gap: 2 });
+      s.items.forEach(i => d.bullet(i));
+      if (s.tail) d.paragraph(s.tail, { gap: 2 });
     });
-    heading(general.declarationHeading);
-    text(general.declaration, { gap: 3 });
-    text('Confirmed: ' + general.agreeLabel.replace(/ \*$/, ''), { bold: true, gap: 4 });
-    text(general.contact, { size: 8, color: '#64748b' });
+    d.section(general.declarationHeading);
+    d.paragraph(general.declaration);
+    d.paragraph('Confirmed: ' + general.agreeLabel.replace(/ \*$/, ''), { bold: true, gap: 3 });
+    d.paragraph(general.contact, { size: 9, color: COLORS.grey });
   }
 
   // ── Part 4: Photo and video consent ──
   if (input.media) {
-    newPage();
+    d.startPage();
     const media = mediaFormFor(audience, input.media.version);
-    titleBlock(media.title);
-    text(media.subtitle, { size: 9, color: '#64748b', gap: 4 });
-    if (media.notStored) text(media.notStored, { bold: true, size: 9, color: '#b91c1c', gap: 4 });
-    text(media.intro, { gap: 6 });
+    d.title(media.title);
+    d.paragraph(media.subtitle, { italic: true, size: 9, color: COLORS.grey, gap: 3 });
+    if (media.notStored) d.paragraph(media.notStored, { bold: true, size: 9, color: COLORS.warn });
+    d.paragraph(media.intro);
     const choices = input.media.choices || {};
-    const answerLine = (c: Record<string, boolean>) => {
-      MEDIA_KEYS.forEach(k => {
-        const v = c[k];
-        const answer = v === true ? media.yes : v === false ? media.no : '-';
-        const lines = doc.splitTextToSize(media.uses[k], contentW - 28);
-        ensure(lines.length * 5 + 4);
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(30, 41, 59);
-        doc.text(lines, margin, y);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(v === true ? 22 : 185, v === true ? 163 : 28, v === true ? 74 : 28);
-        doc.text(answer.toUpperCase(), pageW - margin, y, { align: 'right' });
-        y += lines.length * 5 + 3;
-      });
-    };
-    heading(media.useHeading);
-    answerLine(choices);
+    const rowsFor = (c: Record<string, boolean>) =>
+      MEDIA_KEYS.map(k => ({ label: media.uses[k], answer: typeof c[k] === 'boolean' ? c[k] : undefined }));
+    d.section(media.useHeading);
+    d.choices(['Use', media.yes, media.no], rowsFor(choices));
     if (input.media.status === 'withdrawn') {
-      text('STATUS: CONSENT WITHDRAWN. The answers above are the current ones (all No).', { bold: true, color: '#b91c1c', gap: 4 });
+      d.paragraph('STATUS: CONSENT WITHDRAWN. The answers above are the current ones (all No).', { bold: true, color: COLORS.warn });
     }
     const earlier = (input.media.history || []).filter(h => h && h.choices);
     if (earlier.length > 0) {
-      y += 2;
-      heading('Earlier choices (kept as a record, never overwritten)');
+      d.section('Earlier choices (kept as a record, never overwritten)');
       earlier.forEach(h => {
-        text(`Signed ${h.signed_at ? new Date(h.signed_at).toLocaleString('en-ZA') : '—'}, version ${h.form_version || '—'}`, { bold: true, gap: 2 });
-        answerLine(h.choices as Record<string, boolean>);
-        y += 2;
+        d.subheading(`Signed ${h.signed_at ? new Date(h.signed_at).toLocaleString('en-ZA') : '—'}, version ${h.form_version || '—'}`);
+        d.choices(['Use', media.yes, media.no], rowsFor(h.choices as Record<string, boolean>));
       });
     }
-    if (media.choiceNote) text(media.choiceNote, { size: 9, color: '#64748b', gap: 4 });
-    y += 2;
-    if (media.others) { heading(media.othersHeading); text(media.others, { gap: 4 }); }
-    heading(media.promiseHeading); media.promises.forEach(p => text('•  ' + p, { indent: 3, gap: 2 }));
-    y += 2;
-    heading(media.rightsHeading); media.rights.forEach(r => text('•  ' + r, { indent: 3, gap: 2 }));
-    y += 2;
-    heading(media.declarationHeading);
-    text(media.declaration, { gap: 4 });
-    text(media.contact, { size: 8, color: '#64748b' });
+    if (media.choiceNote) d.paragraph(media.choiceNote, { size: 9, color: COLORS.grey, gap: 3 });
+    if (media.others) { d.section(media.othersHeading); d.paragraph(media.others); }
+    d.section(media.promiseHeading);
+    media.promises.forEach(p => d.bullet(p));
+    d.section(media.rightsHeading);
+    media.rights.forEach(r => d.bullet(r));
+    d.section(media.declarationHeading);
+    d.paragraph(media.declaration, { gap: 3 });
+    d.paragraph(media.contact, { size: 9, color: COLORS.grey });
   }
 
   // ── Signature and what was signed ──
-  newPage();
-  titleBlock('Signature');
-  text('One signature covers every document in this pack.', { gap: 4 });
-  band('Documents signed');
-  const signedRows: [string, string][] = [
-    ['Terms and Conditions', `version ${termsVersion}`]
-  ];
-  if (input.privacyVersion) signedRows.push(['Privacy notice (POPIA)', `version ${input.privacyVersion}`]);
-  if (input.media) signedRows.push(['Photo and video consent (POPIA)', `version ${input.media.version || MEDIA_VERSION}`]);
-  fields(signedRows);
-  y += 6;
+  d.startPage();
+  d.title('Signature');
+  d.paragraph('One signature covers every document in this pack.');
+  d.section('Signature');
+  d.signature({ image: input.signature, name: input.parentName || input.studentName || '', when: whenText });
+  d.section('Document versions');
+  const signedRows: string[][] = [['Terms and Conditions', `version ${termsVersion}`, whenText]];
+  if (input.privacyVersion) signedRows.push(['Privacy notice (POPIA)', `version ${input.privacyVersion}`, whenText]);
+  if (input.media) signedRows.push(['Photo and video consent (POPIA)', `version ${input.media.version || MEDIA_VERSION}`, whenText]);
+  d.simpleTable(['Document', 'Version', 'Date signed'], signedRows, [76, 38, 52]);
 
-  if (input.signature) {
-    try { doc.addImage(input.signature, 'PNG', margin, y, 80, 30); y += 34; }
-    catch { doc.setFontSize(9); doc.text('[Signature image could not be shown]', margin, y + 5); y += 12; }
-  } else {
-    doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(...rgb('#dc2626'));
-    doc.text('No digital signature on record.', margin, y + 5); y += 12;
-  }
-  doc.setDrawColor(...rgb('#1e293b')); doc.setLineWidth(0.5);
-  doc.line(margin, y, margin + 80, y);
-  doc.line(margin + 100, y, margin + 160, y);
-  doc.setTextColor(...rgb('#475569')); doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
-  doc.text(`Signature: ${input.parentName || input.studentName || ''}`, margin, y + 5);
-  doc.setFont('helvetica', 'bold'); doc.text('Signed:', margin + 100, y + 5);
-  doc.setFont('helvetica', 'normal');
-  doc.text((input.signedAt ? new Date(input.signedAt) : new Date()).toLocaleString('en-ZA'), margin + 114, y + 5);
-
-  // Footer on every page, with the versions that were signed
   const versionText = [`Terms v${termsVersion}`, input.privacyVersion ? `Privacy v${input.privacyVersion}` : '', input.media ? `Photo v${input.media.version || MEDIA_VERSION}` : '']
     .filter(Boolean).join('  ·  ');
-  const pageCount = doc.getNumberOfPages();
-  for (let p = 1; p <= pageCount; p++) {
-    doc.setPage(p);
-    doc.setFillColor(30, 77, 161); doc.rect(0, 287, pageW, 10, 'F');
-    doc.setTextColor(255, 255, 255); doc.setFontSize(7); doc.setFont('helvetica', 'normal');
-    doc.text(`JFLIPS  |  ${versionText}  |  ${p}/${pageCount}`, pageW / 2, 293, { align: 'center' });
-  }
-  return doc;
+  return d.finish(versionText);
 }
 
 export function indemnityPdfFileName(studentName: string, signedAt?: string | null): string {

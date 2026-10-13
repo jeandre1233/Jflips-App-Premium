@@ -16,6 +16,7 @@
 import { jsPDF } from 'jspdf';
 import type { Audience } from './indemnityText';
 import { FROZEN_TEXTS } from './frozenTexts';
+import { COLORS, PdfDoc } from './pdfDesign';
 
 export type Lang = 'en';
 export type ConsentKind = 'general' | 'media';
@@ -381,133 +382,63 @@ export interface ConsentPdfInput {
 }
 
 export function generateConsentPdf(input: ConsentPdfInput, opts: { save?: boolean } = { save: true }): jsPDF {
-  const { kind, lang } = input;
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const pageW = 210, margin = 20, contentW = pageW - margin * 2, bottom = 278;
-  let y = 38;
-
+  const { kind } = input;
   const aud: Audience = input.audience === 'adult' ? 'adult' : 'minor';
   const media = mediaFormFor(aud, kind === 'media' ? input.version : null);
   const general = generalFormFor(aud, kind === 'general' ? input.version : null);
   const ui = uiFor(aud);
   const title = kind === 'media' ? media.title : general.title;
   const subtitle = kind === 'media' ? media.subtitle : general.subtitle;
+  const when = input.signedAt ? new Date(input.signedAt) : new Date();
 
-  const header = () => {
-    doc.setFillColor(30, 77, 161); doc.rect(0, 0, pageW, 28, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(18); doc.setFont('helvetica', 'bolditalic'); doc.text('JFLIPS', margin, 17);
-    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.text('STUNTING & TUMBLING', margin + 28, 17);
-  };
-  const footer = () => {
-    const pages = doc.getNumberOfPages();
-    for (let p = 1; p <= pages; p++) {
-      doc.setPage(p);
-      doc.setFillColor(30, 77, 161); doc.rect(0, 287, pageW, 10, 'F');
-      doc.setTextColor(255, 255, 255); doc.setFontSize(7); doc.setFont('helvetica', 'normal');
-      doc.text(`JFLIPS  |  ${title}  |  v${input.version || (kind === 'media' ? MEDIA_VERSION : GENERAL_VERSION)}  |  ${p}/${pages}`, pageW / 2, 293, { align: 'center' });
-    }
-  };
-  const ensure = (need: number) => {
-    if (y + need > bottom) { doc.addPage(); header(); y = 38; }
-  };
-  const para = (text: string, o: { bold?: boolean; size?: number; color?: [number, number, number]; gap?: number; indent?: number } = {}) => {
-    doc.setFont('helvetica', o.bold ? 'bold' : 'normal');
-    doc.setFontSize(o.size || 10);
-    doc.setTextColor(...(o.color || [30, 41, 59]));
-    const lines = doc.splitTextToSize(text, contentW - (o.indent || 0));
-    ensure(lines.length * 5 + (o.gap ?? 3));
-    doc.text(lines, margin + (o.indent || 0), y);
-    y += lines.length * 5 + (o.gap ?? 3);
-  };
-  const heading = (text: string) => {
-    ensure(14);
-    doc.setFillColor(248, 250, 252); doc.rect(margin, y, contentW, 6.5, 'F');
-    doc.setTextColor(30, 77, 161); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
-    doc.text(text.toUpperCase(), margin + 3, y + 4.6);
-    y += 11;
-  };
-  const bullet = (text: string) => para(`•  ${text}`, { indent: 3, gap: 2 });
-  const field = (label: string, value: string) => {
-    ensure(7);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(71, 85, 105);
-    doc.text(`${label}:`, margin, y);
-    doc.setFont('helvetica', 'normal');
-    doc.text(doc.splitTextToSize(value || '-', contentW - 60), margin + 58, y);
-    y += 7;
-  };
-
-  header();
-  doc.setTextColor(30, 77, 161); doc.setFont('helvetica', 'bold'); doc.setFontSize(13);
-  const titleLines = doc.splitTextToSize(title, contentW);
-  doc.text(titleLines, margin, y);
-  y += titleLines.length * 6;
-  doc.setDrawColor(30, 77, 161); doc.setLineWidth(0.5); doc.line(margin, y, pageW - margin, y); y += 6;
-  para(subtitle, { size: 9, color: [100, 116, 139], gap: 5 });
+  // The look (letterhead, footer, tables) is shared with the registration pack: pdfDesign.ts.
+  const d = new PdfDoc();
+  d.title(title);
+  d.paragraph(subtitle, { italic: true, size: 9, color: COLORS.grey, gap: 3 });
   const stored = kind === 'media' ? media.notStored : general.notStored;
-  if (stored) para(stored, { bold: true, size: 9, color: [185, 28, 28], gap: 5 });
-  para(kind === 'media' ? media.intro : general.intro, { gap: 6 });
+  if (stored) d.paragraph(stored, { bold: true, size: 9, color: COLORS.warn });
+  d.paragraph(kind === 'media' ? media.intro : general.intro);
 
-  heading(ui.childrenLabel);
-  field(ui.childrenLabel, input.childNames);
+  d.section(ui.childrenLabel);
+  d.details([[ui.childrenLabel, input.childNames]]);
 
-  heading(ui.parentHeading);
-  field(ui.fullName, input.parentName);
-  field(ui.relationship.replace(/ \(.*\)$/, ''), input.relationship || '');
-  field(ui.cell, input.parentPhone || '');
-  field(ui.email, input.parentEmail || '');
-  y += 2;
+  d.section(ui.parentHeading);
+  d.details([
+    [ui.fullName, input.parentName],
+    [ui.relationship.replace(/ \(.*\)$/, ''), input.relationship || ''],
+    [ui.cell, input.parentPhone || ''],
+    [ui.email, input.parentEmail || '']
+  ]);
 
   if (kind === 'media') {
-    heading(media.useHeading);
-    MEDIA_KEYS.forEach(k => {
-      const v = input.choices ? input.choices[k] : undefined;
-      const answer = v === true ? media.yes : v === false ? media.no : '-';
-      const lines = doc.splitTextToSize(media.uses[k], contentW - 28);
-      ensure(lines.length * 5 + 4);
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(30, 41, 59);
-      doc.text(lines, margin, y);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(v === true ? 22 : 185, v === true ? 163 : 28, v === true ? 74 : 28);
-      doc.text(answer.toUpperCase(), pageW - margin, y, { align: 'right' });
-      y += lines.length * 5 + 3;
-    });
-    if (media.choiceNote) para(media.choiceNote, { size: 9, color: [100, 116, 139], gap: 4 });
-    y += 2;
-    if (media.others) { heading(media.othersHeading); para(media.others, { gap: 4 }); y += 2; }
-    heading(media.promiseHeading); media.promises.forEach(bullet); y += 2;
-    heading(media.rightsHeading); media.rights.forEach(bullet); y += 2;
+    d.section(media.useHeading);
+    d.choices(['Use', media.yes, media.no], MEDIA_KEYS.map(k => ({
+      label: media.uses[k],
+      answer: input.choices && typeof input.choices[k] === 'boolean' ? input.choices[k] : undefined
+    })));
+    if (media.choiceNote) d.paragraph(media.choiceNote, { size: 9, color: COLORS.grey, gap: 3 });
+    if (media.others) { d.section(media.othersHeading); d.paragraph(media.others); }
+    d.section(media.promiseHeading); media.promises.forEach(p => d.bullet(p));
+    d.section(media.rightsHeading); media.rights.forEach(r => d.bullet(r));
   } else {
     general.sections.forEach(s => {
-      heading(s.heading);
-      if (s.lead) para(s.lead, { gap: 2 });
-      s.items.forEach(bullet);
-      if (s.tail) para(s.tail, { gap: 2 });
-      y += 2;
+      d.section(s.heading);
+      if (s.lead) d.paragraph(s.lead, { gap: 2 });
+      s.items.forEach(i => d.bullet(i));
+      if (s.tail) d.paragraph(s.tail, { gap: 2 });
     });
   }
 
-  heading(kind === 'media' ? media.declarationHeading : general.declarationHeading);
-  para(kind === 'media' ? media.declaration : general.declaration, { gap: 5 });
+  d.section(kind === 'media' ? media.declarationHeading : general.declarationHeading);
+  d.paragraph(kind === 'media' ? media.declaration : general.declaration);
   if (input.status === 'withdrawn') {
-    para('STATUS: CONSENT WITHDRAWN', { bold: true, color: [185, 28, 28], gap: 4 });
+    d.paragraph('STATUS: CONSENT WITHDRAWN', { bold: true, color: COLORS.warn });
   }
+  d.signature({ image: input.signature, name: input.parentName || '', when: when.toLocaleString('en-ZA') });
+  d.paragraph(kind === 'media' ? media.contact : general.contact, { size: 9, color: COLORS.grey });
 
-  ensure(48);
-  if (input.signature) {
-    try { doc.addImage(input.signature, 'PNG', margin, y, 70, 26); } catch { /* an unreadable signature must not stop the PDF */ }
-  }
-  y += 28;
-  doc.setDrawColor(30, 41, 59); doc.setLineWidth(0.4);
-  doc.line(margin, y, margin + 80, y); doc.line(margin + 100, y, margin + 160, y);
-  doc.setFontSize(8); doc.setTextColor(71, 85, 105); doc.setFont('helvetica', 'normal');
-  doc.text(`${ui.signHere}: ${input.parentName || ''}`, margin, y + 5);
-  const when = input.signedAt ? new Date(input.signedAt) : new Date();
-  doc.text(when.toLocaleString('en-ZA'), margin + 100, y + 5);
-  y += 12;
-  para(kind === 'media' ? media.contact : general.contact, { size: 8, color: [100, 116, 139] });
-
-  footer();
+  const version = input.version || (kind === 'media' ? MEDIA_VERSION : GENERAL_VERSION);
+  const doc = d.finish(`${title}  ·  v${version}`);
   if (opts.save !== false) {
     const safe = (input.childNames || 'family').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40);
     doc.save(`JFLIPS_${kind === 'media' ? 'PhotoConsent' : 'PrivacyNotice'}_${safe}_${when.toISOString().slice(0, 10)}.pdf`);
