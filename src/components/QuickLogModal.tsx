@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { X, CheckCircle2, Check, User, Users, Building2, Trophy, Clock } from 'lucide-react';
 import { AppState, ClassSchedule, ClassType, Gym, Student } from '../../types';
+import { attendanceCountsForClass, rankByAttendance } from '../utils/attendanceRank';
 
 interface QuickLogModalProps {
   state: AppState;
@@ -69,6 +70,14 @@ export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, d
 
   const [selectedAthletes, setSelectedAthletes] = useState<string[]>(athleteIds || []);
 
+  // How often each athlete has been at THIS class, live and archived, so the
+  // regulars come first and the list does not have to be re-found every time.
+  const attendanceCounts = useMemo(() => {
+    if (classIds.length !== 1) return new Map();
+    const archived = (state.history || []).flatMap((h: any) => h.sessions || []);
+    return attendanceCountsForClass(classIds[0], state.sessions || [], archived);
+  }, [state.sessions, state.history, classIds]);
+
   const { classOptions, entitiesToShow } = useMemo(() => {
     let options: Array<ClassType | Gym> = [];
     const allOptions = [
@@ -85,18 +94,18 @@ export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, d
         if (gym.gym_type !== 'cheer') {
           entities = []; // Gyms/clubs do not have individual athlete attendances
         } else {
-          entities = state.students.filter(s => classIds.includes(s.associated_gym_id || ''));
+          entities = rankByAttendance(
+            state.students.filter(s => classIds.includes(s.associated_gym_id || '')),
+            attendanceCounts
+          );
         }
       } else {
         const ct = (state.classTypes || []).find(c => c.id === firstId);
         const allTumbling = (state.students || []).filter(s => !s.is_gym_member);
         if (ct) {
-          const assignedSet = new Set(ct.studentIds || []);
-          const assigned = allTumbling.filter(s => assignedSet.has(s.id));
-          const unassigned = allTumbling.filter(s => !assignedSet.has(s.id));
-          entities = [...assigned, ...unassigned];
+          entities = rankByAttendance(allTumbling, attendanceCounts, new Set(ct.studentIds || []));
         } else {
-          entities = allTumbling;
+          entities = rankByAttendance(allTumbling, attendanceCounts);
         }
         if (athleteIds && athleteIds.length > 0) {
           entities = entities.filter(s => athleteIds.includes(s.id));
@@ -104,7 +113,7 @@ export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, d
       }
     }
     return { classOptions: options, entitiesToShow: entities };
-  }, [state, classIds, athleteIds]);
+  }, [state, classIds, athleteIds, attendanceCounts]);
 
   const isClubOrGym = classOptions.length > 0 && classOptions.every(o => 'isGym' in o && o.isGym && (o as Gym).gym_type !== 'cheer');
 
@@ -264,6 +273,11 @@ export const QuickLogModal: React.FC<QuickLogModalProps> = ({ state, classIds, d
                         <User size={14} className="opacity-50 shrink-0" />
                         <span className="font-black uppercase italic text-[13px] truncate">{entity.name}</span>
                       </div>
+                      {(attendanceCounts.get(entity.id)?.count || 0) > 0 && (
+                        <span className="text-[8px] font-black uppercase text-slate-400 shrink-0">
+                          {attendanceCounts.get(entity.id)!.count}×
+                        </span>
+                      )}
                       {isAssignedToClass && (
                         <span className="text-[8px] font-black uppercase px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/50 text-[#1e4da1] dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0">
                           Enrolled
