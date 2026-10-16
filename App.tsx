@@ -104,6 +104,7 @@ import ShareSignupLink from './src/components/ShareSignupLink';
 import { QuickLogModal } from './src/components/QuickLogModal';
 import { MerchOrderModal } from './src/components/MerchOrderModal';
 import { ExtraChargeModal } from './src/components/ExtraChargeModal';
+import { attendanceCountsForClass, rankByAttendance } from './src/utils/attendanceRank';
 import type { ExtraChargeDraft } from './src/components/ExtraChargeModal';
 import type { MerchOrderDraft } from './src/components/MerchOrderModal';
 import { MerchItemModal } from './src/components/MerchItemModal';
@@ -9256,6 +9257,14 @@ const RegisterView = memo(({
     // No gym specific logic needed here anymore
   }, [selectedOption, initialSession]);
 
+  // How often each athlete has been at THIS class, live and archived, so the
+  // regulars are listed first. Ordering only — nobody is ticked automatically.
+  const attendanceCounts = useMemo(() => {
+    if (!selectedClassId) return new Map<string, { count: number; last: string }>();
+    const archived = (state.history || []).flatMap(h => h.sessions || []);
+    return attendanceCountsForClass(selectedClassId, state.sessions || [], archived);
+  }, [selectedClassId, state.sessions, state.history]);
+
   const rawEntitiesToShow = useMemo(() => {
     if (!selectedClassId) return [];
 
@@ -9263,12 +9272,8 @@ const RegisterView = memo(({
     const allTumbling = (state.students || []).filter(s => !s.is_gym_member);
     if (!selectedClass) return allTumbling;
 
-    const assignedSet = new Set(selectedClass.studentIds || []);
-    const assigned = allTumbling.filter(s => assignedSet.has(s.id));
-    const unassigned = allTumbling.filter(s => !assignedSet.has(s.id));
-
-    return [...assigned, ...unassigned];
-  }, [selectedClassId, state.students, state.classTypes]);
+    return rankByAttendance(allTumbling, attendanceCounts, new Set(selectedClass.studentIds || []));
+  }, [selectedClassId, state.students, state.classTypes, attendanceCounts]);
 
   // Filter entities according to search query
   const entitiesToShow = useMemo(() => {
@@ -9598,6 +9603,11 @@ const RegisterView = memo(({
                     {isTemp && (
                       <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                         Temp Athlete
+                      </span>
+                    )}
+                    {(attendanceCounts.get(entity.id)?.count || 0) > 0 && (
+                      <span className="text-[8px] font-black uppercase text-slate-400">
+                        {attendanceCounts.get(entity.id)!.count}×
                       </span>
                     )}
                     {isFirstTime && !isTemp && (
