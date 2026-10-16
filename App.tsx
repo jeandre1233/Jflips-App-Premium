@@ -103,6 +103,8 @@ import { useNetworkStatus } from './src/hooks/useNetworkStatus';
 import ShareSignupLink from './src/components/ShareSignupLink';
 import { QuickLogModal } from './src/components/QuickLogModal';
 import { MerchOrderModal } from './src/components/MerchOrderModal';
+import { ExtraChargeModal } from './src/components/ExtraChargeModal';
+import type { ExtraChargeDraft } from './src/components/ExtraChargeModal';
 import type { MerchOrderDraft } from './src/components/MerchOrderModal';
 import { MerchItemModal } from './src/components/MerchItemModal';
 import { addToQueue, getPendingItems, updateItemStatus, deleteSyncedItems } from './src/utils/offlineQueue';
@@ -794,6 +796,7 @@ const App: React.FC = () => {
    * one client's invoice, so the client cannot accidentally be changed; opened
    * from the invoice list it is null and the form asks who to bill.
    */
+  const [extraChargeModal, setExtraChargeModal] = useState<{ id: string; kind: MerchBillToKind; label: string } | null>(null);
   const [merchOrderModal, setMerchOrderModal] = useState<{ fixedBillTo?: { id: string; kind: MerchBillToKind; label: string } } | null>(null);
   const [showMerchItemModal, setShowMerchItemModal] = useState(false);
   const [editingMerchItem, setEditingMerchItem] = useState<MerchItem | null>(null);
@@ -2096,6 +2099,40 @@ const App: React.FC = () => {
     loadCloudData(true);
   };
 
+  /**
+   * "Add to invoice": one typed-in line on a client's normal invoice. Stored as a
+   * merch order flagged is_extra so it reuses the same open/archived lifecycle,
+   * but it prices onto the coaching invoice, not the merchandise one.
+   */
+  const handleAddExtraCharge = async (draft: ExtraChargeDraft) => {
+    if (!user || !extraChargeModal) return;
+    const { error } = await supabase.from('merch_orders').insert({
+      id: newMerchId('morder'),
+      bill_to_id: extraChargeModal.id,
+      bill_to_kind: extraChargeModal.kind,
+      item_id: null,
+      item_name: draft.description,
+      unit_price: draft.amount,
+      unit_cost: 0,
+      qty: 1,
+      size: null,
+      order_date: draft.date,
+      status: 'ordered',
+      invoiced_month: null,
+      notes: null,
+      is_extra: true,
+      user_id: user.id
+    });
+    if (error) {
+      alert(error.message.includes('is_extra')
+        ? "The database needs one small update before this works (the is_extra column). Run the SQL I sent, then try again."
+        : "Could not add to the invoice: " + error.message);
+      return;
+    }
+    setExtraChargeModal(null);
+    loadCloudData(true);
+  };
+
   const handleDeleteMerchOrder = async (id: string) => {
     if (!user) return;
     if (!confirm("Remove this item from the invoice?")) return;
@@ -3082,7 +3119,9 @@ const App: React.FC = () => {
    */
   const archiveMerchFor = useCallback(async (
     billToIds: string[],
-    fallbackMonthKey: string
+    fallbackMonthKey: string,
+    /** false = merchandise only, true = typed-in "add to invoice" extras only. */
+    extras: boolean = false
   ): Promise<Map<string, { monthKey: string; amount: number }[]>> => {
     const out = new Map<string, { monthKey: string; amount: number }[]>();
     if (!user) return out;
@@ -3090,7 +3129,8 @@ const App: React.FC = () => {
     const targets = new Set(billToIds.filter(Boolean));
     if (targets.size === 0) return out;
 
-    const open = openMerchOrders(state.merchOrders).filter(o => targets.has(o.bill_to_id));
+    const open = openMerchOrders(state.merchOrders)
+      .filter(o => targets.has(o.bill_to_id) && !!o.is_extra === extras);
     if (open.length === 0) return out;
 
     // Priced through the same engine that rendered the invoice, so the archived
@@ -3915,14 +3955,19 @@ const App: React.FC = () => {
     });
 
     const openMerchForClient = mode === 'merch'
-      ? openMerchOrders(state.merchOrders).filter(o => o.bill_to_id === familyId)
+      ? openMerchOrders(state.merchOrders).filter(o => o.bill_to_id === familyId && !o.is_extra)
+      : [];
+    // Typed-in "add to invoice" lines sit on the normal invoice, so a coaching
+    // reset closes them together with the sessions.
+    const openExtrasForClient = mode === 'coaching'
+      ? openMerchOrders(state.merchOrders).filter(o => o.bill_to_id === familyId && o.is_extra)
       : [];
 
     if (mode === 'merch' && openMerchForClient.length === 0) {
       alert("No merchandise on this invoice to reset.");
       return;
     }
-    if (mode === 'coaching' && sessionsToReset.length === 0) {
+    if (mode === 'coaching' && sessionsToReset.length === 0 && openExtrasForClient.length === 0) {
       alert("No sessions found for this client in the current month.");
       return;
     }
@@ -3969,7 +4014,12 @@ const App: React.FC = () => {
       ? await archiveMerchFor([familyId], fallbackMonthKey)
       : new Map<string, { monthKey: string; amount: number }[]>();
 
-    (merchByClient.get(familyId) || []).forEach(entry => {
+    const extrasByClient = mode === 'coaching'
+      ? await archiveMerchFor([familyId], fallbackMonthKey, true)
+      : new Map<string, { monthKey: string; amount: number }[]>();
+    const stampedEntries = [...(merchByClient.get(familyId) || []), ...(extrasByClient.get(familyId) || [])];
+
+    stampedEntries.forEach(entry => {
       const parsed = parseMonthKey(entry.monthKey);
       if (!revenueByMonth.has(entry.monthKey)) {
         revenueByMonth.set(entry.monthKey, {
@@ -4009,7 +4059,7 @@ const App: React.FC = () => {
     // sessions to file, so without this the month would never be rewritten and
     // its merch revenue would never reach History.
     const familyResults = await writeHistoryMonths(familySlices, {
-      touchMonthKeys: (merchByClient.get(familyId) || []).map(e => e.monthKey)
+      touchMonthKeys: stampedEntries.map(e => e.monthKey)
     });
 
     // The invoice for each month is the ARCHIVE's figure for this client,
@@ -4352,7 +4402,7 @@ const App: React.FC = () => {
           onSaveAllocations={isOwner ? saveBankAllocations : undefined}
         />
       )}
-      {activeView === View.INVOICES && <AccountsView state={state} user={user} onUpdatePayment={handleUpdatePayment} onResetInvoice={resetSingleInvoice} onSaveAllocations={saveBankAllocations} onAddMerch={(fixedBillTo) => setMerchOrderModal({ fixedBillTo })} onDeleteMerchOrder={handleDeleteMerchOrder} onSetMerchStatus={handleSetMerchOrderStatus} />}
+      {activeView === View.INVOICES && <AccountsView state={state} user={user} onUpdatePayment={handleUpdatePayment} onResetInvoice={resetSingleInvoice} onSaveAllocations={saveBankAllocations} onAddMerch={(fixedBillTo) => setMerchOrderModal({ fixedBillTo })} onAddExtra={(target) => setExtraChargeModal(target)} onDeleteMerchOrder={handleDeleteMerchOrder} onSetMerchStatus={handleSetMerchOrderStatus} />}
       {activeView === View.HISTORY && (
         <HistoryView 
           state={state} 
@@ -4597,6 +4647,15 @@ const App: React.FC = () => {
               setEditingMerchItem(null);
             }}
             onCancel={() => { setShowMerchItemModal(false); setEditingMerchItem(null); }}
+          />
+        </Modal>
+      )}
+      {extraChargeModal && (
+        <Modal title="Add to Invoice" onClose={() => setExtraChargeModal(null)}>
+          <ExtraChargeModal
+            billToLabel={extraChargeModal.label}
+            onSubmit={handleAddExtraCharge}
+            onCancel={() => setExtraChargeModal(null)}
           />
         </Modal>
       )}

@@ -355,6 +355,13 @@ export interface MerchOrder {
    */
   invoiced_month?: string | null;
   notes?: string;
+  /**
+   * True for a one-off line the owner typed onto a family's own invoice
+   * ("cousin's class", "paid back for a bow"). item_name is the description and
+   * unit_price the amount. It shows on the client's normal invoice, not the
+   * merchandise one, and clears when that invoice is reset.
+   */
+  is_extra?: boolean;
   created_at?: string;
 }
 

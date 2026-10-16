@@ -49,6 +49,7 @@ import {
   priceSessions,
   openMerchOrders,
   merchOrdersForMonth,
+  isMerchInvoiceLine,
   sumLines,
   MONTH_NAMES,
   PricingContext,
@@ -119,6 +120,8 @@ interface AccountsViewProps {
   onResetInvoice: (id: string, label: string, mode: 'coaching' | 'merch') => void;
   onSaveAllocations?: (next: { allocations?: InvoiceAllocations; groupDefaults?: GroupDefaults }) => Promise<boolean>;
   onAddMerch?: (fixedBillTo?: { id: string; kind: MerchBillToKind; label: string }) => void;
+  /** Opens "Add to invoice" for one family: a typed-in line on their normal invoice. */
+  onAddExtra?: (target: { id: string; kind: MerchBillToKind; label: string }) => void;
   onDeleteMerchOrder?: (id: string) => void;
   onSetMerchStatus?: (id: string, status: MerchOrderStatus) => void;
 }
@@ -131,6 +134,7 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
   onResetInvoice,
   onSaveAllocations,
   onAddMerch,
+  onAddExtra,
   onDeleteMerchOrder,
   onSetMerchStatus
 }) => {
@@ -382,7 +386,7 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
     if (!group) return [];
     return priced.clientLines.filter(l =>
       l.billToId === group.family_id &&
-      (mode === 'merch' ? l.kind === 'merch' : l.kind !== 'merch') &&
+      (mode === 'merch' ? isMerchInvoiceLine(l) : !isMerchInvoiceLine(l)) &&
       (!monthLabel || l.billingMonthKey === activeMonthKey)
     );
   }, [priced.clientLines, monthLabel, activeMonthKey]);
@@ -439,6 +443,7 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
       targetStudentName: l.targetName,
       displayPrice: l.amount,
       displayClassName: l.description,
+      isExtra: !!l.isExtra,
       subLine: (l.coachNames && l.coachNames.length > 0)
         ? `Coaches: ${l.coachNames.join(', ')}`
         : (multiAthlete ? l.targetName : '')
@@ -927,6 +932,46 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
             </motion.button>
           </div>
         </div>
+
+        {/* ════ ADD TO INVOICE ════
+            Outside invoiceRef on purpose, so none of this is printed on the invoice
+            the client receives. Only families: a gym or school invoice never changes. */}
+        {!monthLabel && selectedInvoiceMode === 'coaching' && onAddExtra && isOwner &&
+          !selectedGroup.isStaff && !selectedGroup.isGym && !selectedGroup.isOrganization && !(selectedGroup as any).isMerchClient && (
+          <div className="bg-white dark:bg-slate-800 p-5 rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm space-y-3">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase italic tracking-wider">Extra Charges</h3>
+                <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase leading-relaxed tracking-wider">
+                  Add anything else this family owes. It prints on their invoice and clears when you reset it.
+                </p>
+              </div>
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => onAddExtra({ id: selectedGroup.family_id, kind: 'athlete', label: selectedGroup.label })}
+                className="bg-[#1e4da1] text-white px-4 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest shadow-lg flex items-center gap-2 shrink-0"
+              >
+                <Plus size={12} strokeWidth={3} /> Add to invoice
+              </motion.button>
+            </div>
+            {openMerchOrders(state.merchOrders).filter(o => o.is_extra && o.bill_to_id === selectedGroup.family_id).map(o => (
+              <div key={`extra-${o.id}`} className="flex items-center justify-between gap-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700 rounded-2xl px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-black uppercase italic text-slate-800 dark:text-slate-100 truncate">{o.item_name}</p>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{new Date(o.order_date).toLocaleDateString('en-GB')}</p>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-[12px] font-black italic tabular-nums text-slate-900 dark:text-slate-100">R{Number(o.unit_price).toFixed(2)}</span>
+                  {onDeleteMerchOrder && (
+                    <button onClick={() => onDeleteMerchOrder(o.id)} title="Remove from invoice" className="p-2 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-500">
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Bank allocation toggle */}
         <div className="bg-white dark:bg-slate-800 p-5 rounded-[2rem] border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1787,7 +1832,7 @@ export const AccountsView: React.FC<AccountsViewProps> = memo(({
               <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-2.5">
                 {listToRender.map((group, idx) => {
                   const lines = getInvoiceLines(group, 'coaching');
-                  const count = new Set(lines.map(l => l.groupId)).size;
+                  const count = new Set(lines.filter(l => !l.isExtra).map(l => l.groupId)).size;
                   const groupTotal = sumLines(lines);
 
                   return (

@@ -183,6 +183,8 @@ export interface PricedClientLine {
   costAmount?: number;
   qty?: number;
   kind: 'class' | 'gym' | 'cheer' | 'merch';
+  /** A typed-in "add to invoice" line. Still kind 'merch' for the money totals, but it belongs on the client's normal invoice. */
+  isExtra?: boolean;
   /** Who coached it — shown under the line so a split total can be audited. */
   coachNames?: string[];
   /** Invoice month this belongs to, after applying the gym's billing day. */
@@ -658,6 +660,15 @@ export function openMerchOrders(orders: MerchOrder[] = []): MerchOrder[] {
 }
 
 /**
+ * Which of the two invoices a priced line belongs on. Merchandise has its own
+ * invoice; everything else — including a typed-in "add to invoice" extra — is on
+ * the client's normal invoice.
+ */
+export function isMerchInvoiceLine(l: { kind: string; isExtra?: boolean }): boolean {
+  return l.kind === 'merch' && !l.isExtra;
+}
+
+/**
  * Filter orders that were stamped with a specific billing month key upon archive/reset.
  */
 export function merchOrdersForMonth(orders: MerchOrder[] = [], monthKey: string): MerchOrder[] {
@@ -678,12 +689,15 @@ export function priceMerch(ctx: PricingContext): PricedClientLine[] {
     const amount = money(num(order.unit_price, 0) * qty);
     const costAmount = money(num(order.unit_cost, 0) * qty);
 
-    let description = order.item_name || 'Merchandise';
-    if (order.size) {
-      description += ` (Size ${order.size})`;
-    }
-    if (qty > 1) {
-      description += ` × ${qty}`;
+    const isExtra = !!order.is_extra;
+    let description = order.item_name || (isExtra ? 'Additional charge' : 'Merchandise');
+    if (!isExtra) {
+      if (order.size) {
+        description += ` (Size ${order.size})`;
+      }
+      if (qty > 1) {
+        description += ` × ${qty}`;
+      }
     }
 
     // Resolve targetName
@@ -732,6 +746,7 @@ export function priceMerch(ctx: PricingContext): PricedClientLine[] {
       costAmount,
       qty,
       kind: 'merch',
+      isExtra,
       billingMonthKey: bm.key,
       billingMonthName: bm.monthName,
       billingYear: bm.year
